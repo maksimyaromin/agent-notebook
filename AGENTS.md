@@ -5,9 +5,7 @@ Guidance for coding agents (Claude Code, Codex, Pi, and others) working in this 
 
 ## Project
 
-**agent-notebook** is a portable, structured notebook for coding agents: one hand-editable
-markdown file that any agent reads at the start of a session and updates at the end.
-The backlog (queued → in flight → done) is the first-class workflow pattern inside it.
+**agent-notebook** is a portable, structured notebook for coding agents: one hand-editable markdown file that any agent reads at the start of a session and updates at the end. The backlog (queued → in flight → done) is the first-class workflow pattern inside it.
 
 Status: greenfield. No code yet; design and scope are being decided.
 
@@ -17,8 +15,7 @@ Goals, in priority order:
 2. The markdown file stays the source of truth and stays readable by a human.
 3. The task/backlog workflow remains a concrete, well-supported pattern, not an afterthought.
 
-Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byte-exact round-trip,
-derived `ready` queue, structured holds), `beads` (dependency graph model).
+Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byte-exact round-trip, derived `ready` queue, structured holds), `beads` (dependency graph model).
 
 ## Repository layout
 
@@ -31,9 +28,12 @@ derived `ready` queue, structured holds), `beads` (dependency graph model).
 - Language: code, comments, commit messages, and docs in English.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Commit and push only when asked.
-- Keep this file short and current: update it when a convention or command changes,
-  remove anything that stops being true.
+- Keep this file short and current: update it when a convention or command changes, remove anything that stops being true.
 
 ## Commands
 
 None yet. Add build, test, and lint commands here as soon as they exist.
+
+## Markdown authoring
+
+- Never insert artificial line breaks inside markdown prose: one paragraph or list item is one physical line, however long. Editors soft-wrap; hard wraps corrupt diffs and editing.
