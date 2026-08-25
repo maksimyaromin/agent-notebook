@@ -5,7 +5,7 @@ Guidance for coding agents (Claude Code, Codex, Pi, and others) working in this 
 
 ## Project
 
-**agent-notebook** (anb) stores a project's working memory in the repository as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.agent-notebook/` (CLI named `anb`, directory the full word — owner's call, 2026-08-25) — read and mutated by any agent through a Go CLI. The backlog is the deepest-worked pattern of the notebook, not the whole of it.
+**agent-notebook** (anb) stores a project's working memory in the repository as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.agent-notebook/` (CLI named `anb`, directory the full word — owner's call, 2026-08-25) — read and mutated by any agent through a Rust CLI (owner's call, 2026-08-25 — for fun; ADR 0006 supersedes 0003 Go). The backlog is the deepest-worked pattern of the notebook, not the whole of it.
 
 Status: no code yet. The concept spec is grilled and frozen (2026-08-24); tickets are cut and live in the tasks-axi backlog; work starts on the owner's signal.
 
@@ -28,7 +28,7 @@ Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byt
 
 - `.tmp/docs/spec-anb-concept.md` — the grilled concept spec: problem, 32 user stories, implementation and testing decisions, Definition of Done.
 - `.tmp/docs/CONTEXT.md` — the domain glossary; use its canonical terms (Record, Task, Status, Check, ...) in every language.
-- `.tmp/docs/adr/` — decisions: 0001 own format, 0002 cross-project as ecosystem horizon, 0003 Go for the CLI (with the why-Go release gate).
+- `.tmp/docs/adr/` — decisions: 0001 own format, 0002 cross-project as ecosystem horizon, 0003 Go for the CLI (superseded), 0004 record file format, 0005 record model, 0006 Rust for the CLI (with the why-Rust release gate).
 - `.tmp/docs/research-method.md` — the scientific search method: novelty questions get a systematic sweep, findings classified tried-vs-theory (theory weighs more); research subagents are Sonnet 5 only.
 - `.tmp/docs/research/` — the evidence base (tasks-axi dissection, codemode-executor, prior art, kody).
 - `.tmp/backlog.md` — the tasks-axi backlog (19 tickets, dependency graph); mutate it only through `npx -y tasks-axi`.
