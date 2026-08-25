@@ -5,7 +5,7 @@ Guidance for coding agents (Claude Code, Codex, Pi, and others) working in this 
 
 ## Project
 
-**agent-notebook** (anb) stores a project's working memory in the repository as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.anb/` — read and mutated by any agent through a Go CLI. The backlog is the deepest-worked pattern of the notebook, not the whole of it.
+**agent-notebook** (anb) stores a project's working memory in the repository as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.agent-notebook/` (CLI named `anb`, directory the full word — owner's call, 2026-08-25) — read and mutated by any agent through a Go CLI. The backlog is the deepest-worked pattern of the notebook, not the whole of it.
 
 Status: no code yet. The concept spec is grilled and frozen (2026-08-24); tickets are cut and live in the tasks-axi backlog; work starts on the owner's signal.
 
@@ -51,6 +51,7 @@ No formal task closure, no commit, and no push ever happens before the review pa
 
 ## Conventions
 
+- Review pauses run the **`grill-with-docs` skill** (`~/dev/skills/skills/engineering/grill-with-docs`) over a Lavish artifact — the skill defines how the interview works; follow it, don't improvise the format. The artifact must be fully self-contained: digested proofs with their numbers, worked examples (mock records, CLI replies), and diagrams in place — never pointers into `.tmp/docs/research/` or cross-references between sections. The owner reads only the artifact; research reports are the agent's own working material.
 - Language: code, comments, commit messages, and docs in English.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Commit and push only when asked.
