@@ -1,0 +1,20 @@
+---
+id: task.demo-record
+type: task
+state: open
+kind: feature
+title: Everything the table allows
+by: supolka
+from: question.why-demo
+tags: core, parser
+link: doc .tmp/docs/spec-anb-format.md
+link: pr https://example.com/pull/7
+supersedes: task.old-demo
+superseded-by: task.new-demo
+blocked-by: task.other-work
+blocked-by: task.more-work
+created: 2026-08-24
+updated: 2026-08-25
+closed: 2026-08-25
+---
+The body.
