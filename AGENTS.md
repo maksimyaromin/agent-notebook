@@ -33,6 +33,10 @@ Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byt
 - `.tmp/docs/research/` — the evidence base (tasks-axi dissection, codemode-executor, prior art, kody).
 - `.tmp/backlog.md` — the tasks-axi backlog (19 tickets, dependency graph); mutate it only through `npx -y tasks-axi`.
 
+## Engineering instruction
+
+Before writing any code: load `.tmp/docs/engineering-instruction.md` and every skill it points to — load, understand, and apply, not skim. It defines the engineer working here (engineering + codebase-design skills), the testing mindset (BDD; tests survive refactoring, test behavior and business requirements, never lines), the code/naming principles (the-art-of-code), and the law for every text in or about code (comment-rules + text-quality-pass). The skills are not installed — reach them at their paths; a skill referencing another skill is found near the entry point.
+
 ## Task protocol
 
 When the owner says **"continue the task"** (in any wording, any language), it means exactly this:
