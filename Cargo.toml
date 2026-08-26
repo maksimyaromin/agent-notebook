@@ -5,7 +5,7 @@ members = ["crates/anb-core", "crates/anb"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-# Tracks the latest stable release until the first public release (owner's call, 2026-08-26).
+# Not a compatibility promise until the first public release; bump freely.
 rust-version = "1.98"
 
 [workspace.dependencies]
