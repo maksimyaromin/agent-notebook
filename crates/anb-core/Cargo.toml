@@ -1,0 +1,15 @@
+[package]
+name = "anb-core"
+description = "agent-notebook Core: grammar, record model, invariants, and queries behind the Storage seam"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# Empty by design: the Core stays dependency-free (ADR 0006).
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

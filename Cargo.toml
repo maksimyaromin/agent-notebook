@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = ["crates/anb-core", "crates/anb"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Tracks the latest stable release until the first public release (owner's call, 2026-08-26).
+rust-version = "1.98"
+
+[workspace.dependencies]
+anb-core = { path = "crates/anb-core" }
+clap = { version = "4.6", features = ["derive"] }
+proptest = "1.11"
+# Unused until the first CLI golden test.
+insta = "1.48"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
