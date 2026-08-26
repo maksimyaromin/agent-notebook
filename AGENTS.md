@@ -35,7 +35,7 @@ Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byt
 
 ## Engineering instruction
 
-Before writing any code: load `.tmp/docs/engineering-instruction.md` and every skill it points to — load, understand, and apply, not skim. It defines the engineer working here (engineering + codebase-design skills), the testing mindset (BDD; tests survive refactoring, test behavior and business requirements, never lines), the code/naming principles (the-art-of-code), and the law for every text in or about code (comment-rules + text-quality-pass). The skills are not installed — reach them at their paths; a skill referencing another skill is found near the entry point.
+Before writing any code: load `.tmp/docs/engineering-instruction.md` and every skill it points to. Loading is not the point — the skills bind every line: apply them while planning a function, while writing it and its tests, and once more in the self code review. Code that merely follows after a reading of the skills was rejected (2026-08-26). It defines the engineer working here (engineering + codebase-design skills), the testing mindset (BDD; tests survive refactoring, test behavior and business requirements, never lines), the code/naming principles (the-art-of-code), and the law for every text in or about code (comment-rules + text-quality-pass). The skills are not installed — reach them at their paths; a skill referencing another skill is found near the entry point.
 
 ## Task protocol
 
@@ -48,14 +48,15 @@ Every task moves through these stages:
 
 1. **Dispatch** — `tasks-axi start <id>`.
 2. **Work** — execute against the body's acceptance criteria; append progress notes to the task body (`tasks-axi update`) so any later session can resume mid-task. Deliverables are written under `.tmp/`.
-3. **Review pause (mandatory, never skipped)** — when the work is done, STOP. Leave every produced or changed file in the working tree — **uncommitted and unstaged** (no `git add`). Report what is ready and where, then wait for the owner to review.
-4. **Close** — only after the owner's explicit approval: `tasks-axi done <id> --report <path>` (or `--pr`), and commit/push only if the owner asks.
+3. **Self code review (mandatory on coding tasks)** — re-read the whole diff, code and tests, holding every line against the engineering instruction's skills (story, naming, comments, test behavior); fix what the pass finds and report the findings honestly. A pass that finds nothing was not performed.
+4. **Review pause (mandatory, never skipped)** — when the work is done, STOP. Leave every produced or changed file in the working tree — **uncommitted and unstaged** (no `git add`). Report what is ready and where, then wait for the owner to review.
+5. **Close** — only after the owner's explicit approval: `tasks-axi done <id> --report <path>` (or `--pr`), and commit/push only if the owner asks.
 
-No formal task closure, no commit, and no push ever happens before the review pause in stage 3.
+No formal task closure, no commit, and no push ever happens before the review pause in stage 4.
 
 ## Conventions
 
-- Review pauses run the **`grill-with-docs` skill** (`~/dev/skills/skills/engineering/grill-with-docs`) over a Lavish artifact — the skill defines how the interview works; follow it, don't improvise the format. The artifact must be fully self-contained: digested proofs with their numbers, worked examples (mock records, CLI replies), and diagrams in place — never pointers into `.tmp/docs/research/` or cross-references between sections. The owner reads only the artifact; research reports are the agent's own working material.
+- Coding tasks are reviewed without Lavish (owner's call, 2026-08-26): the self code review plus the owner reading the working tree directly. Lavish is for brainstorming and design discussions only — there it runs through the **`grill-with-docs` skill** (`~/dev/skills/skills/engineering/grill-with-docs`), which defines the interview format; the artifact must be fully self-contained: digested proofs with their numbers, worked examples, and diagrams in place — never pointers into `.tmp/docs/research/`.
 - Language: code, comments, commit messages, and docs in English.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Commit and push only when asked.
@@ -63,7 +64,7 @@ No formal task closure, no commit, and no push ever happens before the review pa
 
 ## Commands
 
-None yet. Add build, test, and lint commands here as soon as they exist.
+- `./scripts/check.sh` — the local gate: `cargo fmt --check`, `cargo clippy -D warnings`, all tests, doctests.
 
 ## Markdown authoring
 
