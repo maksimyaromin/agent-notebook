@@ -1,0 +1,15 @@
+---
+id: task.on-hold
+type: task
+state: active
+title: A held task
+via: claude-code
+priority: 2
+hold: waiting for the 1.99 release
+hold-until: 2026-09-10
+created: 2026-08-24
+updated: 2026-08-26
+review-by: 2026-09-20
+---
+
+Body prose.
