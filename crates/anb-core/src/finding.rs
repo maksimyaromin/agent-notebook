@@ -33,6 +33,7 @@ pub enum FindingCode {
     OrphanField,
     BrokenRouting,
     DanglingRef,
+    DepCycle,
     DuplicateId,
     BrokenSupersession,
     Crlf,
@@ -56,6 +57,7 @@ impl FindingCode {
             | FindingCode::TypeDirMismatch
             | FindingCode::BrokenRouting
             | FindingCode::DanglingRef
+            | FindingCode::DepCycle
             | FindingCode::DuplicateId
             | FindingCode::BrokenSupersession => Severity::Error,
             FindingCode::UnknownField
@@ -83,6 +85,7 @@ impl FindingCode {
             FindingCode::OrphanField => "orphan-field",
             FindingCode::BrokenRouting => "broken-routing",
             FindingCode::DanglingRef => "dangling-ref",
+            FindingCode::DepCycle => "dep-cycle",
             FindingCode::DuplicateId => "duplicate-id",
             FindingCode::BrokenSupersession => "broken-supersession",
             FindingCode::Crlf => "crlf",

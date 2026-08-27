@@ -393,6 +393,20 @@ impl RecordFile {
         envelope.lines.len() != before
     }
 
+    /// Remove every line of a repeatable `key` carrying exactly `value`;
+    /// every other byte stays verbatim. Returns whether any line was removed.
+    ///
+    /// # Panics
+    /// On a file with no envelope; a caller mutates only accepted records.
+    pub fn remove_field_value(&mut self, key: &str, value: &str) -> bool {
+        let envelope = self.envelope_for_mutation();
+        let before = envelope.lines.len();
+        envelope.lines.retain(|line| {
+            !matches!(line, EnvelopeLine::Field(field) if field.key == key && field.value == value)
+        });
+        envelope.lines.len() != before
+    }
+
     /// Append one line at EOF — the body's only mutation (format spec §4).
     /// A missing newline before the appended line is supplied, whether the
     /// file ended inside the envelope or mid-body-line.

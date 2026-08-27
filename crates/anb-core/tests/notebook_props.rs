@@ -10,6 +10,9 @@ const TODAY: &str = "2026-08-27";
 const TASK_PATH: &str = "tasks/task.demo.md";
 const BYSTANDER_PATH: &str = "notes/note.bystander.md";
 const BYSTANDER: &str = "---\nid: note.bystander\ntype: note\nstate: active\ntitle: Untouched\ncreated: 2026-08-24\n---\n";
+const BLOCKER_PATH: &str = "tasks/task.blocker.md";
+const BLOCKER: &str =
+    "---\nid: task.blocker\ntype: task\nstate: open\ntitle: A blocker\ncreated: 2026-08-24\n---\n";
 
 #[derive(Debug, Clone, Copy)]
 enum Verb {
@@ -20,6 +23,8 @@ enum Verb {
     Reopen,
     Hold,
     Unhold,
+    Block,
+    Unblock,
 }
 
 fn apply(storage: &mut MemoryStorage, verb: Verb) -> Result<bool, NotebookError> {
@@ -37,6 +42,12 @@ fn apply(storage: &mut MemoryStorage, verb: Verb) -> Result<bool, NotebookError>
             .hold(id, "a standing reason", None, TODAY)
             .map(|reply| reply.already),
         Verb::Unhold => notebook.unhold(id, TODAY).map(|reply| reply.already),
+        Verb::Block => notebook
+            .block(id, "task.blocker", TODAY)
+            .map(|reply| reply.already),
+        Verb::Unblock => notebook
+            .unblock(id, "task.blocker", TODAY)
+            .map(|reply| reply.already),
     }
 }
 
@@ -49,6 +60,8 @@ fn verb() -> impl Strategy<Value = Verb> {
         Just(Verb::Reopen),
         Just(Verb::Hold),
         Just(Verb::Unhold),
+        Just(Verb::Block),
+        Just(Verb::Unblock),
     ]
 }
 
@@ -94,6 +107,7 @@ proptest! {
         let mut storage = MemoryStorage::from_files([
             (TASK_PATH, task.as_str()),
             (BYSTANDER_PATH, BYSTANDER),
+            (BLOCKER_PATH, BLOCKER),
         ]);
 
         let first = apply(&mut storage, verb);
@@ -123,6 +137,11 @@ proptest! {
             storage.read(BYSTANDER_PATH).unwrap(),
             BYSTANDER,
             "no verb may touch another record's bytes"
+        );
+        prop_assert_eq!(
+            storage.read(BLOCKER_PATH).unwrap(),
+            BLOCKER,
+            "an edge lives on the dependent alone; the blocker's bytes stay"
         );
     }
 }
