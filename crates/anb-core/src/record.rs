@@ -344,6 +344,7 @@ fn semantic_findings(file: &RecordFile) -> Vec<Finding> {
     check_type_bound_fields(record_type, file, &mut findings);
     check_hold_pairing(record_type, file, &mut findings);
     check_routing(record_type, file, &mut findings);
+    check_dependencies(record_type, file, &mut findings);
     findings
 }
 
@@ -415,6 +416,28 @@ fn check_hold_pairing(record_type: RecordType, file: &RecordFile, findings: &mut
     {
         let message = "hold-until: legal only beside `hold`".to_owned();
         findings.push(Finding::located(line, FindingCode::OrphanField, message));
+    }
+}
+
+/// A dependency edge names what must close first, so it can only point at a
+/// Task — the self-describing id prefix lets one record judge that alone.
+/// A record waiting on itself is the one cycle a single file can carry;
+/// longer cycles are the notebook's to find.
+fn check_dependencies(record_type: RecordType, file: &RecordFile, findings: &mut Vec<Finding>) {
+    if record_type != RecordType::Task {
+        return;
+    }
+    for (target, line) in file.field_entries("blocked-by") {
+        if grammar::id_error(target).is_some() {
+            continue;
+        }
+        if !target.starts_with("task.") {
+            let message = format!("blocked-by: a task waits on a task, not `{target}`");
+            findings.push(Finding::located(line, FindingCode::BadValue, message));
+        } else if file.field("id") == Some(target) {
+            let message = format!("blocked-by: `{target}` waits on itself");
+            findings.push(Finding::located(line, FindingCode::DepCycle, message));
+        }
     }
 }
 

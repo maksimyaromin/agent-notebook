@@ -215,6 +215,31 @@ mod task_cycle {
     }
 
     #[test]
+    fn close_does_not_name_an_invalid_question() {
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task_file("active", &[])),
+            (
+                "questions/question.corrupt.md",
+                &record_file(
+                    "question.corrupt",
+                    "question",
+                    "open",
+                    &["from: task.demo", "routed-to: decision.never-written"],
+                    "",
+                ),
+            ),
+        ]);
+        let closed = Notebook::new(&mut storage)
+            .close("task.demo", &Proof::Waived, TODAY)
+            .unwrap();
+        assert_eq!(
+            closed.open_questions,
+            Vec::<String>::new(),
+            "an invalid record is check's to name, as from every derived query"
+        );
+    }
+
+    #[test]
     fn the_review_loop_submits_returns_and_closes_from_review() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         {
@@ -427,6 +452,553 @@ mod hold {
             .unwrap();
         assert!(reply.already);
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+    }
+}
+
+mod dependency_graph {
+    use super::*;
+    use anb_core::Edged;
+
+    fn task(id: &str, state: &str, extra_lines: &[&str]) -> String {
+        record_file(id, "task", state, extra_lines, "")
+    }
+
+    fn edged(id: &str, on: &str, already: bool) -> Edged {
+        Edged {
+            id: id.to_owned(),
+            on: on.to_owned(),
+            already,
+        }
+    }
+
+    #[test]
+    fn block_writes_the_edge_at_its_canonical_place_and_stamps_updated() {
+        let mut storage = storage_with(&[
+            ("tasks/task.a.md", &task("task.a", "open", &[])),
+            ("tasks/task.b.md", &task("task.b", "open", &[])),
+        ]);
+        let reply = Notebook::new(&mut storage)
+            .block("task.a", "task.b", TODAY)
+            .unwrap();
+        assert_eq!(reply, edged("task.a", "task.b", false));
+        assert_eq!(
+            storage.read("tasks/task.a.md").unwrap(),
+            "---\nid: task.a\ntype: task\nstate: open\ntitle: A demo record\nblocked-by: task.b\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\n"
+        );
+    }
+
+    #[test]
+    fn a_replayed_block_answers_already_true_and_changes_no_byte() {
+        let mut storage = storage_with(&[
+            ("tasks/task.a.md", &task("task.a", "open", &[])),
+            ("tasks/task.b.md", &task("task.b", "open", &[])),
+        ]);
+        Notebook::new(&mut storage)
+            .block("task.a", "task.b", TODAY)
+            .unwrap();
+        let after_first = storage.read("tasks/task.a.md").unwrap();
+
+        let replay = Notebook::new(&mut storage)
+            .block("task.a", "task.b", TODAY)
+            .unwrap();
+        assert_eq!(replay, edged("task.a", "task.b", true));
+        assert_eq!(storage.read("tasks/task.a.md").unwrap(), after_first);
+    }
+
+    #[test]
+    fn blocking_a_task_on_itself_is_refused_as_the_shortest_cycle() {
+        let text = task("task.a", "open", &[]);
+        let mut storage = storage_with(&[("tasks/task.a.md", &text)]);
+        let error = Notebook::new(&mut storage)
+            .block("task.a", "task.a", TODAY)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            NotebookError::WouldCycle {
+                chain: vec!["task.a".to_owned(), "task.a".to_owned()],
+            }
+        );
+        assert_eq!(storage.read("tasks/task.a.md").unwrap(), text);
+    }
+
+    #[test]
+    fn an_edge_that_would_close_a_cycle_is_refused_with_the_cycle_walked() {
+        let text = task("task.b", "open", &[]);
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &task("task.a", "open", &["blocked-by: task.b"]),
+            ),
+            ("tasks/task.b.md", &text),
+        ]);
+        let error = Notebook::new(&mut storage)
+            .block("task.b", "task.a", TODAY)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            NotebookError::WouldCycle {
+                chain: vec![
+                    "task.b".to_owned(),
+                    "task.a".to_owned(),
+                    "task.b".to_owned()
+                ],
+            }
+        );
+        assert_eq!(storage.read("tasks/task.b.md").unwrap(), text);
+    }
+
+    #[test]
+    fn a_cycle_through_an_intermediate_task_is_still_refused() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &task("task.a", "open", &["blocked-by: task.b"]),
+            ),
+            (
+                "tasks/task.b.md",
+                &task("task.b", "open", &["blocked-by: task.c"]),
+            ),
+            ("tasks/task.c.md", &task("task.c", "open", &[])),
+        ]);
+        let error = Notebook::new(&mut storage)
+            .block("task.c", "task.a", TODAY)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            NotebookError::WouldCycle {
+                chain: vec![
+                    "task.c".to_owned(),
+                    "task.a".to_owned(),
+                    "task.b".to_owned(),
+                    "task.c".to_owned(),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn blocking_on_a_task_never_written_is_a_dangling_ref() {
+        let mut storage = storage_with(&[("tasks/task.a.md", &task("task.a", "open", &[]))]);
+        let error = Notebook::new(&mut storage)
+            .block("task.a", "task.never-written", TODAY)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            NotebookError::DanglingRef {
+                field: "blocked-by",
+                target: "task.never-written".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn blocking_on_a_record_that_is_not_a_task_is_refused() {
+        let mut storage = storage_with(&[("tasks/task.a.md", &task("task.a", "open", &[]))]);
+        let error = Notebook::new(&mut storage)
+            .block("task.a", "decision.a-ruling", TODAY)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            NotebookError::WrongType {
+                id: "decision.a-ruling".to_owned(),
+                expected: "a task".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn unblock_erases_the_edge_and_stamps_updated() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &task("task.a", "open", &["blocked-by: task.b"]),
+            ),
+            ("tasks/task.b.md", &task("task.b", "open", &[])),
+        ]);
+        let reply = Notebook::new(&mut storage)
+            .unblock("task.a", "task.b", TODAY)
+            .unwrap();
+        assert_eq!(reply, edged("task.a", "task.b", false));
+        assert_eq!(
+            storage.read("tasks/task.a.md").unwrap(),
+            "---\nid: task.a\ntype: task\nstate: open\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\n"
+        );
+    }
+
+    #[test]
+    fn unblocking_an_edge_that_is_not_there_is_a_replay() {
+        let text = task("task.a", "open", &[]);
+        let mut storage = storage_with(&[("tasks/task.a.md", &text)]);
+        let reply = Notebook::new(&mut storage)
+            .unblock("task.a", "task.b", TODAY)
+            .unwrap();
+        assert_eq!(reply, edged("task.a", "task.b", true));
+        assert_eq!(storage.read("tasks/task.a.md").unwrap(), text);
+    }
+
+    #[test]
+    fn blocking_through_the_archive_is_still_refused_as_a_cycle() {
+        let mut storage = storage_with(&[
+            ("tasks/task.a.md", &task("task.a", "open", &[])),
+            (
+                "archive/tasks/task.done.md",
+                &task("task.done", "closed", &["blocked-by: task.a"]),
+            ),
+        ]);
+        let error = Notebook::new(&mut storage)
+            .block("task.a", "task.done", TODAY)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            NotebookError::WouldCycle {
+                chain: vec![
+                    "task.a".to_owned(),
+                    "task.done".to_owned(),
+                    "task.a".to_owned(),
+                ],
+            },
+            "a closed Task can be reopened, so a latent cycle is a real one"
+        );
+    }
+
+    #[test]
+    fn unblock_repairs_a_task_waiting_on_itself() {
+        let mut storage = storage_with(&[(
+            "tasks/task.a.md",
+            &task("task.a", "open", &["blocked-by: task.a"]),
+        )]);
+        let reply = Notebook::new(&mut storage)
+            .unblock("task.a", "task.a", TODAY)
+            .unwrap();
+        assert_eq!(reply, edged("task.a", "task.a", false));
+        assert!(
+            !storage
+                .read("tasks/task.a.md")
+                .unwrap()
+                .contains("blocked-by"),
+        );
+    }
+
+    #[test]
+    fn unblock_erases_an_edge_into_a_non_task() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &task("task.a", "open", &["blocked-by: note.a-fact"]),
+            ),
+            (
+                "notes/note.a-fact.md",
+                &record_file("note.a-fact", "note", "active", &[], ""),
+            ),
+        ]);
+        let reply = Notebook::new(&mut storage)
+            .unblock("task.a", "note.a-fact", TODAY)
+            .unwrap();
+        assert_eq!(reply, edged("task.a", "note.a-fact", false));
+        assert!(
+            !storage
+                .read("tasks/task.a.md")
+                .unwrap()
+                .contains("blocked-by"),
+        );
+    }
+
+    #[test]
+    fn unblock_erases_a_dangling_edge() {
+        let mut storage = storage_with(&[(
+            "tasks/task.a.md",
+            &task("task.a", "open", &["blocked-by: task.never-written"]),
+        )]);
+        let reply = Notebook::new(&mut storage)
+            .unblock("task.a", "task.never-written", TODAY)
+            .unwrap();
+        assert_eq!(reply, edged("task.a", "task.never-written", false));
+        assert!(
+            !storage
+                .read("tasks/task.a.md")
+                .unwrap()
+                .contains("blocked-by"),
+        );
+    }
+
+    #[test]
+    fn a_corrupted_edge_freezes_every_verb_but_unblock() {
+        let text = task("task.a", "open", &["blocked-by: task.a"]);
+        let mut storage = storage_with(&[("tasks/task.a.md", &text)]);
+        let error = Notebook::new(&mut storage)
+            .start("task.a", TODAY)
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::InvalidRecord { .. }));
+        assert_eq!(storage.read("tasks/task.a.md").unwrap(), text);
+    }
+
+    #[test]
+    fn a_task_in_a_hand_edited_multi_file_cycle_still_moves() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &task("task.a", "open", &["blocked-by: task.b"]),
+            ),
+            (
+                "tasks/task.b.md",
+                &task("task.b", "open", &["blocked-by: task.a"]),
+            ),
+        ]);
+        let reply = Notebook::new(&mut storage).start("task.a", TODAY).unwrap();
+        assert!(
+            !reply.already,
+            "a finding that needs a second record is check's alone and freezes nothing"
+        );
+    }
+
+    #[test]
+    fn unblock_erases_a_hand_edited_duplicate_edge_whole() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &task(
+                    "task.a",
+                    "open",
+                    &["blocked-by: task.b", "blocked-by: task.b"],
+                ),
+            ),
+            ("tasks/task.b.md", &task("task.b", "open", &[])),
+        ]);
+        Notebook::new(&mut storage)
+            .unblock("task.a", "task.b", TODAY)
+            .unwrap();
+        assert!(
+            !storage
+                .read("tasks/task.a.md")
+                .unwrap()
+                .contains("blocked-by"),
+            "a half-erased edge would keep the task blocked and the replay false"
+        );
+    }
+
+    #[test]
+    fn close_names_the_open_tasks_whose_last_live_blocker_it_was() {
+        let mut storage = storage_with(&[
+            ("tasks/task.done.md", &task("task.done", "active", &[])),
+            (
+                "tasks/task.freed.md",
+                &task("task.freed", "open", &["blocked-by: task.done"]),
+            ),
+            (
+                "tasks/task.still-blocked.md",
+                &task(
+                    "task.still-blocked",
+                    "open",
+                    &["blocked-by: task.done", "blocked-by: task.other"],
+                ),
+            ),
+            (
+                "tasks/task.already-active.md",
+                &task("task.already-active", "active", &["blocked-by: task.done"]),
+            ),
+            ("tasks/task.other.md", &task("task.other", "open", &[])),
+        ]);
+        let closed = Notebook::new(&mut storage)
+            .close("task.done", &Proof::Waived, TODAY)
+            .unwrap();
+        assert_eq!(closed.unblocked, vec!["task.freed"]);
+    }
+
+    #[test]
+    fn a_freed_task_on_hold_is_still_named_by_the_close() {
+        let mut storage = storage_with(&[
+            ("tasks/task.done.md", &task("task.done", "active", &[])),
+            (
+                "tasks/task.freed-but-held.md",
+                &task(
+                    "task.freed-but-held",
+                    "open",
+                    &["blocked-by: task.done", "hold: waiting on a decision"],
+                ),
+            ),
+        ]);
+        let closed = Notebook::new(&mut storage)
+            .close("task.done", &Proof::Waived, TODAY)
+            .unwrap();
+        assert_eq!(
+            closed.unblocked,
+            vec!["task.freed-but-held"],
+            "the hold gates `ready`, not the fact of unblocking"
+        );
+    }
+
+    #[test]
+    fn close_names_the_freed_tasks_in_ready_order() {
+        let mut storage = storage_with(&[
+            ("tasks/task.done.md", &task("task.done", "active", &[])),
+            (
+                "tasks/task.background.md",
+                &task(
+                    "task.background",
+                    "open",
+                    &["blocked-by: task.done", "priority: 4"],
+                ),
+            ),
+            (
+                "tasks/task.urgent.md",
+                &task(
+                    "task.urgent",
+                    "open",
+                    &["blocked-by: task.done", "priority: 0"],
+                ),
+            ),
+        ]);
+        let closed = Notebook::new(&mut storage)
+            .close("task.done", &Proof::Waived, TODAY)
+            .unwrap();
+        assert_eq!(closed.unblocked, vec!["task.urgent", "task.background"]);
+    }
+}
+
+mod ready_queue {
+    use super::*;
+    use anb_core::ReadyTask;
+
+    fn task(id: &str, state: &str, extra_lines: &[&str]) -> String {
+        record_file(id, "task", state, extra_lines, "")
+    }
+
+    fn ready_ids(storage: &mut MemoryStorage) -> Vec<String> {
+        Notebook::new(storage)
+            .ready()
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect()
+    }
+
+    fn task_created_on(id: &str, created: &str, extra_lines: &[&str]) -> String {
+        task(id, "open", extra_lines).replace("created: 2026-08-24", &format!("created: {created}"))
+    }
+
+    #[test]
+    fn ready_lists_only_open_unblocked_unheld_tasks() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.pickable.md",
+                &task("task.pickable", "open", &[]),
+            ),
+            (
+                "tasks/task.blocked.md",
+                &task("task.blocked", "open", &["blocked-by: task.pickable"]),
+            ),
+            (
+                "tasks/task.held.md",
+                &task("task.held", "open", &["hold: parked for the release"]),
+            ),
+            ("tasks/task.active.md", &task("task.active", "active", &[])),
+            ("tasks/task.closed.md", &task("task.closed", "closed", &[])),
+        ]);
+        assert_eq!(ready_ids(&mut storage), vec!["task.pickable"]);
+    }
+
+    #[test]
+    fn a_closed_blocker_blocks_nothing() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.waited.md",
+                &task("task.waited", "open", &["blocked-by: task.closed"]),
+            ),
+            ("tasks/task.closed.md", &task("task.closed", "closed", &[])),
+        ]);
+        assert_eq!(ready_ids(&mut storage), vec!["task.waited"]);
+    }
+
+    #[test]
+    fn ready_ranks_priority_first_then_the_oldest_then_the_id() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.urgent.md",
+                &task("task.urgent", "open", &["priority: 1"]),
+            ),
+            (
+                "tasks/task.background.md",
+                &task("task.background", "open", &["priority: 3"]),
+            ),
+            (
+                "tasks/task.old.md",
+                &task_created_on("task.old", "2026-08-01", &["priority: 2"]),
+            ),
+            (
+                "tasks/task.same-day-b.md",
+                &task("task.same-day-b", "open", &["priority: 2"]),
+            ),
+            (
+                "tasks/task.same-day-a.md",
+                &task("task.same-day-a", "open", &["priority: 2"]),
+            ),
+        ]);
+        assert_eq!(
+            ready_ids(&mut storage),
+            vec![
+                "task.urgent",
+                "task.old",
+                "task.same-day-a",
+                "task.same-day-b",
+                "task.background"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unprioritized_task_ranks_at_the_neutral_middle() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.urgent.md",
+                &task("task.urgent", "open", &["priority: 1"]),
+            ),
+            (
+                "tasks/task.untriaged.md",
+                &task("task.untriaged", "open", &[]),
+            ),
+            (
+                "tasks/task.background.md",
+                &task("task.background", "open", &["priority: 3"]),
+            ),
+        ]);
+        assert_eq!(
+            ready_ids(&mut storage),
+            vec!["task.urgent", "task.untriaged", "task.background"]
+        );
+    }
+
+    #[test]
+    fn an_invalid_task_is_excluded_from_the_queue() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.dangling.md",
+                &task("task.dangling", "open", &["blocked-by: task.never-written"]),
+            ),
+            ("tasks/task.sound.md", &task("task.sound", "open", &[])),
+        ]);
+        assert_eq!(
+            ready_ids(&mut storage),
+            vec!["task.sound"],
+            "an invalid record is `check`'s to name, never a silent queue entry"
+        );
+    }
+
+    #[test]
+    fn a_row_carries_what_the_queue_prints() {
+        let mut storage = storage_with(&[(
+            "tasks/task.pickable.md",
+            &task("task.pickable", "open", &["priority: 1"]),
+        )]);
+        let rows = Notebook::new(&mut storage).ready().unwrap();
+        assert_eq!(
+            rows,
+            vec![ReadyTask {
+                id: "task.pickable".to_owned(),
+                priority: Some(1),
+                created: "2026-08-24".to_owned(),
+                title: "A demo record".to_owned(),
+            }]
+        );
     }
 }
 
@@ -1069,6 +1641,189 @@ mod check {
                 FindingCode::BrokenSupersession
             )],
             "the pair is coherent; the victim's live state alone is the defect"
+        );
+    }
+
+    #[test]
+    fn a_hand_edited_cycle_is_named_on_every_member_at_its_edge_line() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &record_file("task.a", "task", "open", &["blocked-by: task.b"], ""),
+            ),
+            (
+                "tasks/task.b.md",
+                &record_file("task.b", "task", "open", &["blocked-by: task.a"], ""),
+            ),
+        ]);
+        let located = Notebook::new(&mut storage).check().unwrap();
+        assert_eq!(
+            located
+                .iter()
+                .map(|found| (found.path.as_str(), found.finding.code, found.finding.line))
+                .collect::<Vec<_>>(),
+            vec![
+                ("tasks/task.a.md", FindingCode::DepCycle, Some(6)),
+                ("tasks/task.b.md", FindingCode::DepCycle, Some(6)),
+            ]
+        );
+        assert!(
+            located[0]
+                .finding
+                .message
+                .contains("task.a → task.b → task.a"),
+            "the message walks the whole cycle: {}",
+            located[0].finding.message
+        );
+    }
+
+    #[test]
+    fn a_cycle_through_a_third_task_names_all_three_members() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &record_file("task.a", "task", "open", &["blocked-by: task.b"], ""),
+            ),
+            (
+                "tasks/task.b.md",
+                &record_file("task.b", "task", "open", &["blocked-by: task.c"], ""),
+            ),
+            (
+                "tasks/task.c.md",
+                &record_file("task.c", "task", "open", &["blocked-by: task.a"], ""),
+            ),
+        ]);
+        assert_eq!(
+            findings_for(&mut storage),
+            vec![
+                ("tasks/task.a.md".to_owned(), FindingCode::DepCycle),
+                ("tasks/task.b.md".to_owned(), FindingCode::DepCycle),
+                ("tasks/task.c.md".to_owned(), FindingCode::DepCycle),
+            ]
+        );
+    }
+
+    #[test]
+    fn two_disjoint_cycles_are_both_named() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &record_file("task.a", "task", "open", &["blocked-by: task.b"], ""),
+            ),
+            (
+                "tasks/task.b.md",
+                &record_file("task.b", "task", "open", &["blocked-by: task.a"], ""),
+            ),
+            (
+                "tasks/task.c.md",
+                &record_file("task.c", "task", "open", &["blocked-by: task.d"], ""),
+            ),
+            (
+                "tasks/task.d.md",
+                &record_file("task.d", "task", "open", &["blocked-by: task.c"], ""),
+            ),
+        ]);
+        let named: Vec<String> = Notebook::new(&mut storage)
+            .check()
+            .unwrap()
+            .into_iter()
+            .map(|located| located.path)
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                "tasks/task.a.md",
+                "tasks/task.b.md",
+                "tasks/task.c.md",
+                "tasks/task.d.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn repairing_a_named_cycle_surfaces_the_one_overlapping_it() {
+        let entangled = [
+            (
+                "tasks/task.a.md",
+                record_file(
+                    "task.a",
+                    "task",
+                    "open",
+                    &["blocked-by: task.b", "blocked-by: task.c"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.b.md",
+                record_file("task.b", "task", "open", &["blocked-by: task.c"], ""),
+            ),
+            (
+                "tasks/task.c.md",
+                record_file("task.c", "task", "open", &["blocked-by: task.a"], ""),
+            ),
+        ];
+        let mut storage = storage_with(
+            &entangled
+                .iter()
+                .map(|(path, text)| (*path, text.as_str()))
+                .collect::<Vec<_>>(),
+        );
+        let first_pass: Vec<FindingCode> = Notebook::new(&mut storage)
+            .check()
+            .unwrap()
+            .into_iter()
+            .map(|located| located.finding.code)
+            .collect();
+        assert_eq!(
+            first_pass,
+            vec![
+                FindingCode::DepCycle,
+                FindingCode::DepCycle,
+                FindingCode::DepCycle
+            ],
+            "one cycle per back edge: the walk names task.a → task.b → task.c → task.a"
+        );
+
+        Notebook::new(&mut storage)
+            .unblock("task.a", "task.b", TODAY)
+            .unwrap();
+        assert_eq!(
+            findings_for(&mut storage),
+            vec![
+                ("tasks/task.a.md".to_owned(), FindingCode::DepCycle),
+                ("tasks/task.c.md".to_owned(), FindingCode::DepCycle),
+            ],
+            "the cycle hidden behind the repaired one surfaces on the next walk"
+        );
+    }
+
+    #[test]
+    fn a_task_waiting_on_itself_is_a_dep_cycle_at_its_own_line() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &task_file("open", &["blocked-by: task.demo"]),
+        )]);
+        let located = Notebook::new(&mut storage).check().unwrap();
+        assert_eq!(located.len(), 1);
+        assert_eq!(located[0].finding.code, FindingCode::DepCycle);
+        assert_eq!(located[0].finding.line, Some(6));
+    }
+
+    #[test]
+    fn a_dependency_edge_into_a_non_task_is_a_bad_value() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("open", &["blocked-by: note.a-fact"]),
+            ),
+            (
+                "notes/note.a-fact.md",
+                &record_file("note.a-fact", "note", "active", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            findings_for(&mut storage),
+            vec![("tasks/task.demo.md".to_owned(), FindingCode::BadValue)]
         );
     }
 

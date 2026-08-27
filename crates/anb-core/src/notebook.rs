@@ -5,11 +5,18 @@
 //! declared supersession writes the back-pointer and flips the victim, a
 //! Question closes only by routing or an explicit reasoned drop, a close
 //! carries its proof. Every mutation is idempotent — a replayed call answers
-//! `already: true` and leaves every byte of every file unchanged — and a
-//! record carrying an error finding is never mutated and never rewritten.
+//! `already: true` and leaves every byte of every file unchanged.
+//!
+//! The mutation gate holds a record's own error findings and its dangling
+//! references against it; findings that need a second record — a broken
+//! supersession pair, a multi-file dependency cycle — are `check`'s alone
+//! and freeze nothing. The one admission through the gate: `unblock` runs
+//! over errors sitting on the very `blocked-by` lines it erases, so a
+//! corrupted edge never freezes its own repair.
 
 use crate::finding::{Finding, FindingCode, Severity};
 use crate::grammar::{self, RecordFile};
+use crate::graph::{TaskGraph, TaskNode};
 use crate::record::{Record, RecordType, TaskAction, TaskState, Transition};
 use crate::storage::{Storage, StorageError};
 use std::collections::BTreeMap;
@@ -93,12 +100,14 @@ pub struct Transitioned {
     pub already: bool,
 }
 
-/// A close, with the deferred findings it must not bury: the still-open
-/// Questions born from this Task (US8).
+/// A close, with the computed consequences it must not bury: the still-open
+/// Questions born from this Task (US8), and the open Tasks whose last live
+/// blocker it was (US7), in ready order.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Closed {
     pub transition: Transitioned,
     pub open_questions: Vec<String>,
+    pub unblocked: Vec<String>,
 }
 
 /// A hold set or cleared; `already` marks the replay.
@@ -106,6 +115,24 @@ pub struct Closed {
 pub struct Held {
     pub id: String,
     pub already: bool,
+}
+
+/// A dependency edge written or erased; `already` marks the replay.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Edged {
+    pub id: String,
+    pub on: String,
+    pub already: bool,
+}
+
+/// One ready Task. It carries `created`, not an age: the Core holds no
+/// clock, so "how old" is the caller's derivation from its own today.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ReadyTask {
+    pub id: String,
+    pub priority: Option<u8>,
+    pub created: String,
+    pub title: String,
 }
 
 /// A record created, with the victim its supersession flipped, if any.
@@ -171,6 +198,11 @@ pub enum NotebookError {
         id: String,
         reason: String,
     },
+    /// The edge would close a dependency cycle (US19); `chain` walks it,
+    /// first and last the same Task.
+    WouldCycle {
+        chain: Vec<String>,
+    },
     Storage(StorageError),
 }
 
@@ -201,6 +233,13 @@ impl std::fmt::Display for NotebookError {
             }
             NotebookError::CannotSupersede { id, reason } => {
                 write!(f, "cannot supersede `{id}`: {reason}")
+            }
+            NotebookError::WouldCycle { chain } => {
+                write!(
+                    f,
+                    "the edge would close a dependency cycle: {}",
+                    chain.join(" → ")
+                )
             }
             NotebookError::Storage(error) => error.fmt(f),
         }
@@ -265,9 +304,24 @@ impl<'a, S: Storage> Notebook<'a, S> {
             check_supersession_pair(record, &by_stem, &mut located);
         }
         check_duplicate_ids(&records, &mut located);
+        check_dep_cycles(&records, &by_stem, &mut located);
 
         located.sort_by(|left, right| finding_order(left).cmp(&finding_order(right)));
         Ok(located)
+    }
+
+    /// The dispatch queue (US9): open, unblocked, unheld Tasks, the most
+    /// urgent first. Invalid records are excluded, as from every derived
+    /// query; `check` names them.
+    ///
+    /// # Errors
+    /// A storage failure.
+    pub fn ready(&self) -> Result<Vec<ReadyTask>, NotebookError> {
+        let tasks = self.records_of(RecordType::Task)?;
+        let graph = task_graph(&tasks);
+        self.open_rows(&tasks, |record| {
+            record.hold().is_none() && !graph.is_blocked(path_stem(record.path()))
+        })
     }
 
     /// Create a record, minting an id from the title unless one is given.
@@ -347,6 +401,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok(Closed {
             transition,
             open_questions: self.open_questions_from(id)?,
+            unblocked: self.unblocked_by_close(id)?,
         })
     }
 
@@ -444,6 +499,77 @@ impl<'a, S: Storage> Notebook<'a, S> {
         self.storage.write(&loaded.path, &file.render())?;
         Ok(Held {
             id: id.to_owned(),
+            already: false,
+        })
+    }
+
+    /// Write a dependency edge: this Task waits on `on`. An edge that would
+    /// close a cycle is rejected with the cycle walked in full (US19), so
+    /// `ready` can never silently empty forever.
+    ///
+    /// # Errors
+    /// [`NotebookError::WrongType`] when `on` is not a task,
+    /// [`NotebookError::DanglingRef`] when it does not exist,
+    /// [`NotebookError::WouldCycle`] naming the cycle, plus the resolution
+    /// errors of [`Notebook::close`].
+    pub fn block(&mut self, id: &str, on: &str, today: &str) -> Result<Edged, NotebookError> {
+        guard_today(today)?;
+        if parsed_type(on)? != RecordType::Task {
+            return Err(NotebookError::WrongType {
+                id: on.to_owned(),
+                expected: "a task".to_owned(),
+            });
+        }
+        self.guard_ref_exists("blocked-by", on)?;
+        let loaded = self.load_live(id, &[RecordType::Task])?;
+        if edge_exists(&loaded.record, on) {
+            return Ok(Edged {
+                id: id.to_owned(),
+                on: on.to_owned(),
+                already: true,
+            });
+        }
+        if let Some(chain) = self.would_cycle(id, on)? {
+            return Err(NotebookError::WouldCycle { chain });
+        }
+        let mut file = loaded.record.into_file();
+        file.append_field("blocked-by", on);
+        file.set_field("updated", today);
+        self.storage.write(&loaded.path, &file.render())?;
+        Ok(Edged {
+            id: id.to_owned(),
+            on: on.to_owned(),
+            already: false,
+        })
+    }
+
+    /// Erase a dependency edge; the reverse of [`Notebook::block`], and the
+    /// repair for a corrupted one. `on` may be any well-formed id — the edge
+    /// being erased may be exactly the wrong-typed target `check` named —
+    /// and errors sitting on the record's own `blocked-by` lines do not
+    /// freeze the verb that erases them. An edge hand-edited into duplicates
+    /// is erased whole, so the replay stays true.
+    ///
+    /// # Errors
+    /// The resolution errors of [`Notebook::close`].
+    pub fn unblock(&mut self, id: &str, on: &str, today: &str) -> Result<Edged, NotebookError> {
+        guard_today(today)?;
+        parsed_type(on)?;
+        let loaded = self.load_live_admitting(id, &[RecordType::Task], edge_borne)?;
+        if !edge_exists(&loaded.record, on) {
+            return Ok(Edged {
+                id: id.to_owned(),
+                on: on.to_owned(),
+                already: true,
+            });
+        }
+        let mut file = loaded.record.into_file();
+        file.remove_field_value("blocked-by", on);
+        file.set_field("updated", today);
+        self.storage.write(&loaded.path, &file.render())?;
+        Ok(Edged {
+            id: id.to_owned(),
+            on: on.to_owned(),
             already: false,
         })
     }
@@ -615,6 +741,17 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// matches the command, the record exists live, and it carries no error
     /// finding — from its own bytes or from a dangling reference.
     fn load_live(&self, id: &str, expected: &[RecordType]) -> Result<LoadedLive, NotebookError> {
+        self.load_live_admitting(id, expected, |_, _| false)
+    }
+
+    /// [`Notebook::load_live`] with an admission: `admits` names the error
+    /// findings this one verb may run over instead of freezing on.
+    fn load_live_admitting(
+        &self,
+        id: &str,
+        expected: &[RecordType],
+        admits: impl Fn(&Record, &Finding) -> bool,
+    ) -> Result<LoadedLive, NotebookError> {
         let record_type = parsed_type(id)?;
         if !expected.contains(&record_type) {
             return Err(NotebookError::WrongType {
@@ -622,13 +759,22 @@ impl<'a, S: Storage> Notebook<'a, S> {
                 expected: type_list(expected),
             });
         }
-        self.resolve_live(id, record_type)
+        self.resolve_live_admitting(id, record_type, admits)
     }
 
     /// The one gate every write passes: the record is live and carries no
     /// error finding, so no path — a verb or a supersession flip — can
     /// rewrite an invalid record.
     fn resolve_live(&self, id: &str, record_type: RecordType) -> Result<LoadedLive, NotebookError> {
+        self.resolve_live_admitting(id, record_type, |_, _| false)
+    }
+
+    fn resolve_live_admitting(
+        &self,
+        id: &str,
+        record_type: RecordType,
+        admits: impl Fn(&Record, &Finding) -> bool,
+    ) -> Result<LoadedLive, NotebookError> {
         let path = record_path(id, record_type, false);
         let text = match self.storage.read(&path) {
             Ok(text) => text,
@@ -641,7 +787,11 @@ impl<'a, S: Storage> Notebook<'a, S> {
             Err(error) => return Err(error.into()),
         };
         let record = Record::parse(&path, &text);
-        let errors = self.mutation_errors(&record)?;
+        let errors: Vec<Finding> = self
+            .exclusion_errors(&record)?
+            .into_iter()
+            .filter(|finding| !admits(&record, finding))
+            .collect();
         if !errors.is_empty() {
             return Err(NotebookError::InvalidRecord {
                 path,
@@ -651,9 +801,59 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok(LoadedLive { path, record })
     }
 
-    /// The error findings that exclude a record from mutation: its own,
-    /// plus a dangling reference probed against storage.
-    fn mutation_errors(&self, record: &Record) -> Result<Vec<Finding>, NotebookError> {
+    /// The cycle the edge `id → on` would close, walked in full: `on`
+    /// already waits on `id`, or is `id` itself.
+    fn would_cycle(&self, id: &str, on: &str) -> Result<Option<Vec<String>>, NotebookError> {
+        if id == on {
+            return Ok(Some(vec![id.to_owned(), on.to_owned()]));
+        }
+        let tasks = self.records_of(RecordType::Task)?;
+        let Some(chain) = task_graph(&tasks).path(on, id) else {
+            return Ok(None);
+        };
+        let mut chain_from_dependent = vec![id.to_owned()];
+        chain_from_dependent.extend(chain);
+        Ok(Some(chain_from_dependent))
+    }
+
+    /// The open Tasks this close released, in ready order: their last live
+    /// blocker was this Task. A held one is named too — the hold gates
+    /// `ready`, not the fact.
+    fn unblocked_by_close(&self, id: &str) -> Result<Vec<String>, NotebookError> {
+        let tasks = self.records_of(RecordType::Task)?;
+        let freed = task_graph(&tasks).unblocked_by(id);
+        let rows = self.open_rows(&tasks, |record| {
+            freed
+                .iter()
+                .any(|freed_id| freed_id == path_stem(record.path()))
+        })?;
+        Ok(rows.into_iter().map(|row| row.id).collect())
+    }
+
+    /// The live, open, valid Tasks passing `keep`, in ready order.
+    fn open_rows(
+        &self,
+        tasks: &[Record],
+        keep: impl Fn(&Record) -> bool,
+    ) -> Result<Vec<ReadyTask>, NotebookError> {
+        let mut rows = Vec::new();
+        for record in tasks {
+            if is_archived(record.path()) || record.state() != Some("open") || !keep(record) {
+                continue;
+            }
+            if !self.exclusion_errors(record)?.is_empty() {
+                continue;
+            }
+            rows.push(ready_row(record));
+        }
+        rows.sort_by(|left, right| ready_rank(left).cmp(&ready_rank(right)));
+        Ok(rows)
+    }
+
+    /// The error findings that exclude a record from mutation and from the
+    /// derived queries: its own, plus a dangling reference probed against
+    /// storage.
+    fn exclusion_errors(&self, record: &Record) -> Result<Vec<Finding>, NotebookError> {
         let mut errors: Vec<Finding> = record
             .findings()
             .iter()
@@ -835,36 +1035,45 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok(None)
     }
 
-    /// The still-open Questions whose Origin is this Task.
+    /// The still-open, valid Questions whose Origin is this Task; an invalid
+    /// one is `check`'s to name, as everywhere.
     fn open_questions_from(&self, task_id: &str) -> Result<Vec<String>, NotebookError> {
         let mut ids = Vec::new();
-        for path in self.storage.list(RecordType::Question.directory())? {
-            if !is_record_file(&path) {
+        for record in self.records_of(RecordType::Question)? {
+            if is_archived(record.path())
+                || record.origin() != Some(task_id)
+                || record.state() != Some("open")
+            {
                 continue;
             }
-            let file = RecordFile::parse(&self.storage.read(&path)?);
-            if file.field("from") == Some(task_id) && file.field("state") == Some("open") {
-                ids.push(path_stem(&path).to_owned());
+            if !self.exclusion_errors(&record)?.is_empty() {
+                continue;
             }
+            ids.push(path_stem(record.path()).to_owned());
         }
         Ok(ids)
     }
 
-    /// Every record, live and archived, invalid ones included: an invalid
-    /// record is a visible first-class state, never a silent drop.
     fn read_records(&self) -> Result<Vec<Record>, NotebookError> {
         let mut records = Vec::new();
         for record_type in RecordType::ALL {
-            let live = record_type.directory().to_owned();
-            let dirs = [live.clone(), format!("archive/{live}")];
-            for dir in dirs {
-                for path in self.storage.list(&dir)? {
-                    if !is_record_file(&path) {
-                        continue;
-                    }
-                    let text = self.storage.read(&path)?;
-                    records.push(Record::parse(&path, &text));
+            records.extend(self.records_of(record_type)?);
+        }
+        Ok(records)
+    }
+
+    /// One type's records, live and archived, invalid ones included: an
+    /// invalid record is a visible first-class state, never a silent drop.
+    fn records_of(&self, record_type: RecordType) -> Result<Vec<Record>, NotebookError> {
+        let live = record_type.directory().to_owned();
+        let mut records = Vec::new();
+        for dir in [live.clone(), format!("archive/{live}")] {
+            for path in self.storage.list(&dir)? {
+                if !is_record_file(&path) {
+                    continue;
                 }
+                let text = self.storage.read(&path)?;
+                records.push(Record::parse(&path, &text));
             }
         }
         Ok(records)
@@ -960,6 +1169,70 @@ fn record_path(id: &str, record_type: RecordType, archived: bool) -> String {
 #[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn is_record_file(path: &str) -> bool {
     path.ends_with(".md")
+}
+
+fn is_archived(path: &str) -> bool {
+    path.starts_with("archive/")
+}
+
+fn edge_exists(record: &Record, target: &str) -> bool {
+    record
+        .file()
+        .field_values("blocked-by")
+        .any(|value| value == target)
+}
+
+/// An error finding sitting on one of the record's own `blocked-by` lines:
+/// the class `unblock` exists to erase.
+fn edge_borne(record: &Record, finding: &Finding) -> bool {
+    finding.line.is_some()
+        && record
+            .file()
+            .field_entries("blocked-by")
+            .any(|(_, line)| line == finding.line)
+}
+
+/// The dependency graph over the Tasks handed in, keyed by file stem — the
+/// name graph findings report against. Archived Tasks enter too: a cycle
+/// through the archive is still a cycle.
+fn task_graph(records: &[Record]) -> TaskGraph {
+    let mut nodes = BTreeMap::new();
+    for record in records {
+        if record.record_type() != Some(RecordType::Task) {
+            continue;
+        }
+        let blocked_by = record
+            .file()
+            .field_values("blocked-by")
+            .filter(|target| grammar::id_error(target).is_none())
+            .map(str::to_owned)
+            .collect();
+        nodes
+            .entry(path_stem(record.path()).to_owned())
+            .or_insert(TaskNode {
+                closed: record.state() == Some("closed"),
+                blocked_by,
+            });
+    }
+    TaskGraph::new(nodes)
+}
+
+fn ready_row(record: &Record) -> ReadyTask {
+    let file = record.file();
+    ReadyTask {
+        id: path_stem(record.path()).to_owned(),
+        priority: file.field("priority").and_then(|value| value.parse().ok()),
+        created: file.field("created").unwrap_or_default().to_owned(),
+        title: file.field("title").unwrap_or_default().to_owned(),
+    }
+}
+
+/// US9's order: the most urgent priority first (0 is the most urgent; none
+/// ranks at the neutral middle — priority is an override, not a promotion
+/// over the untriaged), then oldest first, then id. The ISO date orders as
+/// text.
+fn ready_rank(row: &ReadyTask) -> (u8, &str, &str) {
+    (row.priority.unwrap_or(2), &row.created, &row.id)
 }
 
 /// File, then line (file-level findings last), then code.
@@ -1235,6 +1508,43 @@ fn check_supersession_pair(
                     ),
                 ),
             );
+        }
+    }
+}
+
+/// Cycles among `blocked-by` edges, named on every member file at its own
+/// edge line. The tool refuses them at write, so a cycle is hand-edited
+/// corruption — without this pass it would only sit there emptying `ready`.
+fn check_dep_cycles(
+    records: &[Record],
+    by_stem: &BTreeMap<&str, &Record>,
+    out: &mut Vec<FileFinding>,
+) {
+    for cycle in task_graph(records).cycles() {
+        let walk = cycle
+            .iter()
+            .chain(cycle.first())
+            .cloned()
+            .collect::<Vec<String>>()
+            .join(" → ");
+        for (position, member) in cycle.iter().enumerate() {
+            let next = &cycle[(position + 1) % cycle.len()];
+            let Some(record) = by_stem.get(member.as_str()) else {
+                continue;
+            };
+            let line = record
+                .file()
+                .field_entries("blocked-by")
+                .find(|(target, _)| target == next)
+                .and_then(|(_, line)| line);
+            out.push(FileFinding {
+                path: record.path().to_owned(),
+                finding: Finding::located(
+                    line,
+                    FindingCode::DepCycle,
+                    format!("blocked-by: `{next}` closes the cycle {walk}"),
+                ),
+            });
         }
     }
 }
