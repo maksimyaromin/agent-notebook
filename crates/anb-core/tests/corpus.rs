@@ -4,14 +4,15 @@
 //!
 //! Case layout under `testdata/corpus/{valid,invalid}/`:
 //! - `<case>.md` — the input. A case nested under a type directory
-//!   (`invalid/tasks/task.x.md`) is additionally placement-checked at that
-//!   notebook-relative path; a flat case is parsed as bytes only.
+//!   (`invalid/tasks/task.x.md`) runs the full record pass — placement and
+//!   the record model's semantic findings — at that notebook-relative path;
+//!   a flat case exercises the grammar alone.
 //! - `<case>.findings` — expected findings, one `<line> <code>` per line
 //!   (`-` for findings without a line). Absent means none expected; an
 //!   invalid case must have one.
 //! - `<case>.normalized` — expected canonical form, where one is asserted.
 
-use anb_core::{Finding, RecordFile, Severity};
+use anb_core::{Finding, Record, RecordFile, Severity};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -47,8 +48,8 @@ struct Case {
     rel: String,
     input: String,
     file: RecordFile,
-    /// Parse findings plus, for a case nested under a type directory, the
-    /// placement findings at that path.
+    /// Parse findings; a case nested under a type directory carries the
+    /// full record pass at that path instead.
     findings: Vec<Finding>,
 }
 
@@ -61,10 +62,11 @@ fn load(path: &Path, root: &Path) -> Case {
     let input = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
     let file = RecordFile::parse(&input);
-    let mut findings = file.findings().to_vec();
-    if rel.contains('/') {
-        findings.extend(file.placement_findings(&rel));
-    }
+    let findings = if rel.contains('/') {
+        Record::parse(&rel, &input).findings().to_vec()
+    } else {
+        file.findings().to_vec()
+    };
     Case {
         rel,
         input,
@@ -103,11 +105,14 @@ fn every_valid_case_is_accepted_and_round_trips_byte_exact() {
     let root = corpus_dir("valid");
     for path in md_files(&root) {
         let case = load(&path, &root);
+        let rejected = case
+            .findings
+            .iter()
+            .any(|finding| finding.code.severity() == Severity::Error);
         assert!(
-            !case.file.has_errors(),
+            !rejected,
             "{}: expected acceptance, got {:?}",
-            case.rel,
-            case.findings
+            case.rel, case.findings
         );
         assert_eq!(
             case.file.render(),

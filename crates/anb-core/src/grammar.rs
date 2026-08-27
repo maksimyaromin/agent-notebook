@@ -31,9 +31,11 @@ enum Form {
     /// One lowercase ASCII word; the per-type enums belong to the record model.
     LowerWord,
     /// Non-empty free text.
-    Title,
+    NonEmptyText,
     /// Free text, possibly empty.
     Text,
+    /// An integer `0`–`4`.
+    Priority,
     /// Comma-separated `[a-z0-9-]+` tokens.
     TagList,
     /// A `<kind> <target>` pair: a token, then a non-empty rest of line.
@@ -77,25 +79,33 @@ const fn repeatable(key: &'static str, form: Form) -> FieldSpec {
     }
 }
 
-/// The format spec's field table; table position is canonical order.
-/// `updated` is written by every mutation, but a hand-made file may lack it,
-/// so reading does not require it.
+/// The field table of the format spec extended by the record model's keys,
+/// each placed beside its kin (`via` after `by`, the workflow fields before
+/// the dates); table position is canonical order. `updated` is written by
+/// every mutation, but a hand-made file may lack it, so reading does not
+/// require it.
 const FIELD_TABLE: &[FieldSpec] = &[
     required("id", Form::Id),
     required("type", Form::TypeWord),
     required("state", Form::LowerWord),
     optional("kind", Form::LowerWord),
-    required("title", Form::Title),
+    required("title", Form::NonEmptyText),
     optional("by", Form::Text),
+    optional("via", Form::Text),
     optional("from", Form::Id),
     optional("tags", Form::TagList),
     repeatable("link", Form::Link),
     optional("supersedes", Form::Id),
     optional("superseded-by", Form::Id),
     repeatable("blocked-by", Form::Id),
+    optional("routed-to", Form::Id),
+    optional("priority", Form::Priority),
+    optional("hold", Form::NonEmptyText),
+    optional("hold-until", Form::Date),
     required("created", Form::Date),
     optional("updated", Form::Date),
     optional("closed", Form::Date),
+    optional("review-by", Form::Date),
 ];
 
 fn field_spec(key: &str) -> Option<&'static FieldSpec> {
@@ -113,7 +123,8 @@ struct FieldLine {
     key: String,
     value: String,
     raw: String,
-    line: usize,
+    /// 1-based parse line; `None` on a line spliced in by a mutation.
+    line: Option<usize>,
 }
 
 enum EnvelopeLine {
@@ -141,6 +152,55 @@ impl Envelope {
     fn first(&self, key: &str) -> Option<&FieldLine> {
         self.fields().find(|field| field.key == key)
     }
+
+    fn first_mut(&mut self, key: &str) -> Option<&mut FieldLine> {
+        self.lines.iter_mut().find_map(|line| match line {
+            EnvelopeLine::Field(field) if field.key == key => Some(field),
+            _ => None,
+        })
+    }
+
+    fn last_index_of(&self, key: &str) -> Option<usize> {
+        self.lines
+            .iter()
+            .rposition(|line| matches!(line, EnvelopeLine::Field(field) if field.key == key))
+    }
+}
+
+fn canonical_line(key: &str, value: &str) -> String {
+    debug_assert!(
+        !value.contains('\n'),
+        "a field value is one line; multi-line content belongs in the body"
+    );
+    if value.is_empty() {
+        format!("{key}:\n")
+    } else {
+        format!("{key}: {value}\n")
+    }
+}
+
+fn field_line(key: &str, value: &str, raw: String) -> EnvelopeLine {
+    EnvelopeLine::Field(FieldLine {
+        key: key.to_owned(),
+        value: value.to_owned(),
+        raw,
+        line: None,
+    })
+}
+
+/// Where a new `key` line belongs: after the last field the canonical order
+/// puts at or before it, else ahead of every field. An unknown key ranks
+/// last, so it never pulls a known field ahead of its place — even when it
+/// sits mid-envelope.
+fn insertion_index(envelope: &Envelope, key: &str) -> usize {
+    let rank = canonical_rank(key);
+    envelope
+        .lines
+        .iter()
+        .rposition(
+            |line| matches!(line, EnvelopeLine::Field(field) if canonical_rank(&field.key) <= rank),
+        )
+        .map_or(0, |last_at_or_before| last_at_or_before + 1)
 }
 
 /// A parsed record file: the envelope, the opaque body, and the findings.
@@ -254,11 +314,110 @@ impl RecordFile {
 
     /// Every occurrence's value, in file order.
     pub fn field_values<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'a str> {
+        self.field_entries(key).map(|(value, _)| value)
+    }
+
+    /// The first occurrence's value and line.
+    pub(crate) fn field_entry(&self, key: &str) -> Option<(&str, Option<usize>)> {
+        self.envelope
+            .as_ref()?
+            .first(key)
+            .map(|field| (field.value.as_str(), field.line))
+    }
+
+    /// Every occurrence's value and line, in file order.
+    pub(crate) fn field_entries<'a>(
+        &'a self,
+        key: &'a str,
+    ) -> impl Iterator<Item = (&'a str, Option<usize>)> {
         self.envelope
             .iter()
             .flat_map(Envelope::fields)
             .filter(move |field| field.key == key)
-            .map(|field| field.value.as_str())
+            .map(|field| (field.value.as_str(), field.line))
+    }
+
+    /// Replace `key`'s line with its canonical form, or insert a new line at
+    /// the key's canonical position; every other byte of the file stays
+    /// verbatim (format spec §4), so splicing into a CRLF file leaves its
+    /// untouched lines CRLF while the spliced line is canonical LF. Returns
+    /// whether any byte changed.
+    ///
+    /// The value must be one line — multi-line content belongs in the body.
+    ///
+    /// # Panics
+    /// On a file with no envelope; a caller mutates only accepted records.
+    pub fn set_field(&mut self, key: &str, value: &str) -> bool {
+        let canonical = canonical_line(key, value);
+        let envelope = self.envelope_for_mutation();
+        if let Some(field) = envelope.first_mut(key) {
+            if field.raw == canonical {
+                return false;
+            }
+            value.clone_into(&mut field.value);
+            field.raw = canonical;
+            return true;
+        }
+        let at = insertion_index(envelope, key);
+        envelope.lines.insert(at, field_line(key, value, canonical));
+        true
+    }
+
+    /// Add one more line of a repeatable `key` after its last occurrence
+    /// (at the key's canonical position when it is the first). The value
+    /// must be one line.
+    ///
+    /// # Panics
+    /// On a file with no envelope; a caller mutates only accepted records.
+    pub fn append_field(&mut self, key: &str, value: &str) {
+        let canonical = canonical_line(key, value);
+        let envelope = self.envelope_for_mutation();
+        let at = match envelope.last_index_of(key) {
+            Some(last) => last + 1,
+            None => insertion_index(envelope, key),
+        };
+        envelope.lines.insert(at, field_line(key, value, canonical));
+    }
+
+    /// Remove every line of `key`; every other byte stays verbatim.
+    /// Returns whether any line was removed.
+    ///
+    /// # Panics
+    /// On a file with no envelope; a caller mutates only accepted records.
+    pub fn remove_field(&mut self, key: &str) -> bool {
+        let envelope = self.envelope_for_mutation();
+        let before = envelope.lines.len();
+        envelope
+            .lines
+            .retain(|line| !matches!(line, EnvelopeLine::Field(field) if field.key == key));
+        envelope.lines.len() != before
+    }
+
+    /// Append one line at EOF — the body's only mutation (format spec §4).
+    /// A missing newline before the appended line is supplied, whether the
+    /// file ended inside the envelope or mid-body-line.
+    ///
+    /// # Panics
+    /// On a file with no envelope; a caller mutates only accepted records.
+    pub fn append_body(&mut self, line: &str) {
+        if self.body.is_empty() {
+            let close_fence = &mut self.envelope_for_mutation().close_fence;
+            if let Some(fence) = close_fence
+                && !fence.ends_with('\n')
+            {
+                fence.push('\n');
+            }
+        } else if !self.body.ends_with('\n') {
+            self.body.push('\n');
+        }
+        self.body.push_str(line);
+        self.body.push('\n');
+    }
+
+    fn envelope_for_mutation(&mut self) -> &mut Envelope {
+        self.envelope
+            .as_mut()
+            .expect("a mutation runs only on a record with an envelope")
     }
 
     /// Check the record against where it sits: the filename must equal the id
@@ -279,7 +438,7 @@ impl RecordFile {
             && id.value != stem
         {
             let message = format!("id `{}` does not match filename `{filename}`", id.value);
-            findings.push(Finding::at(
+            findings.push(Finding::located(
                 id.line,
                 FindingCode::IdFilenameMismatch,
                 message,
@@ -294,7 +453,7 @@ impl RecordFile {
                 "type `{}` belongs under `{expected}/`, not `{directory}/`",
                 type_field.value
             );
-            findings.push(Finding::at(
+            findings.push(Finding::located(
                 type_field.line,
                 FindingCode::TypeDirMismatch,
                 message,
@@ -398,7 +557,7 @@ fn scan_envelope(open_fence: &str, field_rows: &[&str]) -> EnvelopeScan {
                 key,
                 value,
                 raw: (*raw).to_owned(),
-                line,
+                line: Some(line),
             }));
         } else {
             let message = "expected a `key: value` field or a `---` fence".to_owned();
@@ -474,19 +633,28 @@ fn split_path(path: &str) -> (Option<&str>, &str) {
 /// The semantic pass over parsed field lines: unknown and duplicate keys,
 /// value forms, required fields, and id/type coherence.
 fn check_fields(envelope: &Envelope, findings: &mut Vec<Finding>) {
-    let mut seen: Vec<(&str, usize)> = Vec::new();
+    let mut seen: Vec<(&str, Option<usize>)> = Vec::new();
     for field in envelope.fields() {
         let Some(spec) = field_spec(&field.key) else {
             let message = format!("unknown field `{}`", field.key);
-            findings.push(Finding::at(field.line, FindingCode::UnknownField, message));
+            findings.push(Finding::located(
+                field.line,
+                FindingCode::UnknownField,
+                message,
+            ));
             continue;
         };
         let earlier = seen.iter().find(|(key, _)| *key == spec.key);
         if let Some((_, first_line)) = earlier
             && !spec.repeatable
         {
-            let message = format!("field `{}` is already set on line {first_line}", field.key);
-            findings.push(Finding::at(
+            let message = match first_line {
+                Some(first_line) => {
+                    format!("field `{}` is already set on line {first_line}", field.key)
+                }
+                None => format!("field `{}` is already set", field.key),
+            };
+            findings.push(Finding::located(
                 field.line,
                 FindingCode::DuplicateField,
                 message,
@@ -527,7 +695,7 @@ fn check_id_type_coherence(envelope: &Envelope, findings: &mut Vec<Finding>) {
             id_type.unwrap_or_default(),
             type_field.value
         );
-        findings.push(Finding::at(id.line, FindingCode::BadId, message));
+        findings.push(Finding::located(id.line, FindingCode::BadId, message));
     }
 }
 
@@ -536,25 +704,34 @@ fn value_finding(spec: &FieldSpec, field: &FieldLine) -> Option<Finding> {
     let value = field.value.as_str();
     let (code, reason) = match spec.form {
         Form::Text => return None,
-        Form::Title => (FindingCode::BadValue, title_error(value)?),
+        Form::NonEmptyText => (FindingCode::BadValue, non_empty_error(value)?),
         Form::LowerWord => (FindingCode::BadValue, lower_word_error(value)?),
         Form::TypeWord => (FindingCode::BadValue, type_word_error(value)?),
         Form::TagList => (FindingCode::BadValue, tag_list_error(value)?),
         Form::Link => (FindingCode::BadValue, link_error(value)?),
+        Form::Priority => (FindingCode::BadValue, priority_error(value)?),
         Form::Id => (FindingCode::BadId, id_error(value)?),
         Form::Date => (FindingCode::BadDate, date_error(value)?),
     };
     let message = format!("{}: {reason}", spec.key);
-    Some(Finding::at(field.line, code, message))
+    Some(Finding::located(field.line, code, message))
 }
 
-fn title_error(value: &str) -> Option<String> {
+fn non_empty_error(value: &str) -> Option<String> {
     value.is_empty().then(|| "must not be empty".to_owned())
 }
 
+fn priority_error(value: &str) -> Option<String> {
+    let in_range = matches!(value, "0" | "1" | "2" | "3" | "4");
+    (!in_range).then(|| format!("`{value}` is not an integer 0–4"))
+}
+
+pub(crate) fn is_lower_word(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_lowercase())
+}
+
 fn lower_word_error(value: &str) -> Option<String> {
-    let is_word = !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_lowercase());
-    (!is_word).then(|| format!("`{value}` is not one lowercase word"))
+    (!is_lower_word(value)).then(|| format!("`{value}` is not one lowercase word"))
 }
 
 fn type_word_error(value: &str) -> Option<String> {
@@ -577,14 +754,14 @@ fn link_error(value: &str) -> Option<String> {
     (!well_formed).then(|| format!("`{value}` is not `<kind> <target>`"))
 }
 
-fn date_error(value: &str) -> Option<String> {
+pub(crate) fn date_error(value: &str) -> Option<String> {
     let valid = is_date(value) || is_timestamp(value);
     (!valid).then(|| format!("`{value}` is not `YYYY-MM-DD` or an RFC 3339 timestamp"))
 }
 
 /// The id grammar: `<type>.<slug>`, ASCII, at most 64 bytes. The first dot
 /// splits: slugs contain no dots.
-fn id_error(value: &str) -> Option<String> {
+pub(crate) fn id_error(value: &str) -> Option<String> {
     if !value.is_ascii() {
         return Some(format!("`{value}` contains non-ASCII characters"));
     }
@@ -605,7 +782,7 @@ fn id_error(value: &str) -> Option<String> {
     None
 }
 
-fn is_token(text: &str) -> bool {
+pub(crate) fn is_token(text: &str) -> bool {
     !text.is_empty()
         && text
             .bytes()
@@ -622,7 +799,7 @@ fn is_slug(slug: &str) -> bool {
         && bytes.iter().all(|&byte| alphanumeric(byte) || byte == b'-')
 }
 
-fn is_date(value: &str) -> bool {
+pub(crate) fn is_date(value: &str) -> bool {
     let bytes = value.as_bytes();
     let shaped = bytes.len() == 10
         && bytes[4] == b'-'
@@ -903,6 +1080,116 @@ mod tests {
     fn placement_does_not_re_report_an_id_that_already_failed_its_own_check() {
         let file = RecordFile::parse(&record(&required_with("id", "id: task.X"), ""));
         assert_eq!(file.placement_findings("tasks/task.other.md"), vec![]);
+    }
+
+    #[test]
+    fn set_field_replaces_only_its_own_line_and_keeps_every_other_quirk() {
+        let text = record(
+            &[
+                "id:task.demo-record",
+                "type:  task",
+                "state: open",
+                "custom: kept verbatim   ",
+                "title: A demo record",
+                "created: 2026-08-24",
+            ],
+            "body\n",
+        );
+        let mut file = RecordFile::parse(&text);
+        assert!(file.set_field("state", "active"));
+        assert_eq!(
+            file.render(),
+            record(
+                &[
+                    "id:task.demo-record",
+                    "type:  task",
+                    "state: active",
+                    "custom: kept verbatim   ",
+                    "title: A demo record",
+                    "created: 2026-08-24",
+                ],
+                "body\n",
+            )
+        );
+    }
+
+    #[test]
+    fn set_field_inserts_a_new_field_at_its_canonical_position() {
+        let mut file = RecordFile::parse(&record(&REQUIRED, "body\n"));
+        file.set_field("hold", "waiting for the 1.99 release");
+        assert_eq!(
+            file.render(),
+            record(
+                &[
+                    "id: task.demo-record",
+                    "type: task",
+                    "state: open",
+                    "title: A demo record",
+                    "hold: waiting for the 1.99 release",
+                    "created: 2026-08-24",
+                ],
+                "body\n",
+            )
+        );
+    }
+
+    #[test]
+    fn set_field_with_the_same_bytes_reports_no_change() {
+        let text = record(&REQUIRED, "body\n");
+        let mut file = RecordFile::parse(&text);
+        assert!(!file.set_field("state", "open"));
+        assert_eq!(file.render(), text);
+    }
+
+    #[test]
+    fn splicing_into_a_crlf_file_writes_the_touched_line_lf_and_keeps_the_rest() {
+        let text = record(&REQUIRED, "body\n").replace('\n', "\r\n");
+        let mut file = RecordFile::parse(&text);
+        file.set_field("state", "active");
+        assert_eq!(
+            file.render(),
+            text.replace("state: open\r\n", "state: active\n")
+        );
+    }
+
+    #[test]
+    fn append_field_adds_a_line_after_the_keys_last_occurrence() {
+        let mut lines = REQUIRED.to_vec();
+        lines.push("link: doc a.md");
+        lines.push("link: doc b.md");
+        let mut file = RecordFile::parse(&record(&lines, ""));
+        file.append_field("link", "pr https://example.com/1");
+        assert_eq!(
+            file.field_values("link").collect::<Vec<_>>(),
+            vec!["doc a.md", "doc b.md", "pr https://example.com/1"]
+        );
+    }
+
+    #[test]
+    fn remove_field_removes_every_line_of_the_key_and_nothing_else() {
+        let mut lines = REQUIRED.to_vec();
+        lines.push("hold: a reason");
+        lines.push("hold-until: 2026-09-01");
+        let mut file = RecordFile::parse(&record(&lines, "body\n"));
+        assert!(file.remove_field("hold"));
+        assert!(file.remove_field("hold-until"));
+        assert!(!file.remove_field("hold"));
+        assert_eq!(file.render(), record(&REQUIRED, "body\n"));
+    }
+
+    #[test]
+    fn append_body_starts_the_body_even_when_the_envelope_lacks_its_newline() {
+        let text = record(&REQUIRED, "");
+        let mut file = RecordFile::parse(text.strip_suffix('\n').unwrap());
+        file.append_body("- a log line");
+        assert_eq!(file.render(), format!("{text}- a log line\n"));
+    }
+
+    #[test]
+    fn append_body_supplies_the_newline_a_bodys_last_line_lacks() {
+        let mut file = RecordFile::parse(&record(&REQUIRED, "no newline at the end"));
+        file.append_body("- a log line");
+        assert_eq!(file.body(), "no newline at the end\n- a log line\n");
     }
 
     #[test]

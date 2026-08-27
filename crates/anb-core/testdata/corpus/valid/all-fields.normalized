@@ -5,6 +5,7 @@ state: open
 kind: feature
 title: Everything the table allows
 by: supolka
+via: claude-code
 from: question.why-demo
 tags: core, parser
 link: doc .tmp/docs/spec-anb-format.md
@@ -13,8 +14,13 @@ supersedes: task.old-demo
 superseded-by: task.new-demo
 blocked-by: task.other-work
 blocked-by: task.more-work
+routed-to: question.why-demo
+priority: 3
+hold: waiting for the demo review
+hold-until: 2026-09-01
 created: 2026-08-24
 updated: 2026-08-25
 closed: 2026-08-25
+review-by: 2026-09-20
 ---
-The body.
+A grammar fixture, not a model record: every key the table allows on one file, a mix the record pass would refuse.

@@ -15,7 +15,8 @@ pub enum Severity {
     Warning,
 }
 
-/// The stable kebab-case finding codes of the grammar layer (S1).
+/// The stable kebab-case finding codes: the grammar layer's (S1) and the
+/// record model's (S2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FindingCode {
     NoEnvelope,
@@ -29,6 +30,11 @@ pub enum FindingCode {
     BadId,
     IdFilenameMismatch,
     TypeDirMismatch,
+    OrphanField,
+    BrokenRouting,
+    DanglingRef,
+    DuplicateId,
+    BrokenSupersession,
     Crlf,
     Bom,
     NoFinalNewline,
@@ -47,8 +53,13 @@ impl FindingCode {
             | FindingCode::BadDate
             | FindingCode::BadId
             | FindingCode::IdFilenameMismatch
-            | FindingCode::TypeDirMismatch => Severity::Error,
+            | FindingCode::TypeDirMismatch
+            | FindingCode::BrokenRouting
+            | FindingCode::DanglingRef
+            | FindingCode::DuplicateId
+            | FindingCode::BrokenSupersession => Severity::Error,
             FindingCode::UnknownField
+            | FindingCode::OrphanField
             | FindingCode::Crlf
             | FindingCode::Bom
             | FindingCode::NoFinalNewline => Severity::Warning,
@@ -69,6 +80,11 @@ impl FindingCode {
             FindingCode::BadId => "bad-id",
             FindingCode::IdFilenameMismatch => "id-filename-mismatch",
             FindingCode::TypeDirMismatch => "type-dir-mismatch",
+            FindingCode::OrphanField => "orphan-field",
+            FindingCode::BrokenRouting => "broken-routing",
+            FindingCode::DanglingRef => "dangling-ref",
+            FindingCode::DuplicateId => "duplicate-id",
+            FindingCode::BrokenSupersession => "broken-supersession",
             FindingCode::Crlf => "crlf",
             FindingCode::Bom => "bom",
             FindingCode::NoFinalNewline => "no-final-newline",
@@ -107,6 +123,17 @@ impl Finding {
         Self {
             code,
             line: None,
+            message,
+        }
+    }
+
+    /// A finding wherever its field sits — a known line, or none on a field
+    /// spliced in by a mutation.
+    #[must_use]
+    pub fn located(line: Option<usize>, code: FindingCode, message: String) -> Self {
+        Self {
+            code,
+            line,
             message,
         }
     }
