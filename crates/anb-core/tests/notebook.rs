@@ -1,11 +1,10 @@
 //! The record model's write-time invariants, specified at the Storage seam:
 //! strings in, exact strings and returned models out. Expected file bytes
-//! derive from the format spec's canonical form, never from running the
-//! code.
+//! derive from the format's canonical form, never from running the code.
 
 use anb_core::{
-    Draft, FindingCode, Link, MemoryStorage, Notebook, NotebookError, Proof, RecordType, Storage,
-    Transitioned,
+    Budget, DebtSignal, Draft, FindingCode, Link, MemoryStorage, Notebook, NotebookError, Proof,
+    RecordType, Storage, Transitioned,
 };
 
 const TODAY: &str = "2026-08-27";
@@ -1113,12 +1112,12 @@ mod routing {
     fn drop_closes_the_question_with_its_stated_reason_in_the_body() {
         let mut storage = question_notebook();
         let reply = Notebook::new(&mut storage)
-            .drop_question("question.demo", "overtaken by the S2 decision", TODAY)
+            .drop_question("question.demo", "overtaken by a newer decision", TODAY)
             .unwrap();
         assert_eq!(reply, moved("question.demo", "open", "dropped"));
         let text = storage.read("questions/question.demo.md").unwrap();
         assert!(text.contains("\nstate: dropped\n"));
-        assert!(text.ends_with("---\nDropped 2026-08-27: overtaken by the S2 decision\n"));
+        assert!(text.ends_with("---\nDropped 2026-08-27: overtaken by a newer decision\n"));
     }
 
     #[test]
@@ -1510,14 +1509,14 @@ mod creation {
         let mut draft = Draft::new(RecordType::Task, "A linked task");
         draft.links = vec![Link {
             kind: "doc".to_owned(),
-            target: ".tmp/docs/spec-anb-format.md".to_owned(),
+            target: "docs/format.md".to_owned(),
         }];
         let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
         assert!(
             storage
                 .read(&created.path)
                 .unwrap()
-                .contains("link: doc .tmp/docs/spec-anb-format.md\n")
+                .contains("link: doc docs/format.md\n")
         );
     }
 }
@@ -1845,6 +1844,1408 @@ mod check {
                 "questions/question.demo.md".to_owned(),
                 FindingCode::BrokenRouting
             )]
+        );
+    }
+}
+
+mod status_dashboard {
+    use super::*;
+
+    fn status_text(storage: &mut MemoryStorage) -> String {
+        Notebook::new(storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap()
+            .text
+    }
+
+    #[test]
+    fn a_quiet_notebook_answers_one_line_with_counts() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["closed: 2026-08-25"]),
+            ),
+            (
+                "notes/note.demo.md",
+                &record_file("note.demo", "note", "retired", &[], ""),
+            ),
+        ]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap();
+        assert!(status.quiet);
+        assert_eq!(status.text.lines().count(), 1);
+        assert!(
+            status
+                .text
+                .starts_with("ok: notebook quiet — 1 tasks, 0 decisions, 1 notes, 0 questions."),
+            "unexpected quiet line: {}",
+            status.text
+        );
+        assert!(status.text.contains("anb --help"));
+    }
+
+    #[test]
+    fn an_active_task_is_the_in_flight_line_with_its_last_log_line() {
+        let body = "Acceptance: the ladder holds.\n\n- 2026-08-25 claude: stopped at the ladder\n";
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &record_file("task.demo", "task", "active", &[], body),
+        )]);
+        let text = status_text(&mut storage);
+        assert!(
+            text.contains("in-flight: task.demo \"A demo record\"\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("log: - 2026-08-25 claude: stopped at the ladder\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_dashboard_opens_on_ready_work_alone() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap();
+        assert!(!status.quiet);
+        assert!(
+            status.text.contains("ready[1]{id,priority,age,title}:\n"),
+            "{}",
+            status.text
+        );
+    }
+
+    #[test]
+    fn the_dashboard_opens_on_debt_alone() {
+        // A routed question is settled; the open one aged past fourteen days.
+        let mut storage = storage_with(&[(
+            "questions/question.demo.md",
+            "---\nid: question.demo\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n",
+        )]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap();
+        assert!(!status.quiet);
+        assert!(
+            status.text.contains("question-age: question.demo (26d)"),
+            "{}",
+            status.text
+        );
+    }
+
+    #[test]
+    fn rules_alone_do_not_open_the_gate() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.demo.md",
+            &record_file("decision.demo", "decision", "active", &["kind: rule"], ""),
+        )]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap();
+        assert!(
+            status.quiet,
+            "a standing rule is not work in motion: {}",
+            status.text
+        );
+    }
+
+    #[test]
+    fn a_ready_row_carries_priority_age_and_title() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            "---\nid: task.demo\ntype: task\nstate: open\ntitle: A demo record\npriority: 1\ncreated: 2026-08-24\n---\n",
+        )]);
+        let text = status_text(&mut storage);
+        assert!(text.contains("  task.demo,1,3d,A demo record\n"), "{text}");
+    }
+
+    #[test]
+    fn an_unprioritized_ready_row_shows_a_dash() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            "---\nid: task.demo\ntype: task\nstate: open\ntitle: A demo record\ncreated: 2026-08-27\n---\n",
+        )]);
+        let text = status_text(&mut storage);
+        assert!(text.contains("  task.demo,-,0d,A demo record\n"), "{text}");
+    }
+
+    #[test]
+    fn a_ready_title_with_a_comma_is_json_quoted() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            "---\nid: task.demo\ntype: task\nstate: open\ntitle: Sort, then trim\ncreated: 2026-08-27\n---\n",
+        )]);
+        let text = status_text(&mut storage);
+        assert!(
+            text.contains("  task.demo,-,0d,\"Sort, then trim\"\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn more_ready_than_five_rows_shows_five_and_the_shorter_hint() {
+        let files: Vec<(String, String)> = (0..7)
+            .map(|index| {
+                (
+                    format!("tasks/task.t{index}.md"),
+                    format!(
+                        "---\nid: task.t{index}\ntype: task\nstate: open\ntitle: A demo record\ncreated: 2026-08-2{}\n---\n",
+                        index % 8
+                    ),
+                )
+            })
+            .collect();
+        let mut storage = MemoryStorage::from_files(files);
+        let text = status_text(&mut storage);
+        assert!(
+            text.contains("ready[5]{id,priority,age,title}:\n"),
+            "{text}"
+        );
+        assert_eq!(text.matches("\n  task.").count(), 5, "{text}");
+        assert!(text.contains("  … 2 more: anb ready\n"), "{text}");
+    }
+
+    #[test]
+    fn standing_rules_list_live_rule_decisions_only() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.rule.md",
+                &record_file("decision.rule", "decision", "active", &["kind: rule"], ""),
+            ),
+            (
+                "decisions/decision.shape.md",
+                &record_file("decision.shape", "decision", "active", &["kind: shape"], ""),
+            ),
+            (
+                "decisions/decision.dead.md",
+                &record_file("decision.dead", "decision", "retired", &["kind: rule"], ""),
+            ),
+            ("tasks/task.demo.md", &task_file("open", &[])),
+        ]);
+        let text = status_text(&mut storage);
+        assert!(
+            text.contains("rules[1]:\n  decision.rule: A demo record\n"),
+            "{text}"
+        );
+        assert!(!text.contains("decision.shape"), "{text}");
+        assert!(!text.contains("decision.dead"), "{text}");
+    }
+
+    #[test]
+    fn a_review_task_is_named_waiting_on_a_human() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("review", &[]))]);
+        let text = status_text(&mut storage);
+        assert!(
+            text.contains("review[1]: task.demo — waiting on a human\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn an_in_flight_title_with_a_quote_is_escaped() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            "---\nid: task.demo\ntype: task\nstate: active\ntitle: Fix the \"quiet\" line\ncreated: 2026-08-24\n---\n",
+        )]);
+        let text = status_text(&mut storage);
+        assert!(
+            text.contains("in-flight: task.demo \"Fix the \\\"quiet\\\" line\"\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn counts_span_live_records_of_every_type_and_skip_the_archive() {
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task_file("open", &[])),
+            (
+                "decisions/decision.demo.md",
+                &record_file("decision.demo", "decision", "active", &[], ""),
+            ),
+            (
+                "notes/note.demo.md",
+                &record_file("note.demo", "note", "active", &[], ""),
+            ),
+            (
+                "questions/question.demo.md",
+                &record_file("question.demo", "question", "open", &[], ""),
+            ),
+            (
+                "archive/tasks/task.done.md",
+                &record_file("task.done", "task", "closed", &[], ""),
+            ),
+        ]);
+        let text = status_text(&mut storage);
+        assert!(
+            text.starts_with("ok: notebook — 1 tasks, 1 decisions, 1 notes, 1 questions\n"),
+            "{text}"
+        );
+    }
+}
+
+mod debt_signals {
+    use super::*;
+
+    /// A record whose clock is under the test's control: `updated` is the
+    /// override this module is about.
+    fn aged(id: &str, type_word: &str, state: &str, updated: &str, extra: &[&str]) -> String {
+        let mut lines = extra.join("\n");
+        if !lines.is_empty() {
+            lines.push('\n');
+        }
+        format!(
+            "---\nid: {id}\ntype: {type_word}\nstate: {state}\ntitle: A demo record\n{lines}created: 2026-08-01\nupdated: {updated}\n---\n"
+        )
+    }
+
+    fn debt_of(storage: &mut MemoryStorage) -> Vec<DebtSignal> {
+        Notebook::new(storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap()
+            .debt
+    }
+
+    #[test]
+    fn an_active_task_untouched_for_seven_days_is_stale() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged("task.demo", "task", "active", "2026-08-20", &[]),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::TaskStale {
+                id: "task.demo".into(),
+                days: 7
+            }]
+        );
+    }
+
+    #[test]
+    fn six_quiet_days_are_not_yet_stale() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged("task.demo", "task", "active", "2026-08-21", &[]),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_held_task_gone_quiet_is_hold_quiet_not_task_stale() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged(
+                "task.demo",
+                "task",
+                "active",
+                "2026-08-13",
+                &["hold: waiting on the owner"],
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::HoldQuiet {
+                id: "task.demo".into(),
+                days: 14
+            }]
+        );
+    }
+
+    #[test]
+    fn a_fresh_hold_is_not_debt_even_on_a_stale_clock_threshold() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged(
+                "task.demo",
+                "task",
+                "active",
+                "2026-08-20",
+                &["hold: waiting on the owner"],
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_free_standing_question_ages_at_fourteen_days() {
+        let mut storage = storage_with(&[(
+            "questions/question.demo.md",
+            &aged("question.demo", "question", "open", "2026-08-13", &[]),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::QuestionAge {
+                id: "question.demo".into(),
+                days: 14
+            }]
+        );
+    }
+
+    #[test]
+    fn a_task_born_question_ages_faster_than_a_free_standing_one() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.parked.md",
+                &aged(
+                    "question.parked",
+                    "question",
+                    "open",
+                    "2026-08-20",
+                    &["from: task.origin"],
+                ),
+            ),
+            (
+                "questions/question.free.md",
+                &aged("question.free", "question", "open", "2026-08-20", &[]),
+            ),
+            (
+                "tasks/task.origin.md",
+                &record_file("task.origin", "task", "active", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::QuestionAge {
+                id: "question.parked".into(),
+                days: 7
+            }]
+        );
+    }
+
+    #[test]
+    fn a_question_surfaces_the_moment_its_origin_task_closes() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.parked.md",
+                &aged(
+                    "question.parked",
+                    "question",
+                    "open",
+                    TODAY,
+                    &["from: task.origin"],
+                ),
+            ),
+            (
+                "tasks/task.origin.md",
+                &record_file("task.origin", "task", "closed", &["closed: 2026-08-26"], ""),
+            ),
+        ]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::OriginClosed {
+                id: "question.parked".into(),
+                origin: "task.origin".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_review_task_waiting_seven_days_surfaces() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged("task.demo", "task", "review", "2026-08-20", &[]),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::ReviewWait {
+                id: "task.demo".into(),
+                days: 7
+            }]
+        );
+    }
+
+    #[test]
+    fn a_review_by_date_surfaces_on_its_own_day_on_any_record() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &aged(
+                "note.demo",
+                "note",
+                "active",
+                TODAY,
+                &[&format!("review-by: {TODAY}")],
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::ReviewDue {
+                id: "note.demo".into(),
+                date: TODAY.into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_future_review_by_stays_silent() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &aged(
+                "note.demo",
+                "note",
+                "active",
+                TODAY,
+                &["review-by: 2026-09-15"],
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_dangling_mention_names_the_citer_and_the_target() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "The fix waits on task.gone.\n",
+            ),
+        )]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap();
+        assert_eq!(
+            status.debt,
+            vec![DebtSignal::DanglingMention {
+                id: "note.demo".into(),
+                target: "task.gone".into()
+            }]
+        );
+        assert!(
+            status
+                .text
+                .contains("  dangling-mention: note.demo -> task.gone\n"),
+            "{}",
+            status.text
+        );
+    }
+
+    #[test]
+    fn a_mention_of_an_existing_record_is_not_debt() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.demo.md",
+                &record_file(
+                    "note.demo",
+                    "note",
+                    "active",
+                    &[],
+                    "See task.demo for the plan.\n",
+                ),
+            ),
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["closed: 2026-08-26"]),
+            ),
+        ]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_compound_word_does_not_cite() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "The subtask.gone helper and task.goneBar are prose, not citations.\n",
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_sentence_final_mention_cites_without_its_dot() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "Blocked by task.gone.\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::DanglingMention {
+                id: "note.demo".into(),
+                target: "task.gone".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_repeated_mention_is_one_line() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "task.gone above, task.gone again.\n",
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage).len(), 1);
+    }
+
+    #[test]
+    fn two_live_decisions_citing_without_an_edge_are_one_pair_with_both_authors() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.a.md",
+                &record_file(
+                    "decision.a",
+                    "decision",
+                    "active",
+                    &["by: supolka"],
+                    "This tightens decision.b without replacing it.\n",
+                ),
+            ),
+            (
+                "decisions/decision.b.md",
+                &record_file(
+                    "decision.b",
+                    "decision",
+                    "active",
+                    &["by: supolka", "via: claude-code"],
+                    "And decision.a is the counterpart.\n",
+                ),
+            ),
+        ]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap();
+        let pairs: Vec<&DebtSignal> = status
+            .debt
+            .iter()
+            .filter(|signal| matches!(signal, DebtSignal::UndeclaredPair { .. }))
+            .collect();
+        assert_eq!(pairs.len(), 1, "both directions of citation are one pair");
+        assert!(
+            status.text.contains(
+                "  undeclared-pair: decision.a (supolka) <-> decision.b (supolka/claude-code)\n"
+            ),
+            "{}",
+            status.text
+        );
+    }
+
+    #[test]
+    fn a_declared_link_edge_silences_the_pair() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.a.md",
+                &record_file(
+                    "decision.a",
+                    "decision",
+                    "active",
+                    &["link: see decision.b"],
+                    "This tightens decision.b without replacing it.\n",
+                ),
+            ),
+            (
+                "decisions/decision.b.md",
+                &record_file("decision.b", "decision", "active", &[], ""),
+            ),
+        ]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn an_invalid_record_is_a_debt_line_with_its_error_count_and_no_clock() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged("task.demo", "task", "wandering", "2026-08-01", &[]),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::Invalid {
+                path: "tasks/task.demo.md".into(),
+                errors: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn a_review_task_six_days_in_is_not_yet_debt() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged("task.demo", "task", "review", "2026-08-21", &[]),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn origin_closed_outranks_the_age_clock_when_both_would_fire() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.parked.md",
+                &aged(
+                    "question.parked",
+                    "question",
+                    "open",
+                    "2026-08-10",
+                    &["from: task.origin"],
+                ),
+            ),
+            (
+                "tasks/task.origin.md",
+                &record_file("task.origin", "task", "closed", &["closed: 2026-08-26"], ""),
+            ),
+        ]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::OriginClosed {
+                id: "question.parked".into(),
+                origin: "task.origin".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_closed_task_still_carrying_a_hold_line_does_not_tick() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged(
+                "task.demo",
+                "task",
+                "closed",
+                "2026-08-01",
+                &["hold: parked before the close", "closed: 2026-08-02"],
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_dead_lifecycle_state_silences_review_by() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.demo.md",
+                &aged(
+                    "decision.demo",
+                    "decision",
+                    "superseded",
+                    "2026-08-01",
+                    &["superseded-by: decision.next", "review-by: 2026-08-10"],
+                ),
+            ),
+            (
+                "decisions/decision.next.md",
+                &record_file(
+                    "decision.next",
+                    "decision",
+                    "active",
+                    &["supersedes: decision.demo"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_record_in_the_wrong_directory_resolves_nothing() {
+        // The referenced file exists only under `tasks/`; as a `note.*` id it
+        // resolves nowhere, so the referrer is excluded from the clocks and
+        // both files are listed invalid.
+        let mut storage = storage_with(&[
+            (
+                "tasks/note.helper.md",
+                &record_file("note.helper", "note", "active", &[], ""),
+            ),
+            (
+                "tasks/task.demo.md",
+                &aged(
+                    "task.demo",
+                    "task",
+                    "active",
+                    "2026-08-10",
+                    &["from: note.helper"],
+                ),
+            ),
+        ]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![
+                DebtSignal::Invalid {
+                    path: "tasks/note.helper.md".into(),
+                    errors: 1
+                },
+                DebtSignal::Invalid {
+                    path: "tasks/task.demo.md".into(),
+                    errors: 1
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_invalid_counterpart_cannot_enter_an_undeclared_pair() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.a.md",
+                &record_file(
+                    "decision.a",
+                    "decision",
+                    "active",
+                    &[],
+                    "This tightens decision.b without replacing it.\n",
+                ),
+            ),
+            (
+                "decisions/decision.b.md",
+                "---\nid: decision.b\ntype: decision\nstate: active\ntitle: A demo record\ncreated: 2026-8-4\n---\n",
+            ),
+        ]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::Invalid {
+                path: "decisions/decision.b.md".into(),
+                errors: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn pairs_rank_by_the_older_members_created_date() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.young.md",
+                "---\nid: decision.young\ntype: decision\nstate: active\ntitle: A demo record\ncreated: 2026-08-20\n---\n\nSee decision.newish.\n",
+            ),
+            (
+                "decisions/decision.newish.md",
+                "---\nid: decision.newish\ntype: decision\nstate: active\ntitle: A demo record\ncreated: 2026-08-18\n---\n",
+            ),
+            (
+                "decisions/decision.old.md",
+                "---\nid: decision.old\ntype: decision\nstate: active\ntitle: A demo record\ncreated: 2026-08-02\n---\n\nSee decision.older.\n",
+            ),
+            (
+                "decisions/decision.older.md",
+                "---\nid: decision.older\ntype: decision\nstate: active\ntitle: A demo record\ncreated: 2026-08-01\n---\n",
+            ),
+        ]);
+        let pair_firsts: Vec<String> = debt_of(&mut storage)
+            .iter()
+            .filter_map(|signal| match signal {
+                DebtSignal::UndeclaredPair { first, .. } => Some(first.id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            pair_firsts,
+            vec!["decision.old".to_owned(), "decision.newish".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_config_stale_threshold_moves_the_task_clock() {
+        let mut storage = storage_with(&[
+            ("config", "debt-task-stale: 2\n"),
+            (
+                "tasks/task.demo.md",
+                &aged("task.demo", "task", "active", "2026-08-25", &[]),
+            ),
+        ]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::TaskStale {
+                id: "task.demo".into(),
+                days: 2
+            }]
+        );
+    }
+
+    #[test]
+    fn a_trailing_hyphen_falls_off_a_mention() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "See task.gone- for why.\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::DanglingMention {
+                id: "note.demo".into(),
+                target: "task.gone".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_dotted_chain_cites_up_to_its_first_stop() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "See task.foo.bar here.\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::DanglingMention {
+                id: "note.demo".into(),
+                target: "task.foo".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn an_underscore_prefix_blocks_a_mention() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "The _task.gone symbol is code.\n",
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn an_id_past_sixty_four_bytes_is_not_a_mention() {
+        let long_slug = "a".repeat(70);
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                &format!("See task.{long_slug} maybe.\n"),
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_scan_is_not_a_parse_so_a_code_fence_still_cites() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "```\nanb view task.gone\n```\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::DanglingMention {
+                id: "note.demo".into(),
+                target: "task.gone".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn six_dangling_mentions_render_five_lines_and_a_hint() {
+        let body = "task.gone0 task.gone1 task.gone2 task.gone3 task.gone4 task.gone5";
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file("note.demo", "note", "active", &[], &format!("{body}\n")),
+        )]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap();
+        assert_eq!(status.debt.len(), 6, "the model keeps every signal");
+        assert_eq!(
+            status.text.matches("dangling-mention:").count(),
+            5,
+            "{}",
+            status.text
+        );
+        assert!(
+            status.text.contains("  … 1 more dangling mentions\n"),
+            "{}",
+            status.text
+        );
+    }
+
+    #[test]
+    fn archived_records_do_not_age() {
+        let mut storage = storage_with(&[(
+            "archive/questions/question.demo.md",
+            &aged("question.demo", "question", "open", "2026-06-01", &[]),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn debt_orders_classes_by_the_clock_table_and_oldest_first_within() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.older.md",
+                &aged("task.older", "task", "active", "2026-08-10", &[]),
+            ),
+            (
+                "tasks/task.newer.md",
+                &aged("task.newer", "task", "active", "2026-08-19", &[]),
+            ),
+            (
+                "questions/question.demo.md",
+                &aged("question.demo", "question", "open", "2026-08-01", &[]),
+            ),
+        ]);
+        let codes_and_ids: Vec<(String, String)> = debt_of(&mut storage)
+            .iter()
+            .map(|signal| match signal {
+                DebtSignal::TaskStale { id, .. } => ("task-stale".into(), id.clone()),
+                DebtSignal::QuestionAge { id, .. } => ("question-age".into(), id.clone()),
+                other => panic!("unexpected signal {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            codes_and_ids,
+            vec![
+                ("task-stale".to_owned(), "task.older".to_owned()),
+                ("task-stale".to_owned(), "task.newer".to_owned()),
+                ("question-age".to_owned(), "question.demo".to_owned()),
+            ]
+        );
+    }
+}
+
+mod budget_ladder {
+    use super::*;
+
+    /// A notebook with every section populated: an in-flight Task with a
+    /// log, review work, rules, seven ready rows, and aged debt.
+    fn full_notebook() -> MemoryStorage {
+        let mut files: Vec<(String, String)> = vec![
+            (
+                "tasks/task.flight.md".into(),
+                record_file(
+                    "task.flight",
+                    "task",
+                    "active",
+                    &[],
+                    "- 2026-08-25 claude: stopped at the ladder\n",
+                ),
+            ),
+            (
+                "tasks/task.waiting.md".into(),
+                record_file("task.waiting", "task", "review", &[], ""),
+            ),
+            (
+                "decisions/decision.rule.md".into(),
+                record_file("decision.rule", "decision", "active", &["kind: rule"], ""),
+            ),
+            (
+                "questions/question.aged.md".into(),
+                "---\nid: question.aged\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n"
+                    .into(),
+            ),
+        ];
+        for index in 0..7 {
+            files.push((
+                format!("tasks/task.r{index}.md"),
+                format!(
+                    "---\nid: task.r{index}\ntype: task\nstate: open\ntitle: A demo record\ncreated: 2026-08-2{}\n---\n",
+                    index % 8
+                ),
+            ));
+        }
+        MemoryStorage::from_files(files)
+    }
+
+    struct Rendered {
+        text: String,
+        spent: u32,
+    }
+
+    fn rendered(budget: Budget) -> Rendered {
+        let mut storage = full_notebook();
+        let status = Notebook::new(&mut storage).status(TODAY, budget).unwrap();
+        Rendered {
+            text: status.text,
+            spent: status.spent,
+        }
+    }
+
+    #[test]
+    fn an_unbounded_budget_prints_every_section_and_the_no_ceiling_line() {
+        let full = rendered(Budget::Unbounded);
+        for section in [
+            "in-flight: task.flight",
+            "log: - 2026-08-25 claude: stopped at the ladder",
+            "review[1]: task.waiting — waiting on a human",
+            "rules[1]:",
+            "ready[5]{id,priority,age,title}:",
+            "  … 2 more: anb ready",
+            "debt[",
+        ] {
+            assert!(
+                full.text.contains(section),
+                "missing `{section}` in: {}",
+                full.text
+            );
+        }
+        assert!(
+            full.text
+                .contains(&format!("budget: ~{} tokens (no ceiling)\n", full.spent))
+        );
+        assert!(!full.text.contains("cut:"), "{}", full.text);
+    }
+
+    #[test]
+    fn a_fitting_budget_cuts_nothing_and_reports_spent_over_ceiling() {
+        let comfortable = rendered(Budget::Tokens(1500));
+        assert!(comfortable.spent <= 1500);
+        assert!(
+            comfortable
+                .text
+                .contains(&format!("budget: ~{}/1500 tokens\n", comfortable.spent)),
+            "{}",
+            comfortable.text
+        );
+        assert!(!comfortable.text.contains("cut:"), "{}", comfortable.text);
+    }
+
+    /// The ladder's fixed order, read off a descending budget sweep: ready
+    /// rows go first, then debt collapses, then rules, then the log line —
+    /// never the other way around — and the text fits every budget the
+    /// floor has not been forced past.
+    #[test]
+    fn sections_degrade_in_the_fixed_order_as_the_budget_shrinks() {
+        let mut stages = Vec::new();
+        for ceiling in [
+            400, 150, 130, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 1,
+        ] {
+            let step = rendered(Budget::Tokens(ceiling));
+            let ready_rows = step.text.matches("\n  task.").count();
+            let debt_itemized = step.text.contains("debt[");
+            let rules_itemized = step.text.contains("rules[");
+            let has_log = step.text.contains("log: ");
+            let floor = !step.text.contains("ready") && !step.text.contains("debt");
+
+            assert!(
+                debt_itemized || ready_rows == 0,
+                "debt collapsed while ready rows remain at {ceiling}: {}",
+                step.text
+            );
+            assert!(
+                rules_itemized || !debt_itemized,
+                "rules collapsed before debt at {ceiling}: {}",
+                step.text
+            );
+            assert!(
+                has_log || !rules_itemized,
+                "the log dropped before rules collapsed at {ceiling}: {}",
+                step.text
+            );
+            assert!(
+                step.spent <= ceiling || floor,
+                "over budget without reaching the floor at {ceiling}: ~{} tokens: {}",
+                step.spent,
+                step.text
+            );
+            if step.text.contains("cut:") {
+                assert!(step.text.contains("anb status --budget 0"), "{}", step.text);
+            }
+            let review_collapsed = step.text.contains("review: 1");
+            if review_collapsed && !floor {
+                assert!(
+                    step.text.contains("review\u{2192}count"),
+                    "a collapsed review list must be named as cut at {ceiling}: {}",
+                    step.text
+                );
+            }
+            if !has_log && !floor {
+                assert!(
+                    step.text.contains("log"),
+                    "a dropped log line must be named as cut at {ceiling}: {}",
+                    step.text
+                );
+            }
+            stages.push((ready_rows, debt_itemized, rules_itemized, has_log));
+        }
+        let mut previous = stages[0];
+        for stage in stages {
+            assert!(
+                stage.0 <= previous.0
+                    && (!stage.1 || previous.1)
+                    && (!stage.2 || previous.2)
+                    && (!stage.3 || previous.3),
+                "a smaller budget restored a section: {stage:?} after {previous:?}"
+            );
+            previous = stage;
+        }
+    }
+
+    /// The number on the budget line must never understate the text it sits
+    /// in: it is the sum of per-part estimates, so it may exceed the whole
+    /// text's estimate by the one rounding token, never fall under it.
+    #[test]
+    fn the_reported_spent_never_understates_the_text() {
+        for ceiling in [
+            Budget::Unbounded,
+            Budget::Tokens(1500),
+            Budget::Tokens(100),
+            Budget::Tokens(1),
+        ] {
+            let step = {
+                let mut storage = full_notebook();
+                Notebook::new(&mut storage).status(TODAY, ceiling).unwrap()
+            };
+            let whole = anb_core::estimate_tokens(&step.text);
+            assert!(
+                step.spent >= whole && step.spent <= whole + 1,
+                "spent ~{} vs whole-text estimate {whole}:\n{}",
+                step.spent,
+                step.text
+            );
+        }
+    }
+
+    #[test]
+    fn a_cut_note_never_names_a_log_line_that_did_not_exist() {
+        // Ready work only: the gate opens with no active Task and no log.
+        let files: Vec<(String, String)> = (0..6)
+            .map(|index| {
+                (
+                    format!("tasks/task.r{index}.md"),
+                    format!(
+                        "---\nid: task.r{index}\ntype: task\nstate: open\ntitle: A demo record\ncreated: 2026-08-2{}\n---\n",
+                        index % 8
+                    ),
+                )
+            })
+            .collect();
+        for ceiling in [200, 100, 60, 40, 20, 10, 2] {
+            let mut storage = MemoryStorage::from_files(files.clone());
+            let status = Notebook::new(&mut storage)
+                .status(TODAY, Budget::Tokens(ceiling))
+                .unwrap();
+            if let Some(cut) = status.text.split("cut: ").nth(1) {
+                assert!(
+                    !cut.contains("log"),
+                    "no log line existed to cut at {ceiling}: {}",
+                    status.text
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_floor_keeps_counts_in_flight_and_the_budget_line() {
+        let floor = rendered(Budget::Tokens(1));
+        let lines: Vec<&str> = floor.text.lines().collect();
+        assert_eq!(lines.len(), 3, "{}", floor.text);
+        assert!(lines[0].starts_with("ok: notebook — "), "{}", floor.text);
+        assert!(
+            lines[1].starts_with("in-flight: task.flight"),
+            "{}",
+            floor.text
+        );
+        assert!(
+            lines[2].starts_with(&format!(
+                "budget: ~{}/1 tokens; cut: all but in-flight",
+                floor.spent
+            )),
+            "the floor ships over budget, reported honestly: {}",
+            floor.text
+        );
+    }
+
+    #[test]
+    fn a_quiet_notebook_ignores_the_ladder() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &task_file("closed", &["closed: 2026-08-25"]),
+        )]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Tokens(1))
+            .unwrap();
+        assert!(status.quiet);
+        assert!(
+            status.text.starts_with("ok: notebook quiet — "),
+            "{}",
+            status.text
+        );
+    }
+
+    /// The Budget regression fixture. The 350 is a pin, not a derivation:
+    /// this notebook's dashboard measured 212 true o200k tokens before the
+    /// rules, review, and log sections existed (2026-08-25), and the pin
+    /// grants those plus the estimator's overshoot their room. Growth past
+    /// it is dashboard bloat, and a budget-line regression is a failure.
+    #[test]
+    fn a_sixty_task_notebook_fits_the_default_budget_with_headroom() {
+        let mut files: Vec<(String, String)> = vec![(
+            "tasks/task.flight.md".into(),
+            record_file(
+                "task.flight",
+                "task",
+                "active",
+                &[],
+                "- 2026-08-25 claude: stopped at the ladder\n",
+            ),
+        )];
+        for index in 0..59 {
+            let state = if index % 3 == 0 { "open" } else { "closed" };
+            files.push((
+                format!("tasks/task.t{index}.md"),
+                format!(
+                    "---\nid: task.t{index}\ntype: task\nstate: {state}\ntitle: Parser accepts budget handling in the fences path\npriority: {}\ncreated: 2026-08-1{}\n---\n",
+                    index % 5,
+                    index % 10,
+                ),
+            ));
+        }
+        for index in 0..20 {
+            let kind = if index % 4 == 0 { "rule" } else { "shape" };
+            files.push((
+                format!("decisions/decision.d{index}.md"),
+                format!(
+                    "---\nid: decision.d{index}\ntype: decision\nstate: active\nkind: {kind}\ntitle: Never render the archive without a stated reason\ncreated: 2026-08-12\n---\n"
+                ),
+            ));
+        }
+        for index in 0..30 {
+            files.push((
+                format!("notes/note.n{index}.md"),
+                format!(
+                    "---\nid: note.n{index}\ntype: note\nstate: active\nkind: fact\ntitle: The renderer keeps every byte it did not touch\ncreated: 2026-08-12\n---\n"
+                ),
+            ));
+        }
+        for index in 0..15 {
+            files.push((
+                format!("questions/question.q{index}.md"),
+                format!(
+                    "---\nid: question.q{index}\ntype: question\nstate: open\ntitle: Does the ladder hold on compaction\ncreated: 2026-08-2{}\nupdated: 2026-08-2{}\n---\n",
+                    index % 8,
+                    index % 8,
+                ),
+            ));
+        }
+        let mut storage = MemoryStorage::from_files(files);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Tokens(1500))
+            .unwrap();
+        assert!(!status.text.contains("cut:"), "{}", status.text);
+        assert!(
+            status.spent <= 350,
+            "the dashboard grew past the pinned budget: ~{} tokens:\n{}",
+            status.spent,
+            status.text
+        );
+    }
+}
+
+mod notebook_config {
+    use super::*;
+
+    #[test]
+    fn an_absent_config_is_the_default_budget() {
+        let mut storage = MemoryStorage::new();
+        let config = Notebook::new(&mut storage).config().unwrap();
+        assert_eq!(config.budget(), Budget::Tokens(1500));
+    }
+
+    #[test]
+    fn budget_zero_in_the_config_disables_the_ceiling() {
+        let mut storage = storage_with(&[("config", "budget: 0\n")]);
+        let config = Notebook::new(&mut storage).config().unwrap();
+        assert_eq!(config.budget(), Budget::Unbounded);
+    }
+
+    #[test]
+    fn a_config_budget_is_the_resolved_ceiling() {
+        let mut storage = storage_with(&[("config", "budget: 400\n")]);
+        let config = Notebook::new(&mut storage).config().unwrap();
+        assert_eq!(config.budget(), Budget::Tokens(400));
+    }
+
+    #[test]
+    fn an_unknown_config_key_is_a_warning_in_check() {
+        let mut storage = storage_with(&[("config", "budgett: 400\n")]);
+        let findings = Notebook::new(&mut storage).check().unwrap();
+        assert!(
+            findings.iter().any(|located| located.path == "config"
+                && located.finding.code == FindingCode::UnknownField),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_value_keeps_the_default_and_check_names_it() {
+        let mut storage = storage_with(&[("config", "budget: many\n")]);
+        let notebook = Notebook::new(&mut storage);
+        assert_eq!(notebook.config().unwrap().budget(), Budget::Tokens(1500));
+        let findings = notebook.check().unwrap();
+        assert!(
+            findings
+                .iter()
+                .any(|located| located.path == "config"
+                    && located.finding.code == FindingCode::BadValue),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn a_duplicate_config_key_is_named_and_the_first_value_wins() {
+        let mut storage = storage_with(&[("config", "budget: 300\nbudget: 900\n")]);
+        let notebook = Notebook::new(&mut storage);
+        assert_eq!(notebook.config().unwrap().budget(), Budget::Tokens(300));
+        let findings = notebook.check().unwrap();
+        assert!(
+            findings.iter().any(|located| located.path == "config"
+                && located.finding.code == FindingCode::DuplicateField),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn a_line_that_is_not_a_field_is_a_bad_envelope_line() {
+        let mut storage = storage_with(&[("config", "just prose\n")]);
+        let findings = Notebook::new(&mut storage).check().unwrap();
+        assert!(
+            findings.iter().any(|located| located.path == "config"
+                && located.finding.code == FindingCode::BadEnvelopeLine),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn a_config_threshold_moves_the_clock() {
+        let mut storage = storage_with(&[
+            ("config", "debt-question-age: 3\n"),
+            (
+                "questions/question.demo.md",
+                "---\nid: question.demo\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-24\n---\n",
+            ),
+        ]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded)
+            .unwrap();
+        assert_eq!(
+            status.debt,
+            vec![DebtSignal::QuestionAge {
+                id: "question.demo".into(),
+                days: 3
+            }]
         );
     }
 }

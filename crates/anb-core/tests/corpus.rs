@@ -1,4 +1,4 @@
-//! The corpus from the format spec's §8: every almost-valid file yields its
+//! The negative corpus: every almost-valid file yields its
 //! named findings and keeps its bytes; every valid file — the body-sovereignty
 //! cases above all — round-trips byte-exact.
 //!

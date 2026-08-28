@@ -3,13 +3,20 @@
 //! The Core runs with no filesystem, git, or network access: all data flows
 //! through the [`storage::Storage`] seam, fed by the host.
 
+pub mod config;
+pub mod debt;
 pub mod finding;
 pub mod grammar;
 mod graph;
+mod mention;
 pub mod notebook;
 pub mod record;
+pub mod status;
 pub mod storage;
+pub mod tokens;
 
+pub use config::Config;
+pub use debt::{Cited, DebtSignal, DebtThresholds};
 pub use finding::{Finding, FindingCode, Severity};
 pub use grammar::RecordFile;
 pub use notebook::{
@@ -17,4 +24,6 @@ pub use notebook::{
     ReadyTask, Transitioned,
 };
 pub use record::{Record, RecordType, TaskState};
+pub use status::{ActiveTask, Budget, Counts, Status, StatusRule};
 pub use storage::{MemoryStorage, Storage, StorageError};
+pub use tokens::estimate_tokens;
