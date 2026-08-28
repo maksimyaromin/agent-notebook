@@ -317,6 +317,15 @@ impl RecordFile {
         self.field_entries(key).map(|(value, _)| value)
     }
 
+    /// Every field's key and value, in file order — the single-record
+    /// read surface, which shows the envelope as it stands.
+    pub fn fields(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.envelope
+            .iter()
+            .flat_map(Envelope::fields)
+            .map(|field| (field.key.as_str(), field.value.as_str()))
+    }
+
     /// The first occurrence's value and line.
     pub(crate) fn field_entry(&self, key: &str) -> Option<(&str, Option<usize>)> {
         self.envelope
@@ -838,9 +847,11 @@ pub(crate) fn is_date(value: &str) -> bool {
 
 /// The date's civil day number (days since 1970-01-01, Howard Hinnant's
 /// days-from-civil), taking the date part of a timestamp; `None` when the
-/// value is not a valid date. Day arithmetic in the Core is a subtraction of
-/// two of these.
-pub(crate) fn day_number(value: &str) -> Option<i64> {
+/// value is not a valid date. Day arithmetic on notebook dates is a
+/// subtraction of two of these — a host derives ages the same way the
+/// Status clocks do.
+#[must_use]
+pub fn day_number(value: &str) -> Option<i64> {
     let date = match value.split_once('T') {
         Some(_) if !is_timestamp(value) => return None,
         Some((date, _)) => date,

@@ -12,6 +12,7 @@
 //! it names the cut and carries the command that restores it.
 
 use crate::debt::DebtSignal;
+use crate::encode::json_quoted;
 use crate::notebook::ReadyTask;
 use crate::tokens::estimate_tokens;
 use std::fmt::Write as _;
@@ -343,19 +344,7 @@ fn render_ready(out: &mut String, ready: &[ReadyTask], shown: usize, today_day: 
         let _ = writeln!(out, "ready: {} — anb ready", ready.len());
         return;
     }
-    let _ = writeln!(out, "ready[{shown}]{{id,priority,age,title}}:");
-    for task in &ready[..shown] {
-        let priority = task
-            .priority
-            .map_or_else(|| "-".to_owned(), |priority| priority.to_string());
-        let _ = writeln!(
-            out,
-            "  {},{priority},{}d,{}",
-            task.id,
-            age_days(&task.created, today_day),
-            quoted_if_delimited(&task.title)
-        );
-    }
+    out.push_str(&crate::encode::ready_table(ready, shown, today_day));
     if ready.len() > shown {
         let _ = writeln!(out, "  … {} more: anb ready", ready.len() - shown);
     }
@@ -401,22 +390,4 @@ fn render_debt(out: &mut String, debt: &[DebtSignal], ladder: Ladder) {
             let _ = writeln!(out, "  \u{2026} {hidden} more {plural}");
         }
     }
-}
-
-fn age_days(created: &str, today_day: i64) -> i64 {
-    crate::grammar::day_number(created).map_or(0, |day| (today_day - day).max(0))
-}
-
-/// A table value carrying the row delimiter or a quote is JSON-quoted;
-/// everything else stays bare.
-fn quoted_if_delimited(value: &str) -> String {
-    if value.contains(',') || value.contains('"') {
-        json_quoted(value)
-    } else {
-        value.to_owned()
-    }
-}
-
-fn json_quoted(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }

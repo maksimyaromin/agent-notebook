@@ -11,9 +11,12 @@ rust-version = "1.98"
 [workspace.dependencies]
 anb-core = { path = "crates/anb-core" }
 clap = { version = "4.6", features = ["derive"] }
+jiff = "0.2"
+# preserve_order lands reply keys in insertion order, so `ok` leads every object.
+serde_json = { version = "1.0", features = ["preserve_order"] }
 proptest = "1.11"
-# Unused until the first CLI golden test.
 insta = "1.48"
+tempfile = "3.27"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

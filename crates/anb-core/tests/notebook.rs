@@ -454,6 +454,120 @@ mod hold {
     }
 }
 
+mod task_log {
+    use super::*;
+
+    #[test]
+    fn comment_appends_a_dated_authored_entry_and_stamps_updated() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let reply = Notebook::new(&mut storage)
+            .comment(
+                "task.demo",
+                Some("claude-code"),
+                "parser done, tests next",
+                TODAY,
+            )
+            .unwrap();
+        assert!(!reply.already);
+        assert_eq!(
+            reply.entry,
+            "- 2026-08-27 claude-code: parser done, tests next"
+        );
+        assert_eq!(
+            storage.read("tasks/task.demo.md").unwrap(),
+            "---\nid: task.demo\ntype: task\nstate: active\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\n- 2026-08-27 claude-code: parser done, tests next\n"
+        );
+    }
+
+    #[test]
+    fn an_entry_without_an_acting_hand_shows_the_dash() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let reply = Notebook::new(&mut storage)
+            .comment("task.demo", None, "stopped at the render step", TODAY)
+            .unwrap();
+        assert_eq!(reply.entry, "- 2026-08-27 -: stopped at the render step");
+    }
+
+    #[test]
+    fn replaying_the_last_entry_answers_already_and_changes_no_byte() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        Notebook::new(&mut storage)
+            .comment("task.demo", Some("claude-code"), "same note", TODAY)
+            .unwrap();
+        let after_first = storage.read("tasks/task.demo.md").unwrap();
+
+        let replay = Notebook::new(&mut storage)
+            .comment("task.demo", Some("claude-code"), "same note", TODAY)
+            .unwrap();
+        assert!(replay.already);
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), after_first);
+    }
+
+    #[test]
+    fn a_repeated_text_behind_a_newer_entry_is_appended_again() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let mut notebook = Notebook::new(&mut storage);
+        notebook
+            .comment("task.demo", Some("claude-code"), "first note", TODAY)
+            .unwrap();
+        notebook
+            .comment("task.demo", Some("claude-code"), "second note", TODAY)
+            .unwrap();
+        let reply = notebook
+            .comment("task.demo", Some("claude-code"), "first note", TODAY)
+            .unwrap();
+        assert!(!reply.already, "the log is a trail, not a set");
+        let text = storage.read("tasks/task.demo.md").unwrap();
+        assert_eq!(text.matches("first note").count(), 2);
+    }
+
+    #[test]
+    fn an_empty_comment_is_refused_before_any_byte_moves() {
+        let text = task_file("active", &[]);
+        let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
+        let error = Notebook::new(&mut storage)
+            .comment("task.demo", None, "   ", TODAY)
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::InvalidArgument { .. }));
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+    }
+
+    #[test]
+    fn a_comment_carrying_a_newline_cannot_inject_log_lines() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let error = Notebook::new(&mut storage)
+            .comment("task.demo", None, "one line\n- 2026-08-27 -: forged", TODAY)
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::InvalidArgument { .. }));
+    }
+
+    #[test]
+    fn the_state_does_not_gate_the_log() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("closed", &[]))]);
+        let reply = Notebook::new(&mut storage)
+            .comment(
+                "task.demo",
+                None,
+                "closed because the epic absorbed it",
+                TODAY,
+            )
+            .unwrap();
+        assert!(!reply.already);
+    }
+
+    #[test]
+    fn a_comment_on_a_non_task_is_wrong_type() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file("note.demo", "note", "active", &[], ""),
+        )]);
+        let error = Notebook::new(&mut storage)
+            .comment("note.demo", None, "a note", TODAY)
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::WrongType { .. }));
+    }
+}
+
 mod dependency_graph {
     use super::*;
     use anb_core::Edged;
@@ -998,6 +1112,199 @@ mod ready_queue {
                 title: "A demo record".to_owned(),
             }]
         );
+    }
+}
+
+mod listing {
+    use super::*;
+    use anb_core::ListedRecord;
+
+    #[test]
+    fn list_shows_live_valid_records_of_every_type_in_type_major_order() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.q.md",
+                &record_file("question.q", "question", "open", &[], ""),
+            ),
+            (
+                "tasks/task.b.md",
+                &record_file("task.b", "task", "open", &["priority: 1"], ""),
+            ),
+            (
+                "tasks/task.a.md",
+                &record_file("task.a", "task", "active", &[], ""),
+            ),
+            (
+                "decisions/decision.d.md",
+                &record_file("decision.d", "decision", "active", &[], ""),
+            ),
+            (
+                "archive/notes/note.gone.md",
+                &record_file("note.gone", "note", "retired", &[], ""),
+            ),
+        ]);
+        let rows = Notebook::new(&mut storage).list().unwrap();
+        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["task.a", "task.b", "decision.d", "question.q"],
+            "tasks first in file order, then the other types; the archive is history"
+        );
+        assert_eq!(
+            rows[1],
+            ListedRecord {
+                id: "task.b".into(),
+                state: "open".into(),
+                priority: Some(1),
+                title: "A demo record".into(),
+            }
+        );
+        assert_eq!(
+            rows[2].priority, None,
+            "a record without the field carries none"
+        );
+    }
+
+    #[test]
+    fn an_invalid_record_is_excluded_from_the_listing() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &record_file("task.a", "task", "open", &[], ""),
+            ),
+            (
+                "tasks/task.broken.md",
+                &record_file("task.broken", "task", "cancelled", &[], ""),
+            ),
+        ]);
+        let rows = Notebook::new(&mut storage).list().unwrap();
+        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, vec!["task.a"], "check names the broken one");
+    }
+}
+
+mod record_view {
+    use super::*;
+
+    #[test]
+    fn view_shows_the_envelope_as_it_stands_and_the_body_verbatim() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &record_file(
+                "task.demo",
+                "task",
+                "active",
+                &["custom: kept"],
+                "The plan.\n\nStep one.\n",
+            ),
+        )]);
+        let view = Notebook::new(&mut storage).view("task.demo").unwrap();
+        assert_eq!(view.path, "tasks/task.demo.md");
+        assert!(!view.archived);
+        assert_eq!(
+            view.fields,
+            vec![
+                ("id".to_owned(), "task.demo".to_owned()),
+                ("type".to_owned(), "task".to_owned()),
+                ("state".to_owned(), "active".to_owned()),
+                ("title".to_owned(), "A demo record".to_owned()),
+                ("custom".to_owned(), "kept".to_owned()),
+                ("created".to_owned(), "2026-08-24".to_owned()),
+                ("updated".to_owned(), "2026-08-25".to_owned()),
+            ]
+        );
+        assert_eq!(view.body, "The plan.\n\nStep one.\n");
+    }
+
+    #[test]
+    fn the_mention_blocks_cite_and_are_cited_by() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &record_file(
+                    "task.demo",
+                    "task",
+                    "active",
+                    &[],
+                    "Follows decision.chosen; question.missing is still open.\n",
+                ),
+            ),
+            (
+                "decisions/decision.chosen.md",
+                &record_file("decision.chosen", "decision", "active", &[], ""),
+            ),
+            (
+                "notes/note.citing.md",
+                &record_file(
+                    "note.citing",
+                    "note",
+                    "active",
+                    &[],
+                    "Background for task.demo.\n",
+                ),
+            ),
+        ]);
+        let view = Notebook::new(&mut storage).view("task.demo").unwrap();
+        assert_eq!(
+            view.mentions,
+            vec!["decision.chosen", "question.missing"],
+            "a citation is a hint, so a dangling one still shows"
+        );
+        assert_eq!(view.mentioned_by, vec!["note.citing"]);
+    }
+
+    #[test]
+    fn a_record_never_enters_its_own_mention_blocks() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &record_file(
+                "task.demo",
+                "task",
+                "active",
+                &[],
+                "This body cites task.demo itself.\n",
+            ),
+        )]);
+        let view = Notebook::new(&mut storage).view("task.demo").unwrap();
+        assert_eq!(view.mentions, Vec::<String>::new());
+        assert_eq!(view.mentioned_by, Vec::<String>::new());
+    }
+
+    #[test]
+    fn mentioned_by_reads_only_live_records() {
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task_file("active", &[])),
+            (
+                "archive/notes/note.gone.md",
+                &record_file(
+                    "note.gone",
+                    "note",
+                    "retired",
+                    &[],
+                    "Once cited task.demo.\n",
+                ),
+            ),
+        ]);
+        let view = Notebook::new(&mut storage).view("task.demo").unwrap();
+        assert_eq!(view.mentioned_by, Vec::<String>::new());
+    }
+
+    #[test]
+    fn view_of_an_archived_record_marks_it_archived() {
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.done.md",
+            &record_file("task.done", "task", "closed", &[], ""),
+        )]);
+        let view = Notebook::new(&mut storage).view("task.done").unwrap();
+        assert!(view.archived);
+        assert_eq!(view.path, "archive/tasks/task.done.md");
+    }
+
+    #[test]
+    fn view_of_an_unknown_id_is_unknown_id() {
+        let mut storage = storage_with(&[]);
+        let error = Notebook::new(&mut storage).view("task.absent").unwrap_err();
+        assert!(matches!(error, NotebookError::UnknownId { .. }));
     }
 }
 

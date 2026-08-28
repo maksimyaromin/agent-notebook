@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod debt;
+pub mod encode;
 pub mod finding;
 pub mod grammar;
 mod graph;
@@ -20,8 +21,8 @@ pub use debt::{Cited, DebtSignal, DebtThresholds};
 pub use finding::{Finding, FindingCode, Severity};
 pub use grammar::RecordFile;
 pub use notebook::{
-    Closed, Created, Draft, Edged, FileFinding, Held, Link, Notebook, NotebookError, Proof,
-    ReadyTask, Transitioned,
+    Closed, Commented, Created, Draft, Edged, FileFinding, Held, Link, ListedRecord, Notebook,
+    NotebookError, Proof, ReadyTask, Transitioned, View,
 };
 pub use record::{Record, RecordType, TaskState};
 pub use status::{ActiveTask, Budget, Counts, Status, StatusRule};
