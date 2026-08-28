@@ -28,8 +28,8 @@ impl TaskGraph {
         TaskGraph { nodes }
     }
 
-    /// A Task is blocked iff an edge points at a non-closed Task (record
-    /// model spec §4). A target outside the graph blocks nothing: whether it
+    /// A Task is blocked iff an edge points at a non-closed Task. A target
+    /// outside the graph blocks nothing: whether it
     /// dangles is validity, judged elsewhere.
     pub fn is_blocked(&self, id: &str) -> bool {
         let Some(node) = self.nodes.get(id) else {

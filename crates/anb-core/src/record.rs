@@ -2,7 +2,7 @@
 //! Task state machine.
 //!
 //! Types follow the persistence rule — how a record may change, not what it
-//! is about (ADR 0005): a Task closes through its workflow, a Decision dies
+//! is about: a Task closes through its workflow, a Decision dies
 //! only by supersession or retirement, a Note is corrected in place, a
 //! Question closes only by routing. This module judges one record at a time;
 //! rules that need a second record live in the notebook.
@@ -128,8 +128,8 @@ impl TaskState {
     }
 
     /// Decide what `action` comes to from this state, before any byte moves.
-    /// An invalid transition answers with the actions this state does allow
-    /// (US5), so no caller has to learn the state machine.
+    /// An invalid transition answers with the actions this state does allow,
+    /// so no caller has to learn the state machine.
     ///
     /// # Errors
     /// The valid actions from this state, when `action` is not among them.

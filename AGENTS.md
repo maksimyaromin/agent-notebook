@@ -58,6 +58,7 @@ No formal task closure, no commit, and no push ever happens before the review pa
 
 - Lavish is never part of a coding task's review (owner's call, 2026-08-26; who reviews is stage 3's rule). Lavish is for brainstorming and design discussions only — there it runs through the **`grill-with-docs` skill** (`~/dev/skills/skills/engineering/grill-with-docs`), which defines the interview format; the artifact must be fully self-contained: digested proofs with their numbers, worked examples, and diagrams in place — never pointers into `.tmp/docs/research/`.
 - Language: code, comments, commit messages, and docs in English.
+- Committed text is self-contained (owner's call, 2026-08-28): comments, docs, and test data never cite what only `.tmp/` holds — no spec §, research-report, ADR, user-story, or owner-ruling pointers. State the constraint itself; provenance stays in `.tmp/` reports.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Commit and push only when asked.
 - Keep this file short and current: update it when a convention or command changes, remove anything that stops being true.

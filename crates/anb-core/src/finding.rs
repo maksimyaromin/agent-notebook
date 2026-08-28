@@ -2,8 +2,8 @@
 //!
 //! A parse either accepts a file (possibly with warnings) or rejects it with
 //! findings naming the line and reason; silent loss is not an outcome Check
-//! permits. The codes are a closed set defined by the format spec; each layer
-//! adds the codes it can detect.
+//! permits. The codes are a closed, documented set; each layer adds the
+//! codes it can detect.
 
 /// The weight of a finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,8 +15,8 @@ pub enum Severity {
     Warning,
 }
 
-/// The stable kebab-case finding codes: the grammar layer's (S1) and the
-/// record model's (S2).
+/// The stable kebab-case finding codes: the grammar layer's and the
+/// record model's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FindingCode {
     NoEnvelope,

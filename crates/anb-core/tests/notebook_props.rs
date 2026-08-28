@@ -1,4 +1,4 @@
-//! Format-contract properties 3 and 4 (format spec §4) over the notebook's
+//! Format-contract properties over the notebook's
 //! verbs: a verb never touches another record's bytes, and a replayed verb
 //! changes nothing — answering `already: true`, or refusing a move that was
 //! never valid to repeat.
@@ -143,5 +143,70 @@ proptest! {
             BLOCKER,
             "an edge lives on the dependent alone; the blocker's bytes stay"
         );
+    }
+}
+
+/// The Budget contract: whatever the notebook holds and however small the
+/// ceiling, the rendered Status fits it — or the ladder has reached its
+/// floor, which ships regardless because the in-flight line is never
+/// dropped. Section content and section count vary freely; the guarantee
+/// must not.
+mod status_fits_its_budget {
+    use super::*;
+    use anb_core::Budget;
+
+    fn task(index: usize, state: &str, extra: &str) -> (String, String) {
+        (
+            format!("tasks/task.t{index}.md"),
+            format!(
+                "---\nid: task.t{index}\ntype: task\nstate: {state}\ntitle: Task number {index} of this notebook\n{extra}created: 2026-08-1{}\nupdated: 2026-08-2{}\n---\n",
+                index % 10,
+                index % 8,
+            ),
+        )
+    }
+
+    proptest! {
+        #[test]
+        fn any_notebook_fits_any_ceiling_or_stands_on_the_floor(
+            open_tasks in 0usize..8,
+            active_tasks in 0usize..3,
+            aged_questions in 0usize..4,
+            ceiling in 1u32..600,
+        ) {
+            let mut files: Vec<(String, String)> = Vec::new();
+            for index in 0..open_tasks {
+                files.push(task(index, "open", ""));
+            }
+            for index in 0..active_tasks {
+                files.push(task(100 + index, "active", ""));
+            }
+            for index in 0..aged_questions {
+                files.push((
+                    format!("questions/question.q{index}.md"),
+                    format!(
+                        "---\nid: question.q{index}\ntype: question\nstate: open\ntitle: An open doubt\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n"
+                    ),
+                ));
+            }
+            let mut storage = MemoryStorage::from_files(files);
+            let status = Notebook::new(&mut storage)
+                .status(TODAY, Budget::Tokens(ceiling))
+                .unwrap();
+            let at_floor = status
+                .text
+                .lines()
+                .all(|line| {
+                    line.starts_with("ok: notebook")
+                        || line.starts_with("in-flight: ")
+                        || line.starts_with("budget: ")
+                });
+            prop_assert!(
+                status.spent <= ceiling || at_floor,
+                "over ~{} of {ceiling} tokens without reaching the floor:\n{}",
+                status.spent,
+                status.text
+            );
+        }
     }
 }

@@ -79,9 +79,9 @@ const fn repeatable(key: &'static str, form: Form) -> FieldSpec {
     }
 }
 
-/// The field table of the format spec extended by the record model's keys,
-/// each placed beside its kin (`via` after `by`, the workflow fields before
-/// the dates); table position is canonical order. `updated` is written by
+/// The envelope's field table, each key beside its kin (`via` after `by`,
+/// the workflow fields before the dates); table position is canonical
+/// order. `updated` is written by
 /// every mutation, but a hand-made file may lack it, so reading does not
 /// require it.
 const FIELD_TABLE: &[FieldSpec] = &[
@@ -339,7 +339,7 @@ impl RecordFile {
 
     /// Replace `key`'s line with its canonical form, or insert a new line at
     /// the key's canonical position; every other byte of the file stays
-    /// verbatim (format spec §4), so splicing into a CRLF file leaves its
+    /// verbatim, so splicing into a CRLF file leaves its
     /// untouched lines CRLF while the spliced line is canonical LF. Returns
     /// whether any byte changed.
     ///
@@ -407,7 +407,7 @@ impl RecordFile {
         envelope.lines.len() != before
     }
 
-    /// Append one line at EOF — the body's only mutation (format spec §4).
+    /// Append one line at EOF — the body's only mutation.
     /// A missing newline before the appended line is supplied, whether the
     /// file ended inside the envelope or mid-body-line.
     ///
@@ -622,7 +622,7 @@ fn line_content(raw: &str) -> (&str, bool) {
 
 /// Strict on the key, lenient on the separator: any run of spaces or tabs
 /// after `:` is accepted, and the value is trimmed of trailing whitespace.
-fn parse_field_line(content: &str) -> Option<(String, String)> {
+pub(crate) fn parse_field_line(content: &str) -> Option<(String, String)> {
     let (key, rest) = content.split_once(':')?;
     let mut chars = key.chars();
     if !chars.next()?.is_ascii_lowercase() {
@@ -836,6 +836,30 @@ pub(crate) fn is_date(value: &str) -> bool {
     (1..=12).contains(&month) && (1..=days_in_month(year, month)).contains(&day)
 }
 
+/// The date's civil day number (days since 1970-01-01, Howard Hinnant's
+/// days-from-civil), taking the date part of a timestamp; `None` when the
+/// value is not a valid date. Day arithmetic in the Core is a subtraction of
+/// two of these.
+pub(crate) fn day_number(value: &str) -> Option<i64> {
+    let date = match value.split_once('T') {
+        Some(_) if !is_timestamp(value) => return None,
+        Some((date, _)) => date,
+        None => value,
+    };
+    if !is_date(date) {
+        return None;
+    }
+    let year: i64 = date[0..4].parse().ok()?;
+    let month: i64 = date[5..7].parse().ok()?;
+    let day: i64 = date[8..10].parse().ok()?;
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
 fn days_in_month(year: u16, month: u8) -> u8 {
     let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
     match month {
@@ -1017,18 +1041,15 @@ mod tests {
     #[test]
     fn a_repeatable_field_yields_every_occurrence_in_file_order() {
         let mut lines = REQUIRED.to_vec();
-        lines.push("link: doc .tmp/docs/spec-anb-format.md");
+        lines.push("link: doc docs/format.md");
         lines.push("link: pr https://example.com/1");
         let file = RecordFile::parse(&record(&lines, ""));
         assert_eq!(file.findings(), &[]);
         assert_eq!(
             file.field_values("link").collect::<Vec<_>>(),
-            vec![
-                "doc .tmp/docs/spec-anb-format.md",
-                "pr https://example.com/1"
-            ]
+            vec!["doc docs/format.md", "pr https://example.com/1"]
         );
-        assert_eq!(file.field("link"), Some("doc .tmp/docs/spec-anb-format.md"));
+        assert_eq!(file.field("link"), Some("doc docs/format.md"));
     }
 
     #[test]

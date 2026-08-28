@@ -1,4 +1,4 @@
-//! The format contract as properties (format spec §4): parsing is total and
+//! The format contract as properties: parsing is total and
 //! lossless over any input, and normalize is idempotent.
 
 use anb_core::RecordFile;
