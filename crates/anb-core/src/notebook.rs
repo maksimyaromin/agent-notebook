@@ -19,6 +19,7 @@ use crate::debt::{self, DebtSources};
 use crate::finding::{Finding, FindingCode, Severity};
 use crate::grammar::{self, RecordFile};
 use crate::graph::{TaskGraph, TaskNode};
+use crate::mention;
 use crate::record::{Record, RecordType, TaskAction, TaskState, Transition};
 use crate::status::{self, ActiveTask, Budget, Counts, Status, StatusInputs, StatusRule};
 use crate::storage::{Storage, StorageError};
@@ -144,6 +145,36 @@ pub struct Created {
     pub id: String,
     pub path: String,
     pub superseded: Option<String>,
+}
+
+/// A log entry appended; `already` marks the replay of the trail's tail.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Commented {
+    pub id: String,
+    pub entry: String,
+    pub already: bool,
+}
+
+/// One row of the live listing; the id carries the type.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ListedRecord {
+    pub id: String,
+    pub state: String,
+    pub priority: Option<u8>,
+    pub title: String,
+}
+
+/// One record read whole: the envelope as it stands, the body, and the two
+/// derived Mention blocks.
+#[derive(Debug, PartialEq, Eq)]
+pub struct View {
+    pub id: String,
+    pub path: String,
+    pub archived: bool,
+    pub fields: Vec<(String, String)>,
+    pub body: String,
+    pub mentions: Vec<String>,
+    pub mentioned_by: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,6 +409,66 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok(status::assemble(inputs, budget))
     }
 
+    /// The live listing: every live, valid record in type-major file order.
+    /// Invalid records are excluded, as from every derived query; `check`
+    /// names them.
+    ///
+    /// # Errors
+    /// A storage failure.
+    pub fn list(&self) -> Result<Vec<ListedRecord>, NotebookError> {
+        let records = self.read_records()?;
+        let resolvable = resolvable_by_id(&records);
+        Ok(records
+            .iter()
+            .filter(|record| !is_archived(record.path()) && !debt::is_excluded(record, &resolvable))
+            .map(|record| {
+                let file = record.file();
+                ListedRecord {
+                    id: path_stem(record.path()).to_owned(),
+                    state: record.state().unwrap_or_default().to_owned(),
+                    priority: file.field("priority").and_then(|value| value.parse().ok()),
+                    title: file.field("title").unwrap_or_default().to_owned(),
+                }
+            })
+            .collect())
+    }
+
+    /// Read one record whole, live or archived: every envelope field in file
+    /// order, the body, the ids its body cites, and the live records whose
+    /// bodies cite it. A record's own id never enters its blocks. Reading
+    /// never gates: an invalid record shows as it stands.
+    ///
+    /// # Errors
+    /// See [`Notebook::record`].
+    pub fn view(&self, id: &str) -> Result<View, NotebookError> {
+        let record = self.record(id)?;
+        let records = self.read_records()?;
+        let mentions = mention::mentions(record.file().body())
+            .into_iter()
+            .filter(|target| *target != id)
+            .map(str::to_owned)
+            .collect();
+        let mentioned_by = records
+            .iter()
+            .filter(|other| !is_archived(other.path()) && path_stem(other.path()) != id)
+            .filter(|other| mention::mentions(other.file().body()).contains(&id))
+            .map(|other| path_stem(other.path()).to_owned())
+            .collect();
+        Ok(View {
+            id: id.to_owned(),
+            path: record.path().to_owned(),
+            archived: is_archived(record.path()),
+            fields: record
+                .file()
+                .fields()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect(),
+            body: record.file().body().to_owned(),
+            mentions,
+            mentioned_by,
+        })
+    }
+
     /// The notebook config; an absent file is the defaults.
     ///
     /// # Errors
@@ -567,6 +658,57 @@ impl<'a, S: Storage> Notebook<'a, S> {
         self.storage.write(&loaded.path, &file.render())?;
         Ok(Held {
             id: id.to_owned(),
+            already: false,
+        })
+    }
+
+    /// Append one dated log entry to a Task's body — the append-only
+    /// progress trail, in the log convention `- <date> <author>: <text>`.
+    /// The Task's state does not gate the verb: the trail may narrate a
+    /// close as well as the work. Replaying the trail's tail answers
+    /// `already: true` and changes no byte.
+    ///
+    /// # Errors
+    /// [`NotebookError::InvalidArgument`] on an empty or multi-line entry or
+    /// a multi-line author, [`NotebookError::WrongType`],
+    /// [`NotebookError::UnknownId`], [`NotebookError::Archived`],
+    /// [`NotebookError::InvalidRecord`], or a storage failure.
+    pub fn comment(
+        &mut self,
+        id: &str,
+        author: Option<&str>,
+        text: &str,
+        today: &str,
+    ) -> Result<Commented, NotebookError> {
+        guard_today(today)?;
+        let text = text.trim();
+        guard_single_line("comment", text)?;
+        if text.is_empty() {
+            return Err(NotebookError::InvalidArgument {
+                reason: "comment: the text must not be empty".to_owned(),
+            });
+        }
+        let author = author.map(str::trim).filter(|name| !name.is_empty());
+        if let Some(author) = author {
+            guard_single_line("author", author)?;
+        }
+
+        let entry = format!("- {today} {}: {text}", author.unwrap_or("-"));
+        let loaded = self.load_live(id, &[RecordType::Task])?;
+        if last_log_line(&loaded.record).as_deref() == Some(entry.as_str()) {
+            return Ok(Commented {
+                id: id.to_owned(),
+                entry,
+                already: true,
+            });
+        }
+        let mut file = loaded.record.into_file();
+        file.append_body(&entry);
+        file.set_field("updated", today);
+        self.storage.write(&loaded.path, &file.render())?;
+        Ok(Commented {
+            id: id.to_owned(),
+            entry,
             already: false,
         })
     }
@@ -1268,7 +1410,10 @@ fn finding_order(located: &FileFinding) -> (&str, usize, &'static str) {
     )
 }
 
-pub(crate) fn path_stem(path: &str) -> &str {
+/// The id a canonical record path carries: the filename minus `.md`. The
+/// path↔id rule has this one home; a host never re-derives it.
+#[must_use]
+pub fn path_stem(path: &str) -> &str {
     let filename = path.rsplit('/').next().unwrap_or(path);
     filename.strip_suffix(".md").unwrap_or(filename)
 }
