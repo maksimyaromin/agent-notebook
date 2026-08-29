@@ -9,9 +9,9 @@ tags: core
 link: report .tmp/data/c2/report.md
 blocked-by: task.spike-record-model
 blocked-by: task.core-grammar-parser-renderer
-created: 2026-08-29
-updated: 2026-08-29
-closed: 2026-08-29
+created: 2026-08-24
+updated: 2026-08-27
+closed: 2026-08-27
 ---
 
 4 record types, transitions, write-time invariants (supersession, routing, proof-on-close); idempotent mutations with already: true.

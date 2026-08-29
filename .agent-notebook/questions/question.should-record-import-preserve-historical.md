@@ -1,11 +1,12 @@
 ---
 id: question.should-record-import-preserve-historical
 type: question
-state: open
+state: routed
 title: Should record import preserve historical dates?
 by: Maksim Yaromin
 via: claude-code
 from: task.milestone-self-host-switch
+routed-to: decision.envelope-dates-mean-notebook-time
 created: 2026-08-29
 updated: 2026-08-29
 ---

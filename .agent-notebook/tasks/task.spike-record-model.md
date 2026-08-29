@@ -8,9 +8,9 @@ via: claude-code
 tags: spike
 link: report .tmp/data/s2/report.md
 blocked-by: task.spike-storage-format
-created: 2026-08-29
-updated: 2026-08-29
-closed: 2026-08-29
+created: 2026-08-24
+updated: 2026-08-25
+closed: 2026-08-25
 ---
 
 Sweep per research-method.md (agent memory typologies, lifecycle/decay models, knowledge curation). Type sufficiency of the 4 records; lifecycle details (review as optional station per D5); holds; Origin-based aging; multi-user by. Close: spec update + ADR.

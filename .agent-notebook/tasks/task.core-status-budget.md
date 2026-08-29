@@ -8,9 +8,9 @@ via: claude-code
 tags: core
 link: report .tmp/data/c4/report.md
 blocked-by: task.core-record-model-invariants
-created: 2026-08-29
-updated: 2026-08-29
-closed: 2026-08-29
+created: 2026-08-24
+updated: 2026-08-28
+closed: 2026-08-28
 ---
 
 Section assembly by priority; token measurement; 'budget spent / what was cut' line; regression fixtures.
