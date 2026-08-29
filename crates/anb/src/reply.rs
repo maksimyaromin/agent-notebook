@@ -2,7 +2,7 @@
 //! the Core, with nothing rendered yet — both output formats read the same
 //! reply.
 
-use crate::cli::{AddArgs, Command};
+use crate::cli::{AddArgs, Command, DecideArgs, DraftArgs, NoteArgs};
 use anb_core::{
     Budget, Closed, Commented, Created, Draft, Edged, Held, Link, ListedRecord, Notebook,
     NotebookError, Proof, ReadyTask, RecordType, Status, Storage, Transitioned, View,
@@ -22,10 +22,18 @@ pub fn shown(total: usize, all: bool) -> usize {
 /// What a command came to; the renderers turn one of these into text.
 #[derive(Debug)]
 pub enum Reply {
-    Created(Created),
+    Created {
+        command: &'static str,
+        created: Created,
+    },
     Moved {
         command: &'static str,
         transition: Transitioned,
+    },
+    /// A Question closed: routed into `to`, or dropped when there is none.
+    Answered {
+        transition: Transitioned,
+        to: Option<String>,
     },
     Closed(Closed),
     Held {
@@ -71,9 +79,27 @@ pub fn execute<S: Storage>(
 ) -> Result<Reply, NotebookError> {
     let mut notebook = Notebook::new(storage);
     match command {
-        Command::Add(args) => Ok(Reply::Created(
-            notebook.create(&draft(args, git_by), today)?,
-        )),
+        Command::Add(args) => Ok(Reply::Created {
+            command: "add",
+            created: notebook.create(&task_draft(args, git_by), today)?,
+        }),
+        Command::Decide(args) => Ok(Reply::Created {
+            command: "decide",
+            created: notebook.create(&decision_draft(args, git_by), today)?,
+        }),
+        Command::Note(args) => Ok(Reply::Created {
+            command: "note",
+            created: notebook.create(&note_draft(args, git_by), today)?,
+        }),
+        Command::Ask(args) => Ok(Reply::Created {
+            command: "ask",
+            created: notebook.create(&draft(RecordType::Question, args, git_by), today)?,
+        }),
+        Command::Answer { id, to, drop } => answered(&mut notebook, &id, to, drop, today),
+        Command::Retire { id } => Ok(Reply::Moved {
+            command: "retire",
+            transition: notebook.retire(&id, today)?,
+        }),
         Command::Start { id } => Ok(Reply::Moved {
             command: "start",
             transition: notebook.start(&id, today)?,
@@ -149,15 +175,57 @@ fn budgeted_status<S: Storage>(
     notebook.status(today, ceiling)
 }
 
-fn draft(args: AddArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
-    let mut draft = Draft::new(RecordType::Task, &args.title);
+fn answered<S: Storage>(
+    notebook: &mut Notebook<'_, S>,
+    id: &str,
+    to: Option<String>,
+    drop: Option<String>,
+    today: &str,
+) -> Result<Reply, NotebookError> {
+    match chosen_routing(to, drop)? {
+        Routing::To(target) => Ok(Reply::Answered {
+            transition: notebook.route(id, &target, today)?,
+            to: Some(target),
+        }),
+        Routing::Drop(reason) => Ok(Reply::Answered {
+            transition: notebook.drop_question(id, &reason, today)?,
+            to: None,
+        }),
+    }
+}
+
+fn task_draft(args: AddArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
+    let mut task = draft(RecordType::Task, args.draft, git_by);
+    task.priority = args.priority;
+    task
+}
+
+fn decision_draft(args: DecideArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
+    let mut decision = draft(RecordType::Decision, args.draft, git_by);
+    decision.kind = args.kind;
+    decision.supersedes = args.supersedes;
+    decision
+}
+
+fn note_draft(args: NoteArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
+    let mut note = draft(RecordType::Note, args.draft, git_by);
+    note.kind = args.kind;
+    note.supersedes = args.supersedes;
+    note
+}
+
+fn draft(
+    record_type: RecordType,
+    args: DraftArgs,
+    git_by: impl FnOnce() -> Option<String>,
+) -> Draft {
+    let mut draft = Draft::new(record_type, &args.title);
     draft.id = args.id;
     draft.by = args.by.or_else(git_by);
     draft.via = args.via;
     draft.from = args.from;
     draft.tags = args.tags;
     draft.links = args.links.iter().map(|raw| parsed_link(raw)).collect();
-    draft.priority = args.priority;
     draft.body = args.body.unwrap_or_default();
     draft
 }
@@ -169,6 +237,27 @@ fn parsed_link(raw: &str) -> Link {
     Link {
         kind: kind.to_owned(),
         target: target.to_owned(),
+    }
+}
+
+/// What closes the Question: the record its answer became, or a reasoned
+/// drop.
+enum Routing {
+    To(String),
+    Drop(String),
+}
+
+fn chosen_routing(to: Option<String>, drop: Option<String>) -> Result<Routing, NotebookError> {
+    match (to, drop) {
+        (Some(target), None) => Ok(Routing::To(target)),
+        (None, Some(reason)) => Ok(Routing::Drop(reason)),
+        (None, None) => Err(NotebookError::InvalidArgument {
+            reason: "answer: a routing is required — pass --to <id> or --drop \"<reason>\""
+                .to_owned(),
+        }),
+        (Some(_), Some(_)) => Err(NotebookError::InvalidArgument {
+            reason: "answer: pass exactly one of --to, --drop".to_owned(),
+        }),
     }
 }
 

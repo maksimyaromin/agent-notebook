@@ -290,6 +290,16 @@ impl Record {
         self.file.field("state")
     }
 
+    /// Whether the record still binds: its state is among its type's live
+    /// states.
+    #[must_use]
+    pub fn is_live(&self) -> bool {
+        match (self.record_type(), self.state()) {
+            (Some(record_type), Some(state)) => record_type.live_states().contains(&state),
+            _ => false,
+        }
+    }
+
     /// The Origin: the record this one was born from (`from`).
     #[must_use]
     pub fn origin(&self) -> Option<&str> {

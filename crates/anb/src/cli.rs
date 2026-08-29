@@ -58,6 +58,24 @@ pub enum Command {
         #[arg(long)]
         via: Option<String>,
     },
+    /// Record a Decision; replacing a conflicting one takes --supersedes.
+    Decide(DecideArgs),
+    /// Record a Note: curated knowledge, corrected in place.
+    Note(NoteArgs),
+    /// File a Question: a doubt parked without scope creep.
+    Ask(DraftArgs),
+    /// Close a Question by routing it into what its answer became.
+    Answer {
+        id: String,
+        /// The Decision or Task the answer became.
+        #[arg(long)]
+        to: Option<String>,
+        /// Close without routing, stating why.
+        #[arg(long)]
+        drop: Option<String>,
+    },
+    /// active → retired: end a Decision or Note that has no successor.
+    Retire { id: String },
     /// The dispatch queue: open, unblocked, unheld Tasks, most urgent first.
     Ready {
         /// Every row; the listing is bounded by default.
@@ -104,6 +122,11 @@ pub fn subject(command: &Command) -> Subject {
         Command::Block { id, .. } => ("block", Some(id)),
         Command::Unblock { id, .. } => ("unblock", Some(id)),
         Command::Comment { id, .. } => ("comment", Some(id)),
+        Command::Decide(_) => ("decide", None),
+        Command::Note(_) => ("note", None),
+        Command::Ask(_) => ("ask", None),
+        Command::Answer { id, .. } => ("answer", Some(id)),
+        Command::Retire { id } => ("retire", Some(id)),
         Command::View { id } => ("view", Some(id)),
         Command::Ready { .. } => ("ready", None),
         Command::List { .. } => ("list", None),
@@ -115,16 +138,15 @@ pub fn subject(command: &Command) -> Subject {
     }
 }
 
+/// The envelope flags every create shares; each command adds its type's
+/// own on top.
 #[derive(Args)]
-pub struct AddArgs {
+pub struct DraftArgs {
     pub title: String,
     /// Explicit id; omitted, one is minted from the title.
     #[arg(long)]
     pub id: Option<String>,
-    /// 0–4, 0 the most urgent.
-    #[arg(long)]
-    pub priority: Option<u8>,
-    /// Origin: the record this Task was born from.
+    /// Origin: the record this record was born from.
     #[arg(long)]
     pub from: Option<String>,
     #[arg(long = "tag")]
@@ -140,6 +162,39 @@ pub struct AddArgs {
     /// The acting agent tool.
     #[arg(long)]
     pub via: Option<String>,
+}
+
+#[derive(Args)]
+pub struct AddArgs {
+    #[command(flatten)]
+    pub draft: DraftArgs,
+    /// 0–4, 0 the most urgent.
+    #[arg(long)]
+    pub priority: Option<u8>,
+}
+
+#[derive(Args)]
+pub struct DecideArgs {
+    #[command(flatten)]
+    pub draft: DraftArgs,
+    /// rule, shape, or drift.
+    #[arg(long)]
+    pub kind: Option<String>,
+    /// The Decision this one replaces; it flips in the same move.
+    #[arg(long)]
+    pub supersedes: Option<String>,
+}
+
+#[derive(Args)]
+pub struct NoteArgs {
+    #[command(flatten)]
+    pub draft: DraftArgs,
+    /// fact, term, or guide.
+    #[arg(long)]
+    pub kind: Option<String>,
+    /// The Note this one replaces; it retires in the same move.
+    #[arg(long)]
+    pub supersedes: Option<String>,
 }
 
 #[derive(Args)]

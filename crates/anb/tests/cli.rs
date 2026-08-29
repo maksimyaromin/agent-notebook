@@ -409,6 +409,251 @@ mod task_cycle_replies {
     }
 }
 
+mod knowledge_replies {
+    use super::*;
+    use anb_core::Storage as _;
+
+    #[test]
+    fn decide_records_a_decision_and_answers_the_path() {
+        let mut storage = MemoryStorage::new();
+        assert_eq!(
+            ok(&mut storage, &["decide", "No mise toml", "--kind", "rule"]),
+            "ok: decide decision.no-mise-toml — decisions/decision.no-mise-toml.md\n"
+        );
+        let written = storage.read("decisions/decision.no-mise-toml.md").unwrap();
+        assert!(written.contains("\nstate: active\n"), "{written}");
+        assert!(written.contains("\nkind: rule\n"), "{written}");
+    }
+
+    #[test]
+    fn decide_with_supersedes_names_the_replaced_decision() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.go-for-the-cli.md".to_owned(),
+            record_file(
+                "decision.go-for-the-cli",
+                "decision",
+                "active",
+                "Go for the CLI",
+                &[],
+                "",
+            ),
+        )]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &[
+                    "decide",
+                    "Rust for the CLI",
+                    "--supersedes",
+                    "decision.go-for-the-cli"
+                ],
+            ),
+            "ok: decide decision.rust-for-the-cli — decisions/decision.rust-for-the-cli.md\n\
+             superseded: decision.go-for-the-cli\n"
+        );
+    }
+
+    #[test]
+    fn an_undeclared_conflict_is_nudged_not_blocked() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.first.md".to_owned(),
+            record_file(
+                "decision.first",
+                "decision",
+                "active",
+                "The first ruling",
+                &["by: supolka", "via: claude-code", "tags: parser, grammar"],
+                "",
+            ),
+        )]);
+        assert_snapshot!(
+            ok(
+                &mut storage,
+                &[
+                    "decide",
+                    "Fences stay",
+                    "--tag",
+                    "parser",
+                    "--tag",
+                    "grammar"
+                ],
+            ),
+            @r"
+        ok: decide decision.fences-stay — decisions/decision.fences-stay.md
+        may-conflict[1]: decision.first (supolka/claude-code)
+        "
+        );
+        assert!(
+            storage.read("decisions/decision.fences-stay.md").is_ok(),
+            "the nudge is a consequence in the reply, never a block"
+        );
+    }
+
+    #[test]
+    fn note_records_a_term() {
+        let mut storage = MemoryStorage::new();
+        assert_eq!(
+            ok(&mut storage, &["note", "Record", "--kind", "term"]),
+            "ok: note note.record — notes/note.record.md\n"
+        );
+        let written = storage.read("notes/note.record.md").unwrap();
+        assert!(written.contains("\nkind: term\n"), "{written}");
+    }
+
+    #[test]
+    fn a_kind_outside_the_types_enum_is_a_recovery_payload() {
+        let mut storage = MemoryStorage::new();
+        assert_snapshot!(
+            refused(&mut storage, &["note", "A fact", "--kind", "law"]),
+            @r#"
+        error[invalid-argument]: kind: `law` is not one of fact, term, guide for a note
+        try: anb note "<title>" --kind fact
+        "#
+        );
+    }
+
+    #[test]
+    fn ask_files_a_question_with_its_origin() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &["ask", "Does the parser keep fences?", "--from", "task.demo"],
+            ),
+            "ok: ask question.does-the-parser-keep-fences — questions/question.does-the-parser-keep-fences.md\n"
+        );
+        let written = storage
+            .read("questions/question.does-the-parser-keep-fences.md")
+            .unwrap();
+        assert!(written.contains("\nstate: open\n"), "{written}");
+        assert!(written.contains("\nfrom: task.demo\n"), "{written}");
+    }
+
+    #[test]
+    fn ask_from_a_missing_origin_is_a_recovery_payload() {
+        let mut storage = MemoryStorage::new();
+        assert_snapshot!(
+            refused(&mut storage, &["ask", "A doubt", "--from", "task.ghost"]),
+            @r#"
+        error[dangling-ref]: from: `task.ghost` names no record
+        try: anb add "<title>" --id task.ghost
+        try: anb list
+        "#
+        );
+    }
+
+    #[test]
+    fn answer_routes_the_question_into_what_its_answer_became() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.doubt.md".to_owned(),
+                record_file("question.doubt", "question", "open", "A doubt", &[], ""),
+            ),
+            (
+                "decisions/decision.ruling.md".to_owned(),
+                record_file("decision.ruling", "decision", "active", "A ruling", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &["answer", "question.doubt", "--to", "decision.ruling"],
+            ),
+            "ok: answer question.doubt — open\u{2192}routed\nrouted-to: decision.ruling\n"
+        );
+        let written = storage.read("questions/question.doubt.md").unwrap();
+        assert!(written.contains("\nstate: routed\n"), "{written}");
+        assert!(
+            written.contains("\nrouted-to: decision.ruling\n"),
+            "{written}"
+        );
+    }
+
+    #[test]
+    fn answer_drop_closes_with_the_stated_reason() {
+        let mut storage = storage_with(&[(
+            "questions/question.doubt.md".to_owned(),
+            record_file("question.doubt", "question", "open", "A doubt", &[], ""),
+        )]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &[
+                    "answer",
+                    "question.doubt",
+                    "--drop",
+                    "overtaken by the rewrite"
+                ],
+            ),
+            "ok: answer question.doubt — open\u{2192}dropped\n"
+        );
+        let written = storage.read("questions/question.doubt.md").unwrap();
+        assert!(
+            written.ends_with("Dropped 2026-08-28: overtaken by the rewrite\n"),
+            "{written}"
+        );
+    }
+
+    #[test]
+    fn answer_without_a_route_is_a_recovery_payload() {
+        let mut storage = storage_with(&[(
+            "questions/question.doubt.md".to_owned(),
+            record_file("question.doubt", "question", "open", "A doubt", &[], ""),
+        )]);
+        assert_snapshot!(
+            refused(&mut storage, &["answer", "question.doubt"]),
+            @r#"
+        error[invalid-argument]: answer: a routing is required — pass --to <id> or --drop "<reason>"
+        try: anb answer question.doubt --to <id>
+        try: anb answer question.doubt --drop "<why>"
+        "#
+        );
+    }
+
+    #[test]
+    fn a_question_routes_only_into_a_decision_or_a_task() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.doubt.md".to_owned(),
+                record_file("question.doubt", "question", "open", "A doubt", &[], ""),
+            ),
+            (
+                "notes/note.fact.md".to_owned(),
+                record_file("note.fact", "note", "active", "A fact", &[], ""),
+            ),
+        ]);
+        assert_snapshot!(
+            refused(
+                &mut storage,
+                &["answer", "question.doubt", "--to", "note.fact"],
+            ),
+            @r"
+        error[wrong-type]: `note.fact` is not a decision or a task
+        try: anb view note.fact
+        "
+        );
+    }
+
+    #[test]
+    fn retire_ends_a_decision_without_a_successor() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.old-rule.md".to_owned(),
+            record_file(
+                "decision.old-rule",
+                "decision",
+                "active",
+                "An old rule",
+                &[],
+                "",
+            ),
+        )]);
+        assert_eq!(
+            ok(&mut storage, &["retire", "decision.old-rule"]),
+            "ok: retire decision.old-rule — active\u{2192}retired\n"
+        );
+    }
+}
+
 mod flat_lists {
     use super::*;
 
@@ -718,6 +963,63 @@ mod json_surface {
     }
 
     #[test]
+    fn a_decide_reply_carries_the_nudge() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.first.md".to_owned(),
+            record_file(
+                "decision.first",
+                "decision",
+                "active",
+                "The first ruling",
+                &["by: supolka", "tags: parser, grammar"],
+                "",
+            ),
+        )]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &[
+                    "decide",
+                    "Fences stay",
+                    "--tag",
+                    "parser",
+                    "--tag",
+                    "grammar",
+                    "--json"
+                ],
+            ),
+            r#"{"ok":"decide","id":"decision.fences-stay","path":"decisions/decision.fences-stay.md","may-conflict":[{"id":"decision.first","by":"supolka"}]}"#
+        );
+    }
+
+    #[test]
+    fn an_answer_reply_carries_the_thread() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.doubt.md".to_owned(),
+                record_file("question.doubt", "question", "open", "A doubt", &[], ""),
+            ),
+            (
+                "decisions/decision.ruling.md".to_owned(),
+                record_file("decision.ruling", "decision", "active", "A ruling", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &[
+                    "answer",
+                    "question.doubt",
+                    "--to",
+                    "decision.ruling",
+                    "--json"
+                ],
+            ),
+            r#"{"ok":"answer","id":"question.doubt","from":"open","to":"routed","already":false,"routed-to":"decision.ruling"}"#
+        );
+    }
+
+    #[test]
     fn a_close_reply_carries_its_consequences() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md".to_owned(),
@@ -749,6 +1051,20 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "block", "task.x", "task.y"],
         vec!["anb", "unblock", "task.x", "task.y"],
         vec!["anb", "comment", "task.x", "note"],
+        vec!["anb", "decide", "A ruling", "--kind", "rule"],
+        vec![
+            "anb",
+            "note",
+            "A fact",
+            "--kind",
+            "fact",
+            "--supersedes",
+            "note.y",
+        ],
+        vec!["anb", "ask", "A doubt", "--from", "task.x"],
+        vec!["anb", "answer", "question.x", "--to", "decision.y"],
+        vec!["anb", "answer", "question.x", "--drop", "why"],
+        vec!["anb", "retire", "decision.x"],
         vec!["anb", "ready"],
         vec!["anb", "list"],
         vec!["anb", "view", "task.x"],
