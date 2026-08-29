@@ -1,12 +1,11 @@
-//! The dependency graph over `blocked-by` edges, and the edge walk both it
-//! and the Origin lineage are asked about.
+//! The dependency graph over `blocked-by` edges, and the walks any edge
+//! the notebook draws can be put through: the cycles in an edge map, and
+//! the chain from one name to another.
 //!
-//! Blocked, the ready gate, cycle verdicts, and unblock consequences are
-//! computed from the edges on demand; none of them is ever stored. The graph
-//! knows a Task only as an id with a closed flag and its edges — records,
-//! files, and validity are the notebook's business. Cycle detection walks
-//! edges regardless of the closed flag: a closed Task can be reopened, so a
-//! latent cycle is a real one.
+//! Blocked, the ready gate, and unblock consequences are computed from the
+//! edges on demand; none of them is ever stored. The graph knows a Task
+//! only as an id with a closed flag and its edges — records, files, and
+//! validity are the notebook's business.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -43,56 +42,6 @@ impl TaskGraph {
         })
     }
 
-    /// Dependency cycles, listed in edge direction, found walking ids in
-    /// order. Each back edge met yields one cycle; an edge into an already
-    /// finished node is not re-explored, so a cycle overlapping a named one
-    /// surfaces on the walk after its neighbor is repaired. A self-edge is
-    /// not among them: one record carries that cycle alone and names it
-    /// itself.
-    pub fn cycles(&self) -> Vec<Vec<String>> {
-        let mut found = Vec::new();
-        let mut visits = BTreeMap::new();
-        let mut stack = Vec::new();
-        for id in self.nodes.keys() {
-            self.collect_cycles(id, &mut visits, &mut stack, &mut found);
-        }
-        found
-    }
-
-    fn collect_cycles<'a>(
-        &'a self,
-        at: &'a str,
-        visits: &mut BTreeMap<&'a str, Visit>,
-        stack: &mut Vec<&'a str>,
-        found: &mut Vec<Vec<String>>,
-    ) {
-        if visits.contains_key(at) {
-            return;
-        }
-        visits.insert(at, Visit::InProgress);
-        stack.push(at);
-        if let Some(node) = self.nodes.get(at) {
-            for target in &node.blocked_by {
-                if target == at {
-                    continue;
-                }
-                match visits.get(target.as_str()) {
-                    Some(Visit::InProgress) => {
-                        let start = stack
-                            .iter()
-                            .position(|id| *id == target)
-                            .expect("an in-progress id is on the stack");
-                        found.push(stack[start..].iter().map(|id| (*id).to_owned()).collect());
-                    }
-                    Some(Visit::Done) => {}
-                    None => self.collect_cycles(target, visits, stack, found),
-                }
-            }
-        }
-        stack.pop();
-        visits.insert(at, Visit::Done);
-    }
-
     /// The non-closed Tasks that closing `id` releases: they wait on it and
     /// on nothing else still live. `id` itself counts as closed, so the
     /// answer is the same before and after its file says so.
@@ -113,6 +62,50 @@ impl TaskGraph {
             .map(|(dependent, _)| dependent.clone())
             .collect()
     }
+}
+
+/// The cycles in an edge map, listed in edge direction, found walking ids
+/// in order. Each back edge met yields one cycle, a name pointing at
+/// itself included; an edge into an already finished node is not
+/// re-explored, so a cycle overlapping a named one surfaces on the walk
+/// after its neighbor is repaired.
+pub(crate) fn cycles(edges: &BTreeMap<&str, Vec<&str>>) -> Vec<Vec<String>> {
+    let mut found = Vec::new();
+    let mut visits = BTreeMap::new();
+    let mut stack = Vec::new();
+    for id in edges.keys() {
+        collect_cycles(edges, id, &mut visits, &mut stack, &mut found);
+    }
+    found
+}
+
+fn collect_cycles<'a>(
+    edges: &BTreeMap<&'a str, Vec<&'a str>>,
+    at: &'a str,
+    visits: &mut BTreeMap<&'a str, Visit>,
+    stack: &mut Vec<&'a str>,
+    found: &mut Vec<Vec<String>>,
+) {
+    if visits.contains_key(at) {
+        return;
+    }
+    visits.insert(at, Visit::InProgress);
+    stack.push(at);
+    for target in edges.get(at).map(Vec::as_slice).unwrap_or_default() {
+        match visits.get(target) {
+            Some(Visit::InProgress) => {
+                let start = stack
+                    .iter()
+                    .position(|id| id == target)
+                    .expect("an in-progress id is on the stack");
+                found.push(stack[start..].iter().map(|id| (*id).to_owned()).collect());
+            }
+            Some(Visit::Done) => {}
+            None => collect_cycles(edges, target, visits, stack, found),
+        }
+    }
+    stack.pop();
+    visits.insert(at, Visit::Done);
 }
 
 /// The edge chain from `from` to `to`, both ends included, walked over a

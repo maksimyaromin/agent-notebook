@@ -1,10 +1,41 @@
-//! The plain-text encoding every table surface shares — the quoting rule
-//! and the ready rows — so the Status and the flat lists cannot drift
-//! apart on the same value.
+//! The encoding every reply surface shares — the bound on a list, the
+//! quoting rule, and the ready rows — so no two surfaces spell the same
+//! value differently.
 
 use crate::grammar;
 use crate::notebook::ReadyTask;
 use std::fmt::Write as _;
+
+/// How many rows a reply carries before it names the rest as a count.
+///
+/// What a command derives from the notebook is answered at a fixed size,
+/// whatever the notebook holds; a listing lifts that with `--all`, and a
+/// consequence named in passing has no lift. A record's own bytes are not
+/// derived and are shown whole.
+pub const ROW_BOUND: usize = 20;
+
+/// The ids named inline in a reply, comma-separated: the first `bound` of
+/// them, then how many were left out.
+#[must_use]
+pub fn id_list(ids: &[String], bound: usize) -> String {
+    bounded_join(ids, ", ", bound)
+}
+
+/// An edge walk named inline in a message — a dependency cycle, a lineage.
+/// A message has one surface and so one bound.
+#[must_use]
+pub fn id_chain(ids: &[String]) -> String {
+    bounded_join(ids, " \u{2192} ", ROW_BOUND)
+}
+
+fn bounded_join(ids: &[String], separator: &str, bound: usize) -> String {
+    let shown = ids.len().min(bound);
+    let mut out = ids[..shown].join(separator);
+    if ids.len() > shown {
+        let _ = write!(out, "{separator}\u{2026} {} more", ids.len() - shown);
+    }
+    out
+}
 
 /// A table value carrying the row delimiter or a quote is JSON-quoted;
 /// everything else stays bare.
@@ -60,6 +91,28 @@ mod tests {
             created: created.to_owned(),
             title: title.to_owned(),
         }
+    }
+
+    fn ids(count: usize) -> Vec<String> {
+        (0..count).map(|n| format!("task.t{n:02}")).collect()
+    }
+
+    #[test]
+    fn a_list_filling_the_bound_names_every_id_and_marks_nothing() {
+        assert_eq!(id_list(&ids(3), 3), "task.t00, task.t01, task.t02");
+    }
+
+    #[test]
+    fn a_list_past_the_bound_names_the_first_and_counts_the_rest() {
+        assert_eq!(
+            id_list(&ids(6), 3),
+            "task.t00, task.t01, task.t02, … 3 more"
+        );
+    }
+
+    #[test]
+    fn a_chain_walks_its_ids_with_arrows() {
+        assert_eq!(id_chain(&ids(2)), "task.t00 → task.t01");
     }
 
     #[test]

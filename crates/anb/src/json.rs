@@ -24,7 +24,7 @@ pub fn render(reply: &Reply) -> String {
             if !created.may_conflict.is_empty() {
                 object.insert(
                     "may-conflict".into(),
-                    Value::Array(created.may_conflict.iter().map(cited_value).collect()),
+                    bounded_section(&created.may_conflict, cited_value),
                 );
             }
             insert_dangling_mentions(&mut object, &created.dangling_mentions);
@@ -145,8 +145,14 @@ fn closed_value(closed: &anb_core::Closed) -> Value {
         object.insert("report".into(), json!(note));
     }
     insert_dangling_mentions(&mut object, &closed.dangling_mentions);
-    object.insert("unblocked".into(), json!(closed.unblocked));
-    object.insert("open-questions".into(), json!(closed.open_questions));
+    object.insert(
+        "unblocked".into(),
+        bounded_section(&closed.unblocked, |id| json!(id)),
+    );
+    object.insert(
+        "open-questions".into(),
+        bounded_section(&closed.open_questions, |id| json!(id)),
+    );
     Value::Object(object)
 }
 
@@ -174,7 +180,10 @@ fn held_map(command: &str, held: &Held) -> Map<String, Value> {
 
 fn insert_dangling_mentions(object: &mut Map<String, Value>, ids: &[String]) {
     if !ids.is_empty() {
-        object.insert("dangling-mention".into(), json!(ids));
+        object.insert(
+            "dangling-mention".into(),
+            bounded_section(ids, |id| json!(id)),
+        );
     }
 }
 
@@ -309,8 +318,8 @@ fn view_value(view: &View) -> Value {
         "archived": view.archived,
         "fields": view.fields.iter().map(|(key, value)| json!([key, value])).collect::<Vec<Value>>(),
         "body": view.body,
-        "mentions": view.mentions,
-        "mentioned-by": view.mentioned_by,
+        "mentions": bounded_section(&view.mentions, |id| json!(id)),
+        "mentioned-by": bounded_section(&view.mentioned_by, |id| json!(id)),
     })
 }
 
@@ -339,6 +348,12 @@ fn section<T>(rows: &[T], shown: usize, row: impl Fn(&T) -> Value) -> Value {
         "count": rows.len(),
         "rows": rows[..shown].iter().map(row).collect::<Vec<Value>>(),
     })
+}
+
+/// [`section`] at the default bound, for a consequence a command names in
+/// passing rather than a listing a caller asked for: no flag lifts it.
+fn bounded_section<T>(rows: &[T], row: impl Fn(&T) -> Value) -> Value {
+    section(rows, shown(rows.len(), false), row)
 }
 
 /// How many rows a Status section shows as data: the dashboard's own

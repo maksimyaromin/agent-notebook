@@ -983,7 +983,10 @@ mod single_record {
         let value: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(value["archived"], serde_json::json!(false));
         assert_eq!(value["fields"][0], serde_json::json!(["id", "task.demo"]));
-        assert_eq!(value["mentions"], serde_json::json!(["decision.chosen"]));
+        assert_eq!(
+            value["mentions"],
+            serde_json::json!({"count": 1, "rows": ["decision.chosen"]})
+        );
     }
 }
 
@@ -1202,7 +1205,7 @@ mod json_surface {
                     "--json"
                 ],
             ),
-            r#"{"ok":"decide","id":"decision.fences-stay","path":"decisions/decision.fences-stay.md","may-conflict":[{"id":"decision.first","by":"supolka"}]}"#
+            r#"{"ok":"decide","id":"decision.fences-stay","path":"decisions/decision.fences-stay.md","may-conflict":{"count":1,"rows":[{"id":"decision.first","by":"supolka"}]}}"#
         );
     }
 
@@ -1246,7 +1249,7 @@ mod json_surface {
                     "--json"
                 ],
             ),
-            r#"{"ok":"comment","id":"task.demo","entry":"- 2026-08-28 Maks: waits on task.ghost, not the `task.quoted` case","already":false,"dangling-mention":["task.ghost"]}"#
+            r#"{"ok":"comment","id":"task.demo","entry":"- 2026-08-28 Maks: waits on task.ghost, not the `task.quoted` case","already":false,"dangling-mention":{"count":1,"rows":["task.ghost"]}}"#
         );
         assert_eq!(
             ok(
@@ -1269,7 +1272,7 @@ mod json_surface {
                 &mut storage,
                 &["close", "task.demo", "--no-proof", "--json"]
             ),
-            r#"{"ok":"close","id":"task.demo","from":"active","to":"closed","already":false,"unblocked":[],"open-questions":[]}"#
+            r#"{"ok":"close","id":"task.demo","from":"active","to":"closed","already":false,"unblocked":{"count":0,"rows":[]},"open-questions":{"count":0,"rows":[]}}"#
         );
     }
 
@@ -1286,7 +1289,7 @@ mod json_surface {
                 &[("r.md", "# What shipped\n")],
             )
             .expect("the command must succeed"),
-            r#"{"ok":"close","id":"task.demo","from":"active","to":"closed","already":false,"report":"note.report-a-demo-record","unblocked":[],"open-questions":[]}"#
+            r#"{"ok":"close","id":"task.demo","from":"active","to":"closed","already":false,"report":"note.report-a-demo-record","unblocked":{"count":0,"rows":[]},"open-questions":{"count":0,"rows":[]}}"#
         );
     }
 }
@@ -1887,13 +1890,158 @@ mod check_bounds {
         assert!(out.starts_with("count: 22\nfindings[20]{"), "got: {out}");
         assert_eq!(out.lines().last().unwrap(), "  … 2 more: anb check --all");
     }
+}
+
+/// The law every reply obeys: what a command names in passing — who was
+/// unblocked, who cites a record, what blocks a removal, how a cycle runs —
+/// is stated as a count and a bounded head, so no answer grows with the
+/// notebook.
+mod bounded_consequences {
+    use super::*;
+
+    /// One past the twenty a reply shows, so the count and the remainder
+    /// are both wrong under any off-by-one.
+    const MANY: usize = 21;
+
+    fn hub_with_dependents(count: usize) -> MemoryStorage {
+        let mut files = vec![(
+            "tasks/task.hub.md".to_owned(),
+            record_file("task.hub", "task", "active", "The hub", &[], ""),
+        )];
+        files.extend((0..count).map(|n| {
+            open_task(
+                &format!("task.d{n:02}"),
+                "A demo record",
+                &["blocked-by: task.hub"],
+            )
+        }));
+        storage_with(&files)
+    }
+
+    fn citers_of(id: &str, count: usize) -> MemoryStorage {
+        let mut files = vec![(
+            format!("notes/{id}.md"),
+            record_file(id, "note", "active", "The cited note", &["kind: fact"], ""),
+        )];
+        files.extend((0..count).map(|n| {
+            (
+                format!("tasks/task.c{n:02}.md"),
+                record_file(
+                    &format!("task.c{n:02}"),
+                    "task",
+                    "open",
+                    "A demo record",
+                    &[],
+                    &format!("It follows {id}.\n"),
+                ),
+            )
+        }));
+        storage_with(&files)
+    }
 
     #[test]
-    fn all_lifts_the_bound() {
-        let mut storage = many_broken_records(22);
-        let out = ok(&mut storage, &["check", "--all"]);
-        assert!(out.contains("findings[22]{"), "got: {out}");
-        assert!(!out.contains('…'), "nothing was truncated: {out}");
+    fn a_close_counts_what_it_unblocked_and_names_a_bounded_head() {
+        let mut storage = hub_with_dependents(MANY);
+        let out = ok(&mut storage, &["close", "task.hub", "--no-proof"]);
+        let line = out
+            .lines()
+            .find(|line| line.starts_with("unblocked["))
+            .unwrap_or_else(|| panic!("no unblocked line in: {out}"));
+        assert!(line.starts_with("unblocked[21]: task.d00, "), "{line}");
+        assert!(line.ends_with("task.d19, … 1 more"), "{line}");
+    }
+
+    #[test]
+    fn a_close_json_carries_the_count_beside_the_bounded_rows() {
+        let mut storage = hub_with_dependents(MANY);
+        let out = ok(&mut storage, &["close", "task.hub", "--no-proof", "--json"]);
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["unblocked"]["count"], serde_json::json!(MANY));
+        assert_eq!(
+            value["unblocked"]["rows"],
+            serde_json::json!(
+                (0..20)
+                    .map(|n| format!("task.d{n:02}"))
+                    .collect::<Vec<String>>()
+            )
+        );
+    }
+
+    #[test]
+    fn a_view_bounds_who_cites_the_record() {
+        let mut storage = citers_of("note.magnet", MANY);
+        let out = ok(&mut storage, &["view", "note.magnet"]);
+        let line = out
+            .lines()
+            .find(|line| line.starts_with("mentioned-by["))
+            .unwrap_or_else(|| panic!("no mentioned-by line in: {out}"));
+        assert!(line.starts_with("mentioned-by[21]: task.c00, "), "{line}");
+        assert!(line.ends_with("task.c19, … 1 more"), "{line}");
+    }
+
+    #[test]
+    fn a_refusal_names_the_detail_lines_it_cut_in_its_own_units() {
+        // Each record holds the id twice — through its edge and through its
+        // body — so the records the message counts and the lines the
+        // details name are two different totals.
+        let mut files = vec![(
+            "tasks/task.hub.md".to_owned(),
+            record_file("task.hub", "task", "active", "The hub", &[], ""),
+        )];
+        files.extend((0..11).map(|n| {
+            (
+                format!("tasks/task.c{n:02}.md"),
+                record_file(
+                    &format!("task.c{n:02}"),
+                    "task",
+                    "open",
+                    "A demo record",
+                    &["blocked-by: task.hub"],
+                    "It also follows task.hub in prose.\n",
+                ),
+            )
+        }));
+        let mut storage = storage_with(&files);
+        let out = refused(&mut storage, &["expunge", "task.hub"]);
+        assert!(
+            out.starts_with(
+                "error[still-referenced]: `task.hub` is still referenced by 11 records\n"
+            ),
+            "{out}"
+        );
+        let details: Vec<&str> = out.lines().filter(|line| line.starts_with("  ")).collect();
+        assert_eq!(details.len(), 21, "twenty blockers and the cut: {out}");
+        assert_eq!(details[20], "  … 2 more");
+        assert_eq!(
+            out.lines().filter(|line| line.starts_with("try: ")).count(),
+            11,
+            "one retry per record holding the id: {out}"
+        );
+    }
+
+    #[test]
+    fn a_cycle_finding_bounds_the_walk_it_names() {
+        let files: Vec<(String, String)> = (0..MANY)
+            .map(|n| {
+                open_task(
+                    &format!("task.r{n:02}"),
+                    "A demo record",
+                    &[&format!("blocked-by: task.r{:02}", (n + 1) % MANY)],
+                )
+            })
+            .collect();
+        let mut storage = storage_with(&files);
+        let out = ok(&mut storage, &["check"]);
+        let finding = out
+            .lines()
+            .find(|line| line.contains("dep-cycle"))
+            .unwrap_or_else(|| panic!("no dep-cycle finding in: {out}"));
+        assert!(
+            finding.contains("closes the cycle task.r00 → task.r01 → "),
+            "{finding}"
+        );
+        // The walk repeats its first id, so a 21-task ring is 22 steps.
+        assert!(finding.ends_with("task.r19 → … 2 more"), "{finding}");
     }
 }
 
@@ -1967,7 +2115,7 @@ mod json_maintenance_surface {
                     "--json",
                 ],
             ),
-            r#"{"ok":"edit","id":"task.demo","changed":["title","body"],"already":false,"dangling-mention":["task.ghost"]}"#
+            r#"{"ok":"edit","id":"task.demo","changed":["title","body"],"already":false,"dangling-mention":{"count":1,"rows":["task.ghost"]}}"#
         );
     }
 

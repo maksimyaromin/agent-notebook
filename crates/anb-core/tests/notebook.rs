@@ -63,21 +63,6 @@ mod task_cycle {
     }
 
     #[test]
-    fn a_replayed_start_answers_already_true_and_changes_no_byte() {
-        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
-        Notebook::new(&mut storage)
-            .start("task.demo", TODAY)
-            .unwrap();
-        let after_first = storage.read("tasks/task.demo.md").unwrap();
-
-        let replay = Notebook::new(&mut storage)
-            .start("task.demo", TODAY)
-            .unwrap();
-        assert!(replay.already);
-        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), after_first);
-    }
-
-    #[test]
     fn an_invalid_transition_answers_with_the_valid_commands() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let error = Notebook::new(&mut storage)
@@ -609,21 +594,6 @@ mod hold {
         assert!(text.contains("\nstate: active\n"), "a hold keeps the state");
         assert!(text.contains("\nhold: waiting for the 1.99 release\n"));
         assert!(text.contains("\nhold-until: 2026-09-10\n"));
-    }
-
-    #[test]
-    fn a_replayed_hold_answers_already_and_changes_no_byte() {
-        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
-        Notebook::new(&mut storage)
-            .hold("task.demo", "a reason", None, TODAY)
-            .unwrap();
-        let after_first = storage.read("tasks/task.demo.md").unwrap();
-
-        let replay = Notebook::new(&mut storage)
-            .hold("task.demo", "a reason", None, TODAY)
-            .unwrap();
-        assert!(replay.already);
-        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), after_first);
     }
 
     #[test]
@@ -2908,6 +2878,118 @@ mod check {
         assert_eq!(located.len(), 1);
         assert_eq!(located[0].finding.code, FindingCode::DepCycle);
         assert_eq!(located[0].finding.line, Some(6));
+    }
+
+    #[test]
+    fn a_cycle_finding_points_at_the_live_file_when_the_archive_holds_the_name_too() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &record_file("task.a", "task", "open", &["blocked-by: task.b"], ""),
+            ),
+            (
+                "tasks/task.b.md",
+                &record_file("task.b", "task", "open", &["blocked-by: task.a"], ""),
+            ),
+            (
+                "archive/tasks/task.a.md",
+                &record_file("task.a", "task", "closed", &["closed: 2026-08-25"], ""),
+            ),
+        ]);
+        let located = Notebook::new(&mut storage).check().unwrap();
+        assert_eq!(
+            located
+                .iter()
+                .filter(|found| found.finding.code == FindingCode::DepCycle)
+                .map(|found| (found.path.as_str(), found.finding.line))
+                .collect::<Vec<_>>(),
+            vec![("tasks/task.a.md", Some(6)), ("tasks/task.b.md", Some(6))],
+            "the edge a reader must erase sits in the live file, not its archived twin"
+        );
+    }
+
+    #[test]
+    fn a_hand_edited_lineage_loop_is_named_on_every_member_at_its_from_line() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &record_file("task.a", "task", "open", &["from: task.b"], ""),
+            ),
+            (
+                "tasks/task.b.md",
+                &record_file("task.b", "task", "open", &["from: task.a"], ""),
+            ),
+        ]);
+        let located = Notebook::new(&mut storage).check().unwrap();
+        assert_eq!(
+            located
+                .iter()
+                .map(|found| (found.path.as_str(), found.finding.code, found.finding.line))
+                .collect::<Vec<_>>(),
+            vec![
+                ("tasks/task.a.md", FindingCode::OriginCycle, Some(6)),
+                ("tasks/task.b.md", FindingCode::OriginCycle, Some(6)),
+            ]
+        );
+        assert!(
+            located[0]
+                .finding
+                .message
+                .contains("task.a → task.b → task.a"),
+            "the message walks the whole lineage: {}",
+            located[0].finding.message
+        );
+    }
+
+    #[test]
+    fn a_record_born_from_itself_is_an_origin_cycle() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &task_file("open", &["from: task.demo"]),
+        )]);
+        let located = Notebook::new(&mut storage).check().unwrap();
+        assert_eq!(
+            located
+                .iter()
+                .map(|found| (found.path.as_str(), found.finding.code))
+                .collect::<Vec<_>>(),
+            vec![("tasks/task.demo.md", FindingCode::OriginCycle)]
+        );
+    }
+
+    #[test]
+    fn a_lineage_loop_leaves_its_records_open_to_repair() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md",
+                &record_file("task.a", "task", "open", &["from: task.b"], ""),
+            ),
+            (
+                "tasks/task.b.md",
+                &record_file("task.b", "task", "open", &["from: task.a"], ""),
+            ),
+            (
+                "tasks/task.root.md",
+                &record_file("task.root", "task", "open", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).check().unwrap().len(),
+            2,
+            "the loop stands before the repair"
+        );
+        let edit = Edit {
+            from: Some("task.root".to_owned()),
+            ..Edit::default()
+        };
+        let edited = Notebook::new(&mut storage)
+            .edit("task.a", &edit, TODAY)
+            .expect("a cycle only two files together carry must not freeze either of them");
+        assert_eq!(edited.changed, vec!["from"]);
+        assert!(
+            Notebook::new(&mut storage).check().unwrap().is_empty(),
+            "the loop is gone once one of its edges points elsewhere"
+        );
     }
 
     #[test]

@@ -16,6 +16,7 @@
 
 use crate::config::{CONFIG_PATH, Config};
 use crate::debt::{self, Cited, DebtSources};
+use crate::encode;
 use crate::finding::{Finding, FindingCode, Severity};
 use crate::grammar::{self, RecordFile, Residence};
 use crate::graph::{self, TaskGraph, TaskNode};
@@ -438,7 +439,7 @@ impl std::fmt::Display for NotebookError {
                 write!(
                     f,
                     "the edge would close a dependency cycle: {}",
-                    chain.join(" → ")
+                    encode::id_chain(chain)
                 )
             }
             NotebookError::Storage(error) => error.fmt(f),
@@ -489,10 +490,12 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let corpus = self.whole_corpus()?;
         let records = corpus.records();
         let resolvable = corpus.resolver();
-        let by_stem: BTreeMap<&str, &Record> = records
-            .iter()
-            .map(|record| (path_stem(record.path()), record))
-            .collect();
+        // Live before archived, as every index over a colliding name reads:
+        // the edge a finding points a reader at is the one in the live file.
+        let mut by_stem: BTreeMap<&str, &Record> = BTreeMap::new();
+        for record in records {
+            by_stem.entry(path_stem(record.path())).or_insert(record);
+        }
 
         let mut located = Vec::new();
         for record in records {
@@ -507,6 +510,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         }
         check_duplicate_ids(records, &mut located);
         check_dep_cycles(records, &by_stem, &mut located);
+        check_origin_cycles(records, &by_stem, &mut located);
         self.check_config(&mut located)?;
 
         located.sort_by(|left, right| finding_order(left).cmp(&finding_order(right)));
@@ -1689,7 +1693,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Err(NotebookError::InvalidArgument {
             reason: format!(
                 "from: `{origin}` is already born inside `{id}` \u{2014} {}",
-                lineage.join(" \u{2192} ")
+                encode::id_chain(&lineage)
             ),
         })
     }
@@ -2333,9 +2337,44 @@ fn edge_borne(record: &Record, finding: &Finding) -> bool {
             .any(|(_, line)| line == finding.line)
 }
 
-/// The dependency graph over the Tasks handed in, keyed by file stem — the
-/// name graph findings report against. Archived Tasks enter too: a cycle
-/// through the archive is still a cycle.
+/// The `blocked-by` edges the Tasks handed in draw, keyed by file stem —
+/// the name graph findings report against. Archived Tasks enter too, and
+/// a closed one keeps its edges: a cycle through history is still a cycle,
+/// and a closed Task can be reopened into one.
+fn task_edges(records: &[Record]) -> BTreeMap<&str, Vec<&str>> {
+    let mut edges = BTreeMap::new();
+    for record in records {
+        if record.record_type() != Some(RecordType::Task) {
+            continue;
+        }
+        edges
+            .entry(path_stem(record.path()))
+            .or_insert_with(|| blocked_by(record).collect());
+    }
+    edges
+}
+
+/// The `from` edge every record draws, keyed by file stem, under the rule
+/// [`blocked_by`] states: a malformed target is a finding, never an edge.
+/// A record has at most one Origin, so a lineage is a path — one that
+/// meets itself is the corruption `check` names.
+fn origin_edges(records: &[Record]) -> BTreeMap<&str, Vec<&str>> {
+    let mut edges = BTreeMap::new();
+    for record in records {
+        edges.entry(path_stem(record.path())).or_insert_with(|| {
+            record
+                .origin()
+                .filter(|origin| grammar::id_error(origin).is_none())
+                .into_iter()
+                .collect()
+        });
+    }
+    edges
+}
+
+/// The same edges [`task_edges`] draws, each node carrying whether its
+/// Task has closed — the flag the ready gate and the unblock consequences
+/// read, and the reason this owns its ids rather than borrowing them.
 fn task_graph(records: &[Record]) -> TaskGraph {
     let mut nodes = BTreeMap::new();
     for record in records {
@@ -3208,21 +3247,61 @@ fn check_supersession_pair(
     }
 }
 
-/// Cycles among `blocked-by` edges, named on every member file at its own
-/// edge line. The tool refuses them at write, so a cycle is hand-edited
-/// corruption — without this pass it would only sit there emptying `ready`.
+/// Cycles among `blocked-by` edges. The tool refuses them at write, so a
+/// cycle is hand-edited corruption — without this pass it would only sit
+/// there emptying `ready`.
 fn check_dep_cycles(
     records: &[Record],
     by_stem: &BTreeMap<&str, &Record>,
     out: &mut Vec<FileFinding>,
 ) {
-    for cycle in task_graph(records).cycles() {
-        let walk = cycle
-            .iter()
-            .chain(cycle.first())
-            .cloned()
-            .collect::<Vec<String>>()
-            .join(" → ");
+    // A Task waiting on itself is the one cycle a single file carries, and
+    // that file names it alone; naming it again here would double it.
+    let across_files = graph::cycles(&task_edges(records))
+        .into_iter()
+        .filter(|cycle| cycle.len() > 1)
+        .collect();
+    cycle_findings(
+        across_files,
+        by_stem,
+        "blocked-by",
+        FindingCode::DepCycle,
+        out,
+    );
+}
+
+/// Cycles among `from` edges. `edit` refuses to write one, so a lineage
+/// that closes on itself is hand-edited corruption. A record whose `from`
+/// names itself is such a cycle with one member, and is named here rather
+/// than by its own file: an Origin has no verb that erases it, so a
+/// finding the mutation gate holds would freeze the record out of `edit`,
+/// the only verb that can repoint it.
+fn check_origin_cycles(
+    records: &[Record],
+    by_stem: &BTreeMap<&str, &Record>,
+    out: &mut Vec<FileFinding>,
+) {
+    cycle_findings(
+        graph::cycles(&origin_edges(records)),
+        by_stem,
+        "from",
+        FindingCode::OriginCycle,
+        out,
+    );
+}
+
+/// Each cycle named on every member file, at the line carrying the edge
+/// that closes it, with the whole walk for a reader deciding which edge to
+/// erase.
+fn cycle_findings(
+    cycles: Vec<Vec<String>>,
+    by_stem: &BTreeMap<&str, &Record>,
+    field: &'static str,
+    code: FindingCode,
+    out: &mut Vec<FileFinding>,
+) {
+    for cycle in cycles {
+        let walk = encode::id_chain(&closed_walk(&cycle));
         for (position, member) in cycle.iter().enumerate() {
             let next = &cycle[(position + 1) % cycle.len()];
             let Some(record) = by_stem.get(member.as_str()) else {
@@ -3230,19 +3309,25 @@ fn check_dep_cycles(
             };
             let line = record
                 .file()
-                .field_entries("blocked-by")
+                .field_entries(field)
                 .find(|(target, _)| target == next)
                 .and_then(|(_, line)| line);
             out.push(FileFinding {
                 path: record.path().to_owned(),
                 finding: Finding::located(
                     line,
-                    FindingCode::DepCycle,
-                    format!("blocked-by: `{next}` closes the cycle {walk}"),
+                    code,
+                    format!("{field}: `{next}` closes the cycle {walk}"),
                 ),
             });
         }
     }
+}
+
+/// A cycle walked so its ends meet, for a reader who must see where it
+/// closes.
+fn closed_walk(cycle: &[String]) -> Vec<String> {
+    cycle.iter().chain(cycle.first()).cloned().collect()
 }
 
 /// Two files claiming one id, live and archive alike: ids are never reused,
