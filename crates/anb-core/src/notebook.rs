@@ -41,9 +41,15 @@ pub(crate) const REF_KEYS: [&str; 5] = [
 /// Only the id-shaped target names a record; nothing else can be resolved,
 /// and nothing else may be mistaken for a reference.
 pub(crate) fn linked_record(link: &str) -> Option<&str> {
-    let (_, target) = link.split_once(char::is_whitespace)?;
-    let target = target.trim();
+    let (_, target) = split_link(link)?;
     grammar::id_error(target).is_none().then_some(target)
+}
+
+/// A link line split into its kind and its target, by the one rule the
+/// grammar states: a token, then the rest of the line.
+pub(crate) fn split_link(link: &str) -> Option<(&str, &str)> {
+    let (kind, target) = link.split_once(char::is_whitespace)?;
+    Some((kind, target.trim()))
 }
 
 /// A record to be created; `id: None` mints one from the title.
@@ -201,6 +207,22 @@ pub struct ListedRecord {
     pub state: String,
     pub priority: Option<u8>,
     pub title: Option<String>,
+}
+
+/// A proof one record cites, and what kind of thing it names. The host
+/// settles these: the Core holds neither git nor a filesystem, and a proof
+/// is a claim about both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CitedProof {
+    pub record: String,
+    pub kind: String,
+    pub target: String,
+}
+
+impl std::fmt::Display for CitedProof {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.kind, self.target)
+    }
 }
 
 /// An epic and where it stands: the hub Task, how many of the children it
@@ -574,6 +596,31 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok((records, scope))
     }
 
+    /// Every proof the notebook cites that names something outside it — a
+    /// commit, or a file — so the host can ask git and the filesystem which
+    /// of them are still there. A link naming another record resolves
+    /// inside the notebook and is `check`'s to judge, not the world's.
+    ///
+    /// # Errors
+    /// A storage failure.
+    pub fn cited_proofs(&self) -> Result<Vec<CitedProof>, NotebookError> {
+        let records = self.read_records()?;
+        Ok(records
+            .iter()
+            .flat_map(|record| {
+                let id = path_stem(record.path());
+                record.file().field_values("link").filter_map(move |link| {
+                    let (kind, target) = split_link(link)?;
+                    ["sha", "report"].contains(&kind).then(|| CitedProof {
+                        record: id.to_owned(),
+                        kind: kind.to_owned(),
+                        target: target.to_owned(),
+                    })
+                })
+            })
+            .collect())
+    }
+
     /// The hubs of the notebook with their progress: every epic a reader
     /// might be asked to continue, and where each stands.
     ///
@@ -592,7 +639,12 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// # Errors
     /// [`NotebookError::InvalidArgument`] on a malformed `today`, or a
     /// storage failure.
-    pub fn status(&self, today: &str, budget: Budget) -> Result<Status, NotebookError> {
+    pub fn status(
+        &self,
+        today: &str,
+        budget: Budget,
+        lost: &[CitedProof],
+    ) -> Result<Status, NotebookError> {
         let today_day = guarded_day(today)?;
         let thresholds = self.config()?.debt_thresholds();
         let records = self.read_records()?;
@@ -606,6 +658,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
             records: &records,
             resolvable: &resolvable,
             today_day,
+            lost_proofs: lost,
         };
         let inputs = StatusInputs {
             counts: live_counts(&records),

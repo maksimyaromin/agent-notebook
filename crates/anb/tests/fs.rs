@@ -344,3 +344,145 @@ mod a_notebook_that_moved {
         );
     }
 }
+
+/// Settling proofs against a real repository and a real working tree.
+mod reconciliation {
+    use super::*;
+    use anb::reconcile::lost_proofs;
+    use anb_core::CitedProof;
+    use std::process::Command;
+
+    fn cited(kind: &str, target: &str) -> CitedProof {
+        CitedProof {
+            record: "task.shipped".to_owned(),
+            kind: kind.to_owned(),
+            target: target.to_owned(),
+        }
+    }
+
+    fn git(dir: &TempDir, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .expect("git runs");
+        String::from_utf8(output.stdout).expect("git speaks UTF-8")
+    }
+
+    /// A repository with one commit, and the sha it made. `history` goes
+    /// into the commit, so two repositories never coincide on a sha.
+    fn a_repository_of(history: &str) -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        git(&dir, &["init", "-q", "."]);
+        git(&dir, &["config", "user.email", "t@e.st"]);
+        git(&dir, &["config", "user.name", "T"]);
+        fs::write(dir.path().join("f.txt"), history).unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", history]);
+        let sha = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+        (dir, sha)
+    }
+
+    fn a_repository() -> (TempDir, String) {
+        a_repository_of("one")
+    }
+
+    #[test]
+    fn a_commit_the_repository_has_is_not_lost() {
+        let (dir, sha) = a_repository();
+        assert_eq!(lost_proofs(dir.path(), &[cited("sha", &sha)]), vec![]);
+    }
+
+    #[test]
+    fn a_commit_the_repository_never_had_is_lost() {
+        let (dir, _) = a_repository();
+        let gone = cited("sha", "f00dfeedf00dfeedf00dfeedf00dfeedf00dfeed");
+        assert_eq!(
+            lost_proofs(dir.path(), std::slice::from_ref(&gone)),
+            vec![gone]
+        );
+    }
+
+    #[test]
+    fn each_answer_stays_with_the_proof_that_asked_it() {
+        let (dir, sha) = a_repository();
+        let asked = [
+            cited("sha", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            cited("sha", &sha),
+            cited("sha", "not-a-sha-at-all"),
+        ];
+        assert_eq!(
+            lost_proofs(dir.path(), &asked),
+            vec![asked[0].clone(), asked[2].clone()],
+            "the present one in the middle must not shift the answers around it"
+        );
+    }
+
+    #[test]
+    fn more_proofs_than_a_pipe_holds_still_answer() {
+        let (dir, sha) = a_repository();
+        // Well past a pipe buffer: the query cannot be written and the
+        // answers read on one thread without both ends blocking.
+        let mut asked: Vec<CitedProof> = (0..4000)
+            .map(|n| cited("sha", &format!("{n:040}")))
+            .collect();
+        asked.push(cited("sha", &sha));
+        assert_eq!(
+            lost_proofs(dir.path(), &asked).len(),
+            4000,
+            "every absent one is named, and the present one is not"
+        );
+    }
+
+    #[test]
+    fn a_report_is_settled_by_the_working_tree() {
+        let (dir, _) = a_repository();
+        fs::create_dir_all(dir.path().join("notes")).unwrap();
+        fs::write(dir.path().join("notes/there.md"), "the report").unwrap();
+        let gone = cited("report", "notes/gone.md");
+        assert_eq!(
+            lost_proofs(
+                dir.path(),
+                &[cited("report", "notes/there.md"), gone.clone()]
+            ),
+            vec![gone],
+            "a file left where it lies is a claim a stat settles"
+        );
+    }
+
+    #[test]
+    fn a_proof_nothing_here_can_settle_is_left_alone() {
+        let (dir, _) = a_repository();
+        assert_eq!(
+            lost_proofs(dir.path(), &[cited("pr", "https://example.com/pull/7")]),
+            vec![],
+            "silence means not known to be lost, never verified"
+        );
+    }
+
+    #[test]
+    fn a_notebook_outside_any_repository_diverges_from_nothing() {
+        let loose = TempDir::new().unwrap();
+        assert_eq!(
+            lost_proofs(loose.path(), &[cited("sha", "f00dfeed")]),
+            vec![],
+            "with no repository to ask, an accusation would be invented"
+        );
+    }
+
+    #[test]
+    fn the_repository_asked_is_the_notebook_s_own() {
+        let (home, sha) = a_repository_of("the notebook's own history");
+        let (elsewhere, _) = a_repository_of("a different project entirely");
+        assert_eq!(
+            lost_proofs(home.path(), &[cited("sha", &sha)]),
+            vec![],
+            "the commit is in the notebook's repository, wherever the caller stands"
+        );
+        assert_eq!(
+            lost_proofs(elsewhere.path(), &[cited("sha", &sha)]).len(),
+            1,
+            "and another repository genuinely does not have it"
+        );
+    }
+}

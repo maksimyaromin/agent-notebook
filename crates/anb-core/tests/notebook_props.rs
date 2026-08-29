@@ -5,7 +5,6 @@
 
 use anb_core::{MemoryStorage, Notebook, NotebookError, Proof, Storage};
 use proptest::prelude::*;
-
 const TODAY: &str = "2026-08-27";
 const TASK_PATH: &str = "tasks/task.demo.md";
 const BYSTANDER_PATH: &str = "notes/note.bystander.md";
@@ -200,7 +199,7 @@ mod status_fits_its_budget {
             }
             let mut storage = MemoryStorage::from_files(files);
             let status = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Tokens(ceiling))
+                .status(TODAY, Budget::Tokens(ceiling), &[])
                 .unwrap();
             let at_floor = status
                 .text

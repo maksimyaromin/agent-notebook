@@ -21,9 +21,9 @@ pub use debt::{Cited, DebtSignal, DebtThresholds};
 pub use finding::{Finding, FindingCode, Severity};
 pub use grammar::RecordFile;
 pub use notebook::{
-    Archived, Blocker, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited, Epic,
-    Expunged, FileFinding, Held, Link, ListedRecord, Notebook, NotebookError, Overview, Proof,
-    ReadyTask, Transitioned, TypeSection, View, carriers_of,
+    Archived, Blocker, CitedProof, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited,
+    Epic, Expunged, FileFinding, Held, Link, ListedRecord, Notebook, NotebookError, Overview,
+    Proof, ReadyTask, Transitioned, TypeSection, View, carriers_of,
 };
 pub use record::{Record, RecordType, TaskState};
 pub use status::{ActiveTask, Budget, Counts, Status, StatusRule, counts_phrase, epic_line};

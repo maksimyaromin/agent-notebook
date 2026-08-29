@@ -5,9 +5,9 @@
 use crate::cli::{AddArgs, CloseArgs, Command, DecideArgs, DraftArgs, EditArgs, NoteArgs, Subject};
 use anb_core::notebook::path_stem;
 use anb_core::{
-    Archived, Budget, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited, Expunged,
-    FileFinding, Finding, Held, Link, ListedRecord, Notebook, NotebookError, Overview, Proof,
-    ReadyTask, RecordType, Status, Storage, StorageError, Transitioned, View,
+    Archived, Budget, CitedProof, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited,
+    Expunged, FileFinding, Finding, Held, Link, ListedRecord, Notebook, NotebookError, Overview,
+    Proof, ReadyTask, RecordType, Status, Storage, StorageError, Transitioned, View,
 };
 
 /// How many rows a flat list shows before the truncation hint; one
@@ -103,9 +103,13 @@ impl Reply {
 /// Storage speaks only in paths under the notebook root, and a report is
 /// written wherever the work happened. `today` is the host's date — the
 /// Core holds no clock.
-pub struct Host<'a, G, R> {
+pub struct Host<'a, G, R, C> {
     pub git_by: G,
     pub read_report: R,
+    /// Which of the proofs a notebook cites the world no longer holds. The
+    /// Core holds neither git nor a filesystem, so the question is asked
+    /// out here; a caller with nothing to ask answers with an empty list.
+    pub lost_proofs: C,
     pub today: &'a str,
 }
 
@@ -114,19 +118,21 @@ pub struct Host<'a, G, R> {
 /// # Errors
 /// The Core's refusal, or the shell's own argument refusal — either
 /// renders as a recovery payload.
-pub fn execute<S, G, R>(
+pub fn execute<S, G, R, C>(
     command: Command,
     storage: &mut S,
-    host: Host<'_, G, R>,
+    host: Host<'_, G, R, C>,
 ) -> Result<Reply, NotebookError>
 where
     S: Storage,
     G: FnOnce() -> Option<String>,
     R: FnOnce(&str) -> Result<String, StorageError>,
+    C: FnOnce(&[CitedProof]) -> Vec<CitedProof>,
 {
     let Host {
         git_by,
         read_report,
+        lost_proofs,
         today,
     } = host;
     let mut notebook = Notebook::new(storage);
@@ -218,7 +224,9 @@ where
             all,
         }),
         Command::Overview => Ok(Reply::Overviewed(notebook.overview()?)),
-        Command::Status { budget, hook } => status_reply(&notebook, budget, hook, today),
+        Command::Status { budget, hook } => {
+            status_reply(&notebook, budget, hook, lost_proofs, today)
+        }
     }
 }
 
@@ -228,9 +236,12 @@ fn status_reply<S: Storage>(
     notebook: &Notebook<'_, S>,
     budget: Option<u32>,
     hook: bool,
+    lost_proofs: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
     today: &str,
 ) -> Result<Reply, NotebookError> {
-    match (budgeted_status(notebook, budget, today), hook) {
+    // Every failure here — reading the notebook to find the proofs
+    // included — passes through the one funnel the hook's fail-soft needs.
+    match (budgeted_status(notebook, budget, lost_proofs, today), hook) {
         (Ok(status), hook) => Ok(Reply::Status { status, hook }),
         (Err(_), true) => Ok(Reply::Silence),
         (Err(error), false) => Err(error),
@@ -241,13 +252,15 @@ fn status_reply<S: Storage>(
 fn budgeted_status<S: Storage>(
     notebook: &Notebook<'_, S>,
     budget: Option<u32>,
+    lost_proofs: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
     today: &str,
 ) -> Result<Status, NotebookError> {
     let ceiling = match budget {
         Some(ceiling) => Budget::from_ceiling(ceiling),
         None => notebook.config()?.budget(),
     };
-    notebook.status(today, ceiling)
+    let lost = lost_proofs(&notebook.cited_proofs()?);
+    notebook.status(today, ceiling, &lost)
 }
 
 fn edited<S: Storage>(

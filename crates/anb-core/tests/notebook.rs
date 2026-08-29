@@ -2873,7 +2873,7 @@ mod status_dashboard {
 
     fn status_text(storage: &mut MemoryStorage) -> String {
         Notebook::new(storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap()
             .text
     }
@@ -2891,7 +2891,7 @@ mod status_dashboard {
             ),
         ]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap();
         assert!(status.quiet);
         assert_eq!(status.text.lines().count(), 1);
@@ -2927,7 +2927,7 @@ mod status_dashboard {
     fn the_dashboard_opens_on_ready_work_alone() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap();
         assert!(!status.quiet);
         assert!(
@@ -2945,7 +2945,7 @@ mod status_dashboard {
             "---\nid: question.demo\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n",
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap();
         assert!(!status.quiet);
         assert!(
@@ -2962,7 +2962,7 @@ mod status_dashboard {
             &record_file("decision.demo", "decision", "active", &["kind: rule"], ""),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap();
         assert!(
             status.quiet,
@@ -3122,7 +3122,7 @@ mod debt_signals {
 
     fn debt_of(storage: &mut MemoryStorage) -> Vec<DebtSignal> {
         Notebook::new(storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap()
             .debt
     }
@@ -3324,7 +3324,7 @@ mod debt_signals {
             ),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap();
         assert_eq!(
             status.debt,
@@ -3439,7 +3439,7 @@ mod debt_signals {
             ),
         ]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap();
         let pairs: Vec<&DebtSignal> = status
             .debt
@@ -3915,7 +3915,7 @@ mod debt_signals {
             &record_file("note.demo", "note", "active", &[], &format!("{body}\n")),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap();
         assert_eq!(status.debt.len(), 6, "the model keeps every signal");
         assert_eq!(
@@ -3928,6 +3928,136 @@ mod debt_signals {
             status.text.contains("  … 1 more dangling mentions\n"),
             "{}",
             status.text
+        );
+    }
+
+    #[test]
+    fn the_proofs_a_notebook_cites_are_offered_for_the_world_to_settle() {
+        let mut storage = storage_with(&[
+            (
+                "archive/tasks/task.shipped.md",
+                &record_file(
+                    "task.shipped",
+                    "task",
+                    "closed",
+                    &[
+                        "link: sha f00dfeed",
+                        "link: report notes/report.md",
+                        "link: pr https://example.com/pull/7",
+                        "link: note note.elsewhere",
+                    ],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.elsewhere.md",
+                &record_file("note.elsewhere", "note", "active", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).cited_proofs().unwrap(),
+            vec![
+                anb_core::CitedProof {
+                    record: "task.shipped".to_owned(),
+                    kind: "sha".to_owned(),
+                    target: "f00dfeed".to_owned(),
+                },
+                anb_core::CitedProof {
+                    record: "task.shipped".to_owned(),
+                    kind: "report".to_owned(),
+                    target: "notes/report.md".to_owned(),
+                },
+            ],
+            "a commit and a file are claims about the world; a pull request \
+             is not ours to reach and a note resolves inside the notebook"
+        );
+    }
+
+    #[test]
+    fn a_proof_the_world_no_longer_holds_is_named_on_the_dashboard() {
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.shipped.md",
+            &record_file(
+                "task.shipped",
+                "task",
+                "closed",
+                &["link: sha f00dfeed"],
+                "",
+            ),
+        )]);
+        let lost = [anb_core::CitedProof {
+            record: "task.shipped".to_owned(),
+            kind: "sha".to_owned(),
+            target: "f00dfeed".to_owned(),
+        }];
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded, &lost)
+            .unwrap();
+        assert_eq!(
+            status.debt,
+            vec![DebtSignal::LostProof {
+                id: "task.shipped".to_owned(),
+                proof: "sha f00dfeed".to_owned(),
+            }],
+            "the archive is read too: a proof stays a claim after its record is filed"
+        );
+        assert!(
+            status
+                .text
+                .contains("  lost-proof: task.shipped -> sha f00dfeed\n"),
+            "{}",
+            status.text
+        );
+    }
+
+    #[test]
+    fn a_proof_the_world_still_holds_raises_nothing() {
+        let mut storage = storage_with(&[(
+            "tasks/task.shipped.md",
+            &record_file(
+                "task.shipped",
+                "task",
+                "closed",
+                &["link: sha f00dfeed"],
+                "",
+            ),
+        )]);
+        // The host settled this one and found it: nothing reaches the Core.
+        assert!(
+            Notebook::new(&mut storage)
+                .status(TODAY, Budget::Unbounded, &[])
+                .unwrap()
+                .debt
+                .iter()
+                .all(|signal| !matches!(signal, DebtSignal::LostProof { .. }))
+        );
+    }
+
+    #[test]
+    fn a_record_its_own_errors_already_condemn_is_left_to_check() {
+        let mut storage = storage_with(&[(
+            "tasks/task.broken.md",
+            &record_file(
+                "task.broken",
+                "task",
+                "closed",
+                &["from: task.never-written", "link: sha f00dfeed"],
+                "",
+            ),
+        )]);
+        let lost = [anb_core::CitedProof {
+            record: "task.broken".to_owned(),
+            kind: "sha".to_owned(),
+            target: "f00dfeed".to_owned(),
+        }];
+        assert!(
+            Notebook::new(&mut storage)
+                .status(TODAY, Budget::Unbounded, &lost)
+                .unwrap()
+                .debt
+                .iter()
+                .all(|signal| !matches!(signal, DebtSignal::LostProof { .. })),
+            "one broken file, one signal — the invalid line already names it"
         );
     }
 
@@ -4064,7 +4194,9 @@ mod budget_ladder {
 
     fn rendered(budget: Budget) -> Rendered {
         let mut storage = full_notebook();
-        let status = Notebook::new(&mut storage).status(TODAY, budget).unwrap();
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, budget, &[])
+            .unwrap();
         Rendered {
             text: status.text,
             spent: status.spent,
@@ -4232,7 +4364,9 @@ mod budget_ladder {
         ] {
             let step = {
                 let mut storage = full_notebook();
-                Notebook::new(&mut storage).status(TODAY, ceiling).unwrap()
+                Notebook::new(&mut storage)
+                    .status(TODAY, ceiling, &[])
+                    .unwrap()
             };
             let whole = anb_core::estimate_tokens(&step.text);
             assert!(
@@ -4261,7 +4395,7 @@ mod budget_ladder {
         for ceiling in [200, 100, 60, 40, 20, 10, 2] {
             let mut storage = MemoryStorage::from_files(files.clone());
             let status = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Tokens(ceiling))
+                .status(TODAY, Budget::Tokens(ceiling), &[])
                 .unwrap();
             if let Some(cut) = status.text.split("cut: ").nth(1) {
                 assert!(
@@ -4301,7 +4435,7 @@ mod budget_ladder {
             &task_file("closed", &["closed: 2026-08-25"]),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1))
+            .status(TODAY, Budget::Tokens(1), &[])
             .unwrap();
         assert!(status.quiet);
         assert!(
@@ -4368,7 +4502,7 @@ mod budget_ladder {
         }
         let mut storage = MemoryStorage::from_files(files);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1500))
+            .status(TODAY, Budget::Tokens(1500), &[])
             .unwrap();
         assert!(!status.text.contains("cut:"), "{}", status.text);
         assert!(
@@ -4464,7 +4598,7 @@ mod notebook_config {
             ),
         ]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded)
+            .status(TODAY, Budget::Unbounded, &[])
             .unwrap();
         assert_eq!(
             status.debt,

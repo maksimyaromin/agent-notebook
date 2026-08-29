@@ -43,6 +43,7 @@ fn run_reading(
     let host = Host {
         git_by: || Some(GIT_IDENTITY.to_owned()),
         read_report,
+        lost_proofs: nothing_lost,
         today: TODAY,
     };
     match execute(cli.command, storage, host) {
@@ -61,7 +62,12 @@ fn run_reading(
 
 /// A host built from plain functions, so a case can name one without
 /// spelling out two closure types.
-type PlainHost = Host<'static, fn() -> Option<String>, fn(&str) -> Result<String, StorageError>>;
+type PlainHost = Host<
+    'static,
+    fn() -> Option<String>,
+    fn(&str) -> Result<String, StorageError>,
+    fn(&[anb_core::CitedProof]) -> Vec<anb_core::CitedProof>,
+>;
 
 /// The host of a shell whose clock has gone wrong: the one fact these cases
 /// vary.
@@ -69,8 +75,15 @@ fn undated_host() -> PlainHost {
     Host {
         git_by: || None,
         read_report: missing_report,
+        lost_proofs: nothing_lost,
         today: "not-a-date",
     }
+}
+
+/// The world of a case that is not about reconciliation: it still holds
+/// every proof the notebook cites.
+fn nothing_lost(_: &[anb_core::CitedProof]) -> Vec<anb_core::CitedProof> {
+    Vec::new()
 }
 
 /// The reader for tests that never pass `--note`: every path is absent.
@@ -1333,6 +1346,7 @@ mod maintenance_replies {
             Host {
                 git_by: || None,
                 read_report: missing_report,
+                lost_proofs: nothing_lost,
                 today: TODAY,
             },
         )
@@ -1360,6 +1374,7 @@ mod maintenance_replies {
             Host {
                 git_by: || None,
                 read_report: missing_report,
+                lost_proofs: nothing_lost,
                 today: TODAY,
             },
         )
