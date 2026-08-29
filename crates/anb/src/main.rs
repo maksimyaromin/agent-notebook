@@ -2,7 +2,7 @@
 //! shell and print one reply.
 
 use anb::cli::{Cli, Command};
-use anb::fs_storage::{FsStorage, resolve_root};
+use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root};
 use anb::reply::{Host, execute};
 use anb::{json, text};
 use anb_core::NotebookError;
@@ -69,7 +69,11 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
             })));
         }
     };
-    let mut storage = FsStorage::new(resolve_root(&cwd));
+    let mut storage = FsStorage::new(notebook_root(
+        &cwd,
+        cli.notebook.as_deref(),
+        std::env::var_os(NOTEBOOK_ENV).as_deref(),
+    ));
     let today = jiff::Zoned::now().date().to_string();
 
     let host = Host {

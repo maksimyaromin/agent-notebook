@@ -1,6 +1,6 @@
 [package]
 name = "anb"
-description = "agent-notebook CLI: a project's working memory as typed records in the repository"
+description = "agent-notebook CLI: a project's working memory as typed records in plain files"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

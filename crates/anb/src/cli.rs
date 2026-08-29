@@ -12,7 +12,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "anb",
     version,
-    about = "A project's working memory as typed records in the repository"
+    about = "A project's working memory as typed records in plain files"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -20,6 +20,11 @@ pub struct Cli {
     /// Compact JSON instead of plain text, on every command.
     #[arg(long, global = true)]
     pub json: bool,
+    /// Where the notebook lives, read from here and outranking
+    /// `ANB_NOTEBOOK`, which is read from the project. By default the
+    /// nearest `.agent-notebook` at or above the working directory.
+    #[arg(long, global = true, value_name = "PATH")]
+    pub notebook: Option<std::path::PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -292,7 +297,7 @@ pub struct EditArgs {
 pub struct CloseArgs {
     pub id: String,
     /// Proof, the default route: the report file, ingested as a Note the
-    /// notebook carries, so a reader reaches it without leaving the repo.
+    /// notebook carries, so a reader reaches it through the notebook alone.
     #[arg(long)]
     pub note: Option<String>,
     /// Proof: the pull request that shipped the work.
