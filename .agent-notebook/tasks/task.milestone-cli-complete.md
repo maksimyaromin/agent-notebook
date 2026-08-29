@@ -14,6 +14,7 @@ blocked-by: task.slug-minting-cut-at-a-word-boundary
 blocked-by: task.epic-pattern-scoped-queries-status-hub-g
 blocked-by: task.git-reconciliation
 blocked-by: task.notebook-location-and-commit-policy-are
+blocked-by: task.check-finding-state-vs-residence-mismatc
 created: 2026-08-29
 updated: 2026-08-29
 ---
