@@ -6,7 +6,7 @@ title: Rust scaffold
 by: Maksim Yaromin
 via: claude-code
 tags: scaffold
-link: report .tmp/data/g1/report.md
+link: note note.report-rust-scaffold
 created: 2026-08-24
 updated: 2026-08-26
 closed: 2026-08-26

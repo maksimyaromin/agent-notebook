@@ -6,7 +6,7 @@ title: Milestone: self-host switch
 by: Maksim Yaromin
 via: claude-code
 tags: milestone
-link: report .tmp/data/m1/report.md
+link: note note.report-milestone-self-host-switch
 blocked-by: task.cli-task-cycle
 blocked-by: task.core-status-budget
 created: 2026-08-29

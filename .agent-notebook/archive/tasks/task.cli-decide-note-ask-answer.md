@@ -6,7 +6,7 @@ title: CLI: decide / note / ask / answer
 by: Maksim Yaromin
 via: claude-code
 tags: cli
-link: report .tmp/data/l2/report.md
+link: note note.report-cli-decide-note-ask-answer
 blocked-by: task.core-record-model-invariants
 created: 2026-08-24
 updated: 2026-08-29

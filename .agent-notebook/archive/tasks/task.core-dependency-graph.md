@@ -6,7 +6,7 @@ title: Core: dependency graph
 by: Maksim Yaromin
 via: claude-code
 tags: core
-link: report .tmp/data/c3/report.md
+link: note note.report-core-dependency-graph
 blocked-by: task.core-record-model-invariants
 created: 2026-08-24
 updated: 2026-08-27
