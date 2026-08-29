@@ -5,7 +5,7 @@ Guidance for coding agents (Claude Code, Codex, Pi, and others) working in this 
 
 ## Project
 
-**agent-notebook** (anb) stores a project's working memory in the repository as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.agent-notebook/` (CLI named `anb`, directory the full word — owner's call, 2026-08-25) — read and mutated by any agent through a Rust CLI (owner's call, 2026-08-25 — for fun; ADR 0006 supersedes 0003 Go). The backlog is the deepest-worked pattern of the notebook, not the whole of it.
+**agent-notebook** (anb) stores a project's working memory as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.agent-notebook/` (CLI named `anb`, directory the full word — owner's call, 2026-08-25) — read and mutated by any agent through a Rust CLI (owner's call, 2026-08-25 — for fun; ADR 0006 supersedes 0003 Go). The backlog is the deepest-worked pattern of the notebook, not the whole of it.
 
 Status: self-hosted. The backlog lives in the notebook itself (`.agent-notebook/`), read and mutated only through the anb CLI; the concept spec is grilled and frozen (2026-08-24).
 
@@ -22,7 +22,7 @@ Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byt
 - `.tmp/` — git-ignored. Scratch space AND the standard home of all working documents at this stage: nothing under it may be moved or copied elsewhere in the repo. Never use `/tmp`.
 - `.claude/` — local agent config and skills, git-ignored.
 - `.agents/` — reserved for skills and agent config that must be committed and shared.
-- `.agent-notebook/` — the notebook: the committed source of truth for Tasks, Decisions, Notes, Questions. Mutate it only through the anb CLI, never by hand-editing the files.
+- `.agent-notebook/` — the notebook: the source of truth for Tasks, Decisions, Notes, Questions. Mutate it only through the anb CLI, never by hand-editing the files. This project keeps it at the repo root and commits it by choice; where a notebook sits and whether it is committed are configuration (`--notebook`, `ANB_NOTEBOOK`), not something anb requires.
 
 ## Working documents (all under `.tmp/`, deliberately uncommitted)
 

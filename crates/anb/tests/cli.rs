@@ -1252,6 +1252,8 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "check", "--all"],
         vec!["anb", "archive", "task.x"],
         vec!["anb", "expunge", "task.x"],
+        vec!["anb", "--notebook", "elsewhere", "list"],
+        vec!["anb", "list", "--notebook", "elsewhere"],
         vec![
             "anb",
             "edit",

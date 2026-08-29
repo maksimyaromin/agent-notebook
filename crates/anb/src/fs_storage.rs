@@ -5,25 +5,54 @@
 //! so a reader never sees a half-written record.
 
 use anb_core::{Storage, StorageError};
+use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-/// Where the notebook lives: the nearest ancestor of `start` already
-/// carrying one, the search bounded by the repository — the notebook is
-/// committed with its code, so a directory above `.git` is never read.
-/// At the repository root the notebook appears on first write; outside any
-/// repository, `start` itself hosts it.
-#[must_use]
-pub fn resolve_root(start: &Path) -> PathBuf {
+/// The directory a relative notebook path is read from: the nearest
+/// ancestor of `start` already holding a notebook or a repository, else
+/// `start` itself. A directory above `.git` belongs to another project.
+fn project_anchor(start: &Path) -> &Path {
     for dir in start.ancestors() {
-        let root = dir.join(NOTEBOOK_DIR);
-        if root.is_dir() || dir.join(".git").exists() {
-            return root;
+        if dir.join(NOTEBOOK_DIR).is_dir() || dir.join(".git").exists() {
+            return dir;
         }
     }
-    start.join(NOTEBOOK_DIR)
+    start
 }
+
+/// Where the notebook lives when nobody names one: `.agent-notebook` in the
+/// project `start` belongs to. At the repository root it appears on first
+/// write; outside any repository, `start` itself hosts it.
+#[must_use]
+pub fn resolve_root(start: &Path) -> PathBuf {
+    project_anchor(start).join(NOTEBOOK_DIR)
+}
+
+/// The notebook root for this call: the path the caller named, else the one
+/// the environment names, else [`resolve_root`]'s default. A notebook may
+/// sit beside the code and be committed with it, hide in a git-ignored
+/// corner, or live outside the repository altogether.
+///
+/// A relative path anchors differently in the two, because they are typed
+/// at different moments: a flag arrives with a known working directory and
+/// is read from there, while `ANB_NOTEBOOK` is exported once and outlives
+/// every `cd`, so it is read from the project. Anchoring the variable on
+/// the working directory would make one export mean a different notebook in
+/// every directory.
+#[must_use]
+pub fn notebook_root(start: &Path, named: Option<&Path>, from_env: Option<&OsStr>) -> PathBuf {
+    if let Some(named) = named {
+        return start.join(named);
+    }
+    match from_env.filter(|chosen| !chosen.is_empty()) {
+        Some(chosen) => project_anchor(start).join(chosen),
+        None => resolve_root(start),
+    }
+}
+
+pub const NOTEBOOK_ENV: &str = "ANB_NOTEBOOK";
 
 const NOTEBOOK_DIR: &str = ".agent-notebook";
 
