@@ -3,6 +3,7 @@
 
 use anb::cli::{Cli, Command};
 use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root};
+use anb::reconcile::lost_proofs;
 use anb::reply::{Host, execute};
 use anb::{json, text};
 use anb_core::NotebookError;
@@ -69,16 +70,18 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
             })));
         }
     };
-    let mut storage = FsStorage::new(notebook_root(
+    let root = notebook_root(
         &cwd,
         cli.notebook.as_deref(),
         std::env::var_os(NOTEBOOK_ENV).as_deref(),
-    ));
+    );
+    let mut storage = FsStorage::new(root.clone());
     let today = jiff::Zoned::now().date().to_string();
 
     let host = Host {
         git_by: git_user_name,
         read_report,
+        lost_proofs: |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited),
         today: &today,
     };
     match execute(cli.command, &mut storage, host) {

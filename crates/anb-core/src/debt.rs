@@ -8,6 +8,7 @@
 
 use crate::grammar;
 use crate::mention;
+use crate::notebook::CitedProof;
 use crate::notebook::path_stem;
 use crate::record::{Record, RecordType};
 use std::collections::BTreeMap;
@@ -76,6 +77,10 @@ pub enum DebtSignal {
     UndeclaredPair { first: Cited, second: Cited },
     /// A record excluded from every derived query by its error findings.
     Invalid { path: String, errors: usize },
+    /// A proof naming something the world no longer holds — a commit this
+    /// repository does not have, a report file that is gone. Git and the
+    /// working tree outrank the record: the proof is what is wrong.
+    LostProof { id: String, proof: String },
 }
 
 impl DebtSignal {
@@ -92,6 +97,7 @@ impl DebtSignal {
             DebtSignal::DanglingMention { .. } => "dangling-mention",
             DebtSignal::UndeclaredPair { .. } => "undeclared-pair",
             DebtSignal::Invalid { .. } => "invalid",
+            DebtSignal::LostProof { .. } => "lost-proof",
         }
     }
 
@@ -118,6 +124,7 @@ impl DebtSignal {
                 let unit = if *errors == 1 { "error" } else { "errors" };
                 format!("{code}: {path} ({errors} {unit})")
             }
+            DebtSignal::LostProof { id, proof } => format!("{code}: {id} -> {proof}"),
         }
     }
 }
@@ -129,6 +136,8 @@ pub(crate) struct DebtSources<'a> {
     pub records: &'a [Record],
     pub resolvable: &'a BTreeMap<&'a str, &'a Record>,
     pub today_day: i64,
+    /// The cited proofs the world no longer holds, as the host found them.
+    pub lost_proofs: &'a [CitedProof],
 }
 
 /// A record's error findings plus a reference into nothing: the exclusion
@@ -180,6 +189,7 @@ pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) ->
         collect_dangling_mentions(record, sources.resolvable, &mut classes);
     }
     classes.pairs = undeclared_pairs(&valid, sources.resolvable);
+    classes.lost_proofs = lost_proofs(sources);
     // A corrupt file is not a hint the reader may decline: no verb can move
     // a record out of the archive, so an invalid one there is the least
     // recoverable of all and the last that may go unsaid.
@@ -206,6 +216,7 @@ struct SignalClasses {
     review_due: Vec<DebtSignal>,
     dangling: Vec<DebtSignal>,
     pairs: Vec<DebtSignal>,
+    lost_proofs: Vec<DebtSignal>,
     invalid: Vec<DebtSignal>,
 }
 
@@ -221,6 +232,7 @@ impl SignalClasses {
             self.review_due,
             self.dangling,
             self.pairs,
+            self.lost_proofs,
             self.invalid,
         ] {
             class.sort_by_key(signal_rank);
@@ -228,6 +240,35 @@ impl SignalClasses {
         }
         ordered
     }
+}
+
+/// The proofs the world no longer holds, as the host settled them.
+///
+/// Between the record and the world outside it, the world wins: a commit
+/// that is gone was rebased or dropped, a report file that is gone was
+/// moved or deleted, and either way the record is left pointing at nothing.
+/// Nothing is repaired — the tool cannot know what the proof meant, and
+/// inventing one would be worse than naming the gap. Any record counts, not
+/// only a closed one: a stale proof is stale wherever it sits, and the
+/// archive is read too, since a proof stays a claim after the record it
+/// proves has been filed. A record already excluded by its own errors is
+/// left to `check`, which names it once and better.
+fn lost_proofs(sources: &DebtSources<'_>) -> Vec<DebtSignal> {
+    sources
+        .lost_proofs
+        .iter()
+        .filter(|lost| {
+            sources
+                .records
+                .iter()
+                .find(|record| crate::notebook::path_stem(record.path()) == lost.record)
+                .is_some_and(|record| !is_excluded(record, sources.resolvable))
+        })
+        .map(|lost| DebtSignal::LostProof {
+            id: lost.record.clone(),
+            proof: lost.to_string(),
+        })
+        .collect()
 }
 
 /// Oldest first where the signal carries an age; the classes without one
@@ -245,6 +286,7 @@ fn signal_rank(signal: &DebtSignal) -> (i64, String) {
         DebtSignal::DanglingMention { id, target } => (0, format!("{id} {target}")),
         DebtSignal::UndeclaredPair { .. } => (0, String::new()),
         DebtSignal::Invalid { path, .. } => (0, path.clone()),
+        DebtSignal::LostProof { id, proof } => (0, format!("{id} {proof}")),
     }
 }
 
