@@ -6,6 +6,7 @@
 //! what is no longer there. It never repairs: which commit a lost proof
 //! meant is not something anything here can know.
 
+use crate::fs_storage::project_anchor;
 use anb_core::CitedProof;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -13,18 +14,22 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// The proofs `root`'s notebook cites that the world no longer holds.
+/// The proofs the notebook at `root` cites that the world no longer holds.
 ///
 /// A proof whose kind nothing here can settle is left alone: silence means
-/// "not known to be lost", never "verified".
+/// "not known to be lost", never "verified". A report path is read from the
+/// project rather than from the notebook directory or the caller's working
+/// directory — a path in a record outlives the shell that typed it, and the
+/// project is the only base a later reader shares.
 #[must_use]
 pub fn lost_proofs(root: &Path, cited: &[CitedProof]) -> Vec<CitedProof> {
     let gone = absent_commits(root, cited);
+    let project = project_anchor(&ask_in(root)).to_owned();
     cited
         .iter()
         .filter(|proof| match proof.kind.as_str() {
             "sha" => gone.contains(&proof.target),
-            "report" => !root.join(&proof.target).exists(),
+            "report" => !project.join(&proof.target).exists(),
             _ => false,
         })
         .cloned()
@@ -82,7 +87,7 @@ fn absent_commits(root: &Path, cited: &[CitedProof]) -> BTreeSet<String> {
         .collect()
 }
 
-/// Where to ask git: the notebook's own directory, since a notebook may sit
+/// Where to stand while asking: inside the notebook, since it may sit
 /// anywhere and the working directory may belong to another repository
 /// entirely. A root not yet on disk falls back to its nearest existing
 /// ancestor, so a first-run notebook still asks the right repository.
