@@ -5,9 +5,9 @@
 use crate::cli::{AddArgs, CloseArgs, Command, DecideArgs, DraftArgs, EditArgs, NoteArgs, Subject};
 use anb_core::notebook::path_stem;
 use anb_core::{
-    Archived, Budget, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited, FileFinding,
-    Finding, Held, Link, ListedRecord, Notebook, NotebookError, Overview, Proof, ReadyTask,
-    RecordType, Status, Storage, StorageError, Transitioned, View,
+    Archived, Budget, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited, Expunged,
+    FileFinding, Finding, Held, Link, ListedRecord, Notebook, NotebookError, Overview, Proof,
+    ReadyTask, RecordType, Status, Storage, StorageError, Transitioned, View,
 };
 
 /// How many rows a flat list shows before the truncation hint; one
@@ -66,6 +66,7 @@ pub enum Reply {
         all: bool,
     },
     Archived(Archived),
+    Expunged(Expunged),
     Edited(Edited),
     Searched {
         query: String,
@@ -209,6 +210,7 @@ where
             all,
         }),
         Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id)?)),
+        Command::Expunge { id } => Ok(Reply::Expunged(notebook.expunge(&id)?)),
         Command::Edit(args) => edited(&mut notebook, args, today),
         Command::Search { query, all } => Ok(Reply::Searched {
             rows: notebook.search(&query)?,
@@ -334,6 +336,12 @@ impl Recovery {
                     recovery.tries.extend(transition_retries(action, id));
                 }
             }
+            NotebookError::StillReferenced { blockers, .. } => {
+                recovery.details = blockers.iter().map(ToString::to_string).collect();
+                recovery.tries.extend(
+                    anb_core::carriers_of(blockers).map(|carrier| format!("anb view {carrier}")),
+                );
+            }
             NotebookError::DuplicateId { id, .. } => {
                 recovery.tries.push(format!("anb view {id}"));
                 recovery.tries.push("anb add \"<title>\"".to_owned());
@@ -405,6 +413,7 @@ fn error_code(error: &NotebookError) -> &'static str {
         NotebookError::InvalidTransition { .. } => "invalid-transition",
         NotebookError::InvalidArgument { .. } => "invalid-argument",
         NotebookError::DuplicateId { .. } => "duplicate-id",
+        NotebookError::StillReferenced { .. } => "still-referenced",
         NotebookError::DanglingRef { .. } => "dangling-ref",
         NotebookError::CannotSupersede { .. } => "cannot-supersede",
         NotebookError::WouldCycle { .. } => "would-cycle",

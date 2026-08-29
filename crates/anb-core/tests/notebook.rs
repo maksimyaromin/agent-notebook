@@ -3,8 +3,8 @@
 //! derive from the format's canonical form, never from running the code.
 
 use anb_core::{
-    Budget, DebtSignal, Draft, Edit, FindingCode, Link, MemoryStorage, Notebook, NotebookError,
-    Proof, RecordType, Storage, StorageError, Transitioned,
+    Blocker, Budget, DebtSignal, Draft, Edit, FindingCode, Link, MemoryStorage, Notebook,
+    NotebookError, Proof, RecordType, Storage, StorageError, Transitioned,
 };
 
 const TODAY: &str = "2026-08-27";
@@ -4378,6 +4378,292 @@ mod notebook_config {
                 id: "question.demo".into(),
                 days: 3
             }]
+        );
+    }
+}
+
+mod expunge_verb {
+    use super::*;
+
+    fn blockers_of(storage: &mut MemoryStorage, id: &str) -> Vec<Blocker> {
+        match Notebook::new(storage).expunge(id).unwrap_err() {
+            NotebookError::StillReferenced { blockers, .. } => blockers,
+            other => panic!("expected a refusal naming the blockers, got {other:?}"),
+        }
+    }
+
+    fn held_by(carrier: &str, through: &'static str) -> Blocker {
+        Blocker {
+            carrier: carrier.to_owned(),
+            through,
+        }
+    }
+
+    #[test]
+    fn an_unreferenced_record_leaves_no_trace() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.mistake.md",
+                &record_file("note.mistake", "note", "active", &[], ""),
+            ),
+            ("tasks/task.demo.md", &task_file("open", &[])),
+        ]);
+        let gone = Notebook::new(&mut storage).expunge("note.mistake").unwrap();
+
+        assert_eq!(gone.paths, vec!["notes/note.mistake.md"]);
+        assert_eq!(storage.list("notes").unwrap(), Vec::<String>::new());
+        assert!(
+            storage.read("tasks/task.demo.md").is_ok(),
+            "one record leaves; every other byte stays"
+        );
+    }
+
+    #[test]
+    fn every_kind_of_inbound_edge_holds_the_record_and_is_named() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.mistake.md",
+                &record_file("note.mistake", "note", "active", &[], ""),
+            ),
+            (
+                "notes/note.heir.md",
+                &record_file(
+                    "note.heir",
+                    "note",
+                    "active",
+                    &["supersedes: note.mistake"],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.replaced.md",
+                &record_file(
+                    "note.replaced",
+                    "note",
+                    "retired",
+                    &["superseded-by: note.mistake"],
+                    "",
+                ),
+            ),
+            (
+                "questions/question.routed.md",
+                &record_file(
+                    "question.routed",
+                    "question",
+                    "routed",
+                    &["routed-to: note.mistake"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.born.md",
+                &record_file("task.born", "task", "open", &["from: note.mistake"], ""),
+            ),
+            (
+                "tasks/task.proved.md",
+                &record_file(
+                    "task.proved",
+                    "task",
+                    "closed",
+                    &["link: note note.mistake"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.citing.md",
+                &record_file(
+                    "task.citing",
+                    "task",
+                    "open",
+                    &[],
+                    "grew out of note.mistake\n",
+                ),
+            ),
+        ]);
+        // Notebook order: type-major as every listing groups, then by path.
+        assert_eq!(
+            blockers_of(&mut storage, "note.mistake"),
+            vec![
+                held_by("task.born", "from"),
+                held_by("task.citing", "body"),
+                held_by("task.proved", "link"),
+                held_by("note.heir", "supersedes"),
+                held_by("note.replaced", "superseded-by"),
+                held_by("question.routed", "routed-to"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_link_that_names_no_record_holds_nothing() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.mistake.md",
+                &record_file("note.mistake", "note", "active", &[], ""),
+            ),
+            (
+                "tasks/task.shipped.md",
+                &record_file(
+                    "task.shipped",
+                    "task",
+                    "closed",
+                    &[
+                        "link: report notes/note.mistake.md",
+                        "link: pr note.mistake/7",
+                    ],
+                    "",
+                ),
+            ),
+        ]);
+        assert!(
+            Notebook::new(&mut storage).expunge("note.mistake").is_ok(),
+            "a path and a URL are not references, however they read"
+        );
+    }
+
+    #[test]
+    fn a_record_claiming_two_files_loses_both() {
+        let text = record_file("note.mistake", "note", "retired", &[], "");
+        let mut storage = storage_with(&[
+            ("notes/note.mistake.md", &text),
+            ("archive/notes/note.mistake.md", &text),
+        ]);
+        let gone = Notebook::new(&mut storage).expunge("note.mistake").unwrap();
+        assert_eq!(
+            gone.paths,
+            vec!["notes/note.mistake.md", "archive/notes/note.mistake.md"],
+            "an interrupted archive move leaves two files; no trace means neither"
+        );
+        assert!(
+            Notebook::new(&mut storage).record("note.mistake").is_err(),
+            "and the id resolves to nothing anywhere"
+        );
+    }
+
+    #[test]
+    fn a_refused_expunge_touches_nothing() {
+        let files = [
+            (
+                "notes/note.mistake.md",
+                record_file("note.mistake", "note", "active", &[], ""),
+            ),
+            (
+                "tasks/task.citing.md",
+                record_file("task.citing", "task", "open", &[], "see note.mistake\n"),
+            ),
+        ];
+        let mut storage =
+            storage_with(&files.each_ref().map(|(path, text)| (*path, text.as_str())));
+        blockers_of(&mut storage, "note.mistake");
+        for (path, text) in &files {
+            assert_eq!(&storage.read(path).unwrap(), text);
+        }
+    }
+
+    #[test]
+    fn repairing_the_last_reference_opens_the_same_call() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.mistake.md",
+                &record_file("task.mistake", "task", "open", &[], ""),
+            ),
+            (
+                "tasks/task.waiting.md",
+                &record_file(
+                    "task.waiting",
+                    "task",
+                    "open",
+                    &["blocked-by: task.mistake"],
+                    "",
+                ),
+            ),
+        ]);
+        blockers_of(&mut storage, "task.mistake");
+        Notebook::new(&mut storage)
+            .unblock("task.waiting", "task.mistake", TODAY)
+            .unwrap();
+        assert!(Notebook::new(&mut storage).expunge("task.mistake").is_ok());
+    }
+
+    #[test]
+    fn a_quoted_id_is_prose_about_a_record_and_holds_nothing() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.mistake.md",
+                &record_file("note.mistake", "note", "active", &[], ""),
+            ),
+            (
+                "notes/note.talking.md",
+                &record_file(
+                    "note.talking",
+                    "note",
+                    "active",
+                    &[],
+                    "the id `note.mistake` is a bad name\n",
+                ),
+            ),
+        ]);
+        assert!(Notebook::new(&mut storage).expunge("note.mistake").is_ok());
+    }
+
+    #[test]
+    fn a_record_citing_its_own_id_does_not_hold_itself() {
+        let mut storage = storage_with(&[(
+            "notes/note.mistake.md",
+            &record_file(
+                "note.mistake",
+                "note",
+                "active",
+                &[],
+                "note.mistake was a slip\n",
+            ),
+        )]);
+        assert!(Notebook::new(&mut storage).expunge("note.mistake").is_ok());
+    }
+
+    #[test]
+    fn an_archived_mistake_is_expunged_where_it_lies() {
+        let mut storage = storage_with(&[(
+            "archive/notes/note.mistake.md",
+            &record_file("note.mistake", "note", "retired", &[], ""),
+        )]);
+        let gone = Notebook::new(&mut storage).expunge("note.mistake").unwrap();
+        assert_eq!(gone.paths, vec!["archive/notes/note.mistake.md"]);
+    }
+
+    #[test]
+    fn an_invalid_record_still_holds_the_id_it_names() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.mistake.md",
+                &record_file("note.mistake", "note", "active", &[], ""),
+            ),
+            (
+                "tasks/task.broken.md",
+                &record_file("task.broken", "task", "bogus", &["from: note.mistake"], ""),
+            ),
+        ]);
+        assert_eq!(
+            blockers_of(&mut storage, "note.mistake"),
+            vec![held_by("task.broken", "from")],
+            "a file the tool refuses to mutate is the worst place to leave a dangling reference"
+        );
+    }
+
+    #[test]
+    fn a_second_expunge_says_the_record_is_gone_rather_than_claiming_success() {
+        let mut storage = storage_with(&[(
+            "notes/note.mistake.md",
+            &record_file("note.mistake", "note", "active", &[], ""),
+        )]);
+        Notebook::new(&mut storage).expunge("note.mistake").unwrap();
+        assert_eq!(
+            Notebook::new(&mut storage)
+                .expunge("note.mistake")
+                .unwrap_err(),
+            NotebookError::UnknownId {
+                id: "note.mistake".to_owned()
+            }
         );
     }
 }

@@ -34,6 +34,18 @@ pub(crate) const REF_KEYS: [&str; 5] = [
     "blocked-by",
 ];
 
+/// The record a `link` line points at, if it points at one at all.
+///
+/// A link is `<kind> <target>`, and its target is a pull request, a commit,
+/// a path, or — since a close may carry its report as a Note — a record id.
+/// Only the id-shaped target names a record; nothing else can be resolved,
+/// and nothing else may be mistaken for a reference.
+pub(crate) fn linked_record(link: &str) -> Option<&str> {
+    let (_, target) = link.split_once(char::is_whitespace)?;
+    let target = target.trim();
+    grammar::id_error(target).is_none().then_some(target)
+}
+
 /// A record to be created; `id: None` mints one from the title.
 pub struct Draft {
     pub record_type: RecordType,
@@ -191,6 +203,30 @@ pub struct ListedRecord {
     pub title: Option<String>,
 }
 
+/// A record removed as a mistake, and every file that is gone. One id can
+/// claim two files after an interrupted archive move; leaving no trace
+/// means leaving neither.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Expunged {
+    pub id: String,
+    pub paths: Vec<String>,
+}
+
+/// One record standing in the way of an expunge, and the edge that holds
+/// it: an envelope key, or the body that cites the id in prose. One carrier
+/// can hold several, so a blocker is an edge, not a record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Blocker {
+    pub carrier: String,
+    pub through: &'static str,
+}
+
+impl std::fmt::Display for Blocker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} — {}", self.carrier, self.through)
+    }
+}
+
 /// A record moved into the archive; `already` marks the replay.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Archived {
@@ -308,6 +344,12 @@ pub enum NotebookError {
         id: String,
         holder: String,
     },
+    /// An expunge would leave the notebook pointing at nothing. Every
+    /// blocker is named, since repairing them is the whole path forward.
+    StillReferenced {
+        id: String,
+        blockers: Vec<Blocker>,
+    },
     /// A reference argument names a record that does not exist.
     DanglingRef {
         field: &'static str,
@@ -347,6 +389,11 @@ impl std::fmt::Display for NotebookError {
             NotebookError::InvalidArgument { reason } => f.write_str(reason),
             NotebookError::DuplicateId { id, holder } => {
                 write!(f, "`{id}` already exists at {holder}")
+            }
+            NotebookError::StillReferenced { id, blockers } => {
+                let records = carriers_of(blockers).count();
+                let unit = if records == 1 { "record" } else { "records" };
+                write!(f, "`{id}` is still referenced by {records} {unit}")
             }
             NotebookError::DanglingRef { field, target } => {
                 write!(f, "{field}: `{target}` names no record")
@@ -1228,6 +1275,46 @@ impl<'a, S: Storage> Notebook<'a, S> {
         })
     }
 
+    /// Delete a record born by mistake, wherever it sits. Retirement ends
+    /// something that was once true and the archive keeps history; a record
+    /// that should never have existed is the third case, and it leaves no
+    /// trace.
+    ///
+    /// The guard is the whole verb: every inbound edge is named and the
+    /// call refuses, since the only alternative to repairing them first is
+    /// a notebook pointing at nothing.
+    ///
+    /// A second call finds nothing and says so: with the record gone there
+    /// is nothing left to tell an expunge already done from an id that
+    /// never existed, and reporting a typo as success would be worse than
+    /// refusing a replay.
+    ///
+    /// # Errors
+    /// [`NotebookError::StillReferenced`] naming every blocker,
+    /// [`NotebookError::UnknownId`], [`NotebookError::InvalidArgument`] on
+    /// a malformed id, or a storage failure.
+    pub fn expunge(&mut self, id: &str) -> Result<Expunged, NotebookError> {
+        parsed_type(id)?;
+        let paths = self.holder_paths(id)?;
+        if paths.is_empty() {
+            return Err(NotebookError::UnknownId { id: id.to_owned() });
+        }
+        let blockers = inbound_edges(&self.read_records()?, id);
+        if !blockers.is_empty() {
+            return Err(NotebookError::StillReferenced {
+                id: id.to_owned(),
+                blockers,
+            });
+        }
+        for path in &paths {
+            self.storage.remove(path)?;
+        }
+        Ok(Expunged {
+            id: id.to_owned(),
+            paths,
+        })
+    }
+
     /// Refuse the move when the destination already holds different bytes —
     /// ids are never reused, and overwriting a divergent archived copy would
     /// delete history. Identical bytes pass: that is the replay of a move
@@ -1530,23 +1617,32 @@ impl<'a, S: Storage> Notebook<'a, S> {
 
     /// Where `id` lives, if anywhere: its live path, else its archive path.
     fn holder_path(&self, id: &str) -> Result<Option<String>, NotebookError> {
+        Ok(self.holder_paths(id)?.into_iter().next())
+    }
+
+    /// Every canonical path holding `id`, live before archived. Two is the
+    /// `duplicate-id` corruption an interrupted archive move leaves; the
+    /// verbs that read one record take the first, and only expunge, which
+    /// must leave nothing behind, needs them all.
+    fn holder_paths(&self, id: &str) -> Result<Vec<String>, NotebookError> {
         let Some(record_type) = id
             .split_once('.')
             .and_then(|(word, _)| RecordType::from_word(word))
         else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
+        let mut holders = Vec::new();
         for archived in [false, true] {
             let path = record_path(id, record_type, archived);
             match self.storage.read(&path) {
                 // A file that is not UTF-8 still claims its id — ids are
                 // never reused, unreadable holders included.
-                Ok(_) | Err(StorageError::NotUtf8 { .. }) => return Ok(Some(path)),
+                Ok(_) | Err(StorageError::NotUtf8 { .. }) => holders.push(path),
                 Err(StorageError::NotFound { .. }) => {}
                 Err(error) => return Err(error.into()),
             }
         }
-        Ok(None)
+        Ok(holders)
     }
 
     fn read_records(&self) -> Result<Vec<Record>, NotebookError> {
@@ -2437,6 +2533,59 @@ fn dangling_finding(record: &Record, key: &str, target: &str, line: Option<usize
     }
 }
 
+/// Every edge pointing at `target` from somewhere else, in file order.
+///
+/// An envelope key and a body citation both count, and an invalid record's
+/// edges count too: what makes an edge a blocker is that removing the
+/// target would leave it pointing at nothing, and a file the tool refuses
+/// to mutate is the worst place to leave that. The target's own edges are
+/// not blockers — they leave with it.
+fn inbound_edges(records: &[Record], target: &str) -> Vec<Blocker> {
+    let mut blockers = Vec::new();
+    for record in records {
+        let carrier = path_stem(record.path());
+        if carrier == target {
+            continue;
+        }
+        let mut held_by = |through| {
+            blockers.push(Blocker {
+                carrier: carrier.to_owned(),
+                through,
+            });
+        };
+        for key in REF_KEYS {
+            if record.file().field_values(key).any(|value| value == target) {
+                held_by(key);
+            }
+        }
+        if record
+            .file()
+            .field_values("link")
+            .filter_map(linked_record)
+            .any(|linked| linked == target)
+        {
+            held_by("link");
+        }
+        if mention::mentions(record.file().body()).contains(&target) {
+            held_by("body");
+        }
+    }
+    blockers
+}
+
+/// The distinct records among a blocker list, first appearance first: one
+/// carrier is one thing to open, however many of its lines hold the record.
+pub fn carriers_of(blockers: &[Blocker]) -> impl Iterator<Item = &str> {
+    let mut seen: Vec<&str> = Vec::new();
+    blockers.iter().filter_map(move |blocker| {
+        let carrier = blocker.carrier.as_str();
+        (!seen.contains(&carrier)).then(|| {
+            seen.push(carrier);
+            carrier
+        })
+    })
+}
+
 fn error_findings(record: &Record) -> Vec<Finding> {
     record
         .findings()
@@ -2447,15 +2596,25 @@ fn error_findings(record: &Record) -> Vec<Finding> {
 }
 
 fn check_refs(record: &Record, by_stem: &BTreeMap<&str, &Record>, out: &mut Vec<FileFinding>) {
+    let mut dangling = |key, target: &str, line| {
+        if grammar::id_error(target).is_some() || by_stem.contains_key(target) {
+            return;
+        }
+        out.push(FileFinding {
+            path: record.path().to_owned(),
+            finding: dangling_finding(record, key, target, line),
+        });
+    };
     for key in REF_KEYS {
         for (target, line) in record.file().field_entries(key) {
-            if grammar::id_error(target).is_some() || by_stem.contains_key(target) {
-                continue;
-            }
-            out.push(FileFinding {
-                path: record.path().to_owned(),
-                finding: dangling_finding(record, key, target, line),
-            });
+            dangling(key, target, line);
+        }
+    }
+    // A proof carried as a Note is a reference like any other: the whole
+    // point of ingesting the report was that the notebook could reach it.
+    for (link, line) in record.file().field_entries("link") {
+        if let Some(target) = linked_record(link) {
+            dangling("link", target, line);
         }
     }
 }

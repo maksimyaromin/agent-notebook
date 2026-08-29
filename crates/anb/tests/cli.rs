@@ -1251,6 +1251,7 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "status", "--budget", "0", "--hook"],
         vec!["anb", "check", "--all"],
         vec!["anb", "archive", "task.x"],
+        vec!["anb", "expunge", "task.x"],
         vec![
             "anb",
             "edit",
@@ -1392,6 +1393,101 @@ mod maintenance_replies {
             @r"
         error[invalid-transition]: `task.demo` is active; valid: close
         try: anb close task.demo --note <path>
+        "
+        );
+    }
+
+    #[test]
+    fn expunge_answers_the_file_that_is_gone() {
+        let mut storage = storage_with(&[(
+            "notes/note.mistake.md".to_owned(),
+            record_file(
+                "note.mistake",
+                "note",
+                "active",
+                "Written in error",
+                &[],
+                "",
+            ),
+        )]);
+        assert_eq!(
+            ok(&mut storage, &["expunge", "note.mistake"]),
+            "ok: expunge note.mistake — notes/note.mistake.md removed\n"
+        );
+    }
+
+    #[test]
+    fn a_held_expunge_lists_every_blocker_with_its_carrier() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.mistake.md".to_owned(),
+                record_file(
+                    "note.mistake",
+                    "note",
+                    "active",
+                    "Written in error",
+                    &[],
+                    "",
+                ),
+            ),
+            open_task("task.born", "Born from the slip", &["from: note.mistake"]),
+            (
+                "tasks/task.citing.md".to_owned(),
+                record_file(
+                    "task.citing",
+                    "task",
+                    "open",
+                    "A task naming it in prose",
+                    &[],
+                    "grew out of note.mistake\n",
+                ),
+            ),
+        ]);
+        assert_snapshot!(
+            refused(&mut storage, &["expunge", "note.mistake"]),
+            @r"
+        error[still-referenced]: `note.mistake` is still referenced by 2 records
+          task.born — from
+          task.citing — body
+        try: anb view task.born
+        try: anb view task.citing
+        "
+        );
+    }
+
+    #[test]
+    fn one_carrier_holding_two_edges_is_opened_once() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.mistake.md".to_owned(),
+                record_file(
+                    "note.mistake",
+                    "note",
+                    "active",
+                    "Written in error",
+                    &[],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.holder.md".to_owned(),
+                record_file(
+                    "task.holder",
+                    "task",
+                    "open",
+                    "Holding it twice over",
+                    &["from: note.mistake"],
+                    "and it says so again: note.mistake\n",
+                ),
+            ),
+        ]);
+        assert_snapshot!(
+            refused(&mut storage, &["expunge", "note.mistake"]),
+            @r"
+        error[still-referenced]: `note.mistake` is still referenced by 1 record
+          task.holder — from
+          task.holder — body
+        try: anb view task.holder
         "
         );
     }
