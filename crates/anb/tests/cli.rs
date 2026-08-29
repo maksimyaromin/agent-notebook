@@ -259,6 +259,36 @@ mod task_cycle_replies {
     }
 
     #[test]
+    fn a_citation_into_nothing_is_nudged_under_the_ok_line() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            ok(
+                &mut storage,
+                &["comment", "task.demo", "waits on task.ghost and task.wraith"],
+            ),
+            @r"
+        ok: comment task.demo — logged
+        dangling-mention[2]: task.ghost, task.wraith — backtick to quote, or create the record
+        "
+        );
+    }
+
+    #[test]
+    fn an_add_body_citing_nothing_is_nudged_the_same_way() {
+        let mut storage = MemoryStorage::new();
+        assert_snapshot!(
+            ok(
+                &mut storage,
+                &["add", "A demo record", "--body", "Blocked by task.ghost."],
+            ),
+            @r"
+        ok: add task.a-demo-record — tasks/task.a-demo-record.md
+        dangling-mention[1]: task.ghost — backtick to quote, or create the record
+        "
+        );
+    }
+
+    #[test]
     fn an_invalid_record_names_its_findings() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md".to_owned(),
@@ -1016,6 +1046,31 @@ mod json_surface {
                 ],
             ),
             r#"{"ok":"answer","id":"question.doubt","from":"open","to":"routed","already":false,"routed-to":"decision.ruling"}"#
+        );
+    }
+
+    #[test]
+    fn a_comment_reply_carries_only_the_citations_into_nothing() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &[
+                    "comment",
+                    "task.demo",
+                    "waits on task.ghost, not the `task.quoted` case",
+                    "--json"
+                ],
+            ),
+            r#"{"ok":"comment","id":"task.demo","entry":"- 2026-08-28 Maks: waits on task.ghost, not the `task.quoted` case","already":false,"dangling-mention":["task.ghost"]}"#
+        );
+        assert_eq!(
+            ok(
+                &mut storage,
+                &["comment", "task.demo", "plain text", "--json"]
+            ),
+            r#"{"ok":"comment","id":"task.demo","entry":"- 2026-08-28 Maks: plain text","already":false}"#,
+            "an absent nudge is omitted, like every absent field"
         );
     }
 

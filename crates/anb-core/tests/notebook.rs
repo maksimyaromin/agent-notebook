@@ -1254,6 +1254,30 @@ mod record_view {
     }
 
     #[test]
+    fn a_quoted_id_stays_out_of_the_mention_blocks() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &record_file(
+                    "task.demo",
+                    "task",
+                    "active",
+                    &[],
+                    "Rename `decision.chosen` before question.missing settles.\n",
+                ),
+            ),
+            (
+                "decisions/decision.chosen.md",
+                &record_file("decision.chosen", "decision", "active", &[], ""),
+            ),
+        ]);
+        let view = Notebook::new(&mut storage).view("task.demo").unwrap();
+        assert_eq!(view.mentions, vec!["question.missing"]);
+        let quoted = Notebook::new(&mut storage).view("decision.chosen").unwrap();
+        assert_eq!(quoted.mentioned_by, Vec::<String>::new());
+    }
+
+    #[test]
     fn a_record_never_enters_its_own_mention_blocks() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md",
@@ -1421,7 +1445,7 @@ mod routing {
         let reply = Notebook::new(&mut storage)
             .drop_question("question.demo", "overtaken by a newer decision", TODAY)
             .unwrap();
-        assert_eq!(reply, moved("question.demo", "open", "dropped"));
+        assert_eq!(reply.transition, moved("question.demo", "open", "dropped"));
         let text = storage.read("questions/question.demo.md").unwrap();
         assert!(text.contains("\nstate: dropped\n"));
         assert!(text.ends_with("---\nDropped 2026-08-27: overtaken by a newer decision\n"));
@@ -1438,7 +1462,7 @@ mod routing {
         let replay = Notebook::new(&mut storage)
             .drop_question("question.demo", "a reason", TODAY)
             .unwrap();
-        assert!(replay.already);
+        assert!(replay.transition.already);
         assert_eq!(
             storage.read("questions/question.demo.md").unwrap(),
             after_first
@@ -1875,6 +1899,16 @@ mod conflict_nudge {
     }
 
     #[test]
+    fn a_quoted_decision_id_is_not_a_conflict_hint() {
+        let (path, text) = standing_decision(&[]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let mut draft = decision_draft(&[]);
+        draft.body = "Renames the `decision.first` rule file.".to_owned();
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.may_conflict, vec![]);
+    }
+
+    #[test]
     fn one_shared_tag_is_not_a_conflict_hint() {
         let (path, text) = standing_decision(&["tags: parser, grammar"]);
         let mut storage = storage_with(&[(path, &text)]);
@@ -2063,6 +2097,131 @@ mod conflict_nudge {
             .map(|cited| cited.id.as_str())
             .collect();
         assert_eq!(named, vec!["decision.first", "decision.second"]);
+    }
+}
+
+mod mention_nudge {
+    use super::*;
+
+    #[test]
+    fn a_body_citing_no_record_warns_in_the_reply_and_still_lands() {
+        let mut storage = MemoryStorage::new();
+        let mut draft = Draft::new(RecordType::Task, "A demo record");
+        draft.body = "Blocked by task.ghost until the spike lands.".to_owned();
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.dangling_mentions, vec!["task.ghost"]);
+        assert!(
+            storage.read(&created.path).is_ok(),
+            "a forward reference is legal, so the record is written"
+        );
+    }
+
+    #[test]
+    fn a_quoted_unknown_id_warns_nothing() {
+        let mut storage = MemoryStorage::new();
+        let mut draft = Draft::new(RecordType::Task, "A demo record");
+        draft.body = "The corpus case `task.ghost` is prose.".to_owned();
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.dangling_mentions, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_citation_that_resolves_live_or_archived_warns_nothing() {
+        let mut storage = storage_with(&[
+            ("tasks/task.live.md", &task_file("open", &[])),
+            (
+                "archive/tasks/task.done.md",
+                &record_file("task.done", "task", "closed", &[], ""),
+            ),
+        ]);
+        let mut draft = Draft::new(RecordType::Task, "A demo record");
+        draft.body = "Follows task.live and task.done.".to_owned();
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.dangling_mentions, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_body_citing_the_record_it_creates_warns_nothing() {
+        let mut storage = MemoryStorage::new();
+        let mut draft = Draft::new(RecordType::Task, "A demo record");
+        draft.id = Some("task.selfware".to_owned());
+        draft.body = "task.selfware tracks its own scope.".to_owned();
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.dangling_mentions, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_comment_citing_no_record_warns_in_the_reply_and_still_logs() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let reply = Notebook::new(&mut storage)
+            .comment("task.demo", None, "waits on task.ghost", TODAY)
+            .unwrap();
+        assert_eq!(reply.dangling_mentions, vec!["task.ghost"]);
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .contains("waits on task.ghost"),
+            "a warning is not a rejection"
+        );
+    }
+
+    #[test]
+    fn a_quoted_id_in_a_comment_warns_nothing() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let reply = Notebook::new(&mut storage)
+            .comment("task.demo", None, "renamed the `task.ghost` case", TODAY)
+            .unwrap();
+        assert_eq!(reply.dangling_mentions, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_replayed_comment_carries_the_same_nudge() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        Notebook::new(&mut storage)
+            .comment("task.demo", None, "waits on task.ghost", TODAY)
+            .unwrap();
+        let replay = Notebook::new(&mut storage)
+            .comment("task.demo", None, "waits on task.ghost", TODAY)
+            .unwrap();
+        assert!(replay.already);
+        assert_eq!(
+            replay.dangling_mentions,
+            vec!["task.ghost"],
+            "the entry stands as the trail's tail, so its citations stand too"
+        );
+    }
+
+    #[test]
+    fn a_drop_reason_citing_no_record_warns_in_the_reply() {
+        let mut storage = storage_with(&[(
+            "questions/question.demo.md",
+            &record_file("question.demo", "question", "open", &[], ""),
+        )]);
+        let dropped = Notebook::new(&mut storage)
+            .drop_question("question.demo", "absorbed into task.ghost", TODAY)
+            .unwrap();
+        assert_eq!(dropped.dangling_mentions, vec!["task.ghost"]);
+    }
+
+    #[test]
+    fn a_replayed_drop_carries_no_nudge_for_a_reason_that_never_landed() {
+        let mut storage = storage_with(&[(
+            "questions/question.demo.md",
+            &record_file("question.demo", "question", "open", &[], ""),
+        )]);
+        Notebook::new(&mut storage)
+            .drop_question("question.demo", "a plain reason", TODAY)
+            .unwrap();
+        let replay = Notebook::new(&mut storage)
+            .drop_question("question.demo", "absorbed into task.ghost", TODAY)
+            .unwrap();
+        assert!(replay.transition.already);
+        assert_eq!(
+            replay.dangling_mentions,
+            Vec::<String>::new(),
+            "the replay's reason wrote nothing, so it cites nothing"
+        );
     }
 }
 
@@ -3283,7 +3442,29 @@ mod debt_signals {
     }
 
     #[test]
-    fn a_scan_is_not_a_parse_so_a_code_fence_still_cites() {
+    fn a_backticked_id_is_a_quotation_beside_a_citing_bare_id() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "The corpus case `task.quoted` waits on task.gone.\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::DanglingMention {
+                id: "note.demo".into(),
+                target: "task.gone".into()
+            }],
+            "the quoted id creates no edge; the bare one still cites"
+        );
+    }
+
+    #[test]
+    fn an_id_inside_a_code_fence_is_a_quotation_too() {
         let mut storage = storage_with(&[(
             "notes/note.demo.md",
             &record_file(
@@ -3294,12 +3475,119 @@ mod debt_signals {
                 "```\nanb view task.gone\n```\n",
             ),
         )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn a_stray_backtick_on_an_earlier_line_cannot_unquote_a_later_entry() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "- 2026-08-26 -: the ` character is special\n- 2026-08-27 -: renamed the `task.ghost` case\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![],
+            "span backticks pair within one line, never across entries"
+        );
+    }
+
+    #[test]
+    fn a_fence_closes_on_a_longer_run_too() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "```\nanb view task.gone\n````\n",
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn an_unclosed_fence_quotes_to_the_end() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "```\nanb view task.gone\n",
+            ),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    #[test]
+    fn multi_byte_neighbors_leave_the_scan_intact() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "A café note — task.gone cites, «`task.quoted`» does not.\n",
+            ),
+        )]);
         assert_eq!(
             debt_of(&mut storage),
             vec![DebtSignal::DanglingMention {
                 id: "note.demo".into(),
                 target: "task.gone".into()
             }]
+        );
+    }
+
+    #[test]
+    fn an_unpaired_backtick_leaves_what_follows_citing() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "A stray ` backtick, then task.gone.\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::DanglingMention {
+                id: "note.demo".into(),
+                target: "task.gone".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_code_span_closes_only_on_a_run_of_its_own_length() {
+        let mut storage = storage_with(&[(
+            "notes/note.demo.md",
+            &record_file(
+                "note.demo",
+                "note",
+                "active",
+                &[],
+                "``a `task.inner` chain`` beside task.gone.\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::DanglingMention {
+                id: "note.demo".into(),
+                target: "task.gone".into()
+            }],
+            "the single-backtick run is content of the double-run span"
         );
     }
 
