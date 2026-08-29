@@ -261,9 +261,24 @@ fn finding_value(located: &FileFinding) -> Value {
     Value::Object(object)
 }
 
+fn epic_value(epic: &anb_core::Epic) -> Value {
+    let mut object = Map::new();
+    object.insert("id".into(), json!(epic.id));
+    object.insert("closed".into(), json!(epic.closed));
+    object.insert("total".into(), json!(epic.total));
+    if let Some(next) = &epic.next {
+        object.insert("next".into(), json!(next));
+    }
+    Value::Object(object)
+}
+
 fn overview_value(overview: &Overview) -> Value {
     let mut object = Map::new();
     object.insert("live".into(), counts_value(&overview.live));
+    object.insert(
+        "epics".into(),
+        Value::Array(overview.epics.iter().map(epic_value).collect()),
+    );
     for section in &overview.sections {
         object.insert(
             section.record_type.directory().into(),
@@ -312,6 +327,7 @@ fn status_value(status: &Status) -> Value {
         "review": status.review,
         "rules": status.rules.iter().map(|rule| json!({"id": rule.id, "title": rule.title})).collect::<Vec<Value>>(),
         "ready": status.ready.iter().map(ready_row).collect::<Vec<Value>>(),
+        "epics": status.epics.iter().map(epic_value).collect::<Vec<Value>>(),
         "debt": status.debt.iter().map(debt_value).collect::<Vec<Value>>(),
         "text": status.text,
     })

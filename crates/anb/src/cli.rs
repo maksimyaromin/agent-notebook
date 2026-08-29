@@ -85,12 +85,18 @@ pub enum Command {
     Retire { id: String },
     /// The dispatch queue: open, unblocked, unheld Tasks, most urgent first.
     Ready {
+        /// Only work this record's scope reaches: an epic's own queue.
+        #[arg(long = "for", value_name = "ID")]
+        scope: Option<String>,
         /// Every row; the listing is bounded by default.
         #[arg(long)]
         all: bool,
     },
     /// Every live record.
     List {
+        /// Only records this one's scope reaches: an epic and its work.
+        #[arg(long = "for", value_name = "ID")]
+        scope: Option<String>,
         /// Every row; the listing is bounded by default.
         #[arg(long)]
         all: bool,

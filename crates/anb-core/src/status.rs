@@ -4,16 +4,17 @@
 //! Only synthesized, uninferable state enters — never prose, never
 //! instructions: counts,
 //! the in-flight Task with its last log line, review Tasks waiting on a
-//! human, standing rules, the ready top rows, Debt. The gate keeps a quiet
-//! notebook to one line. Under a Budget the sections degrade in fixed order
-//! — ready rows first, then Debt to a count, then rules to a count, then
-//! the log and review lines — and the in-flight line is never dropped.
+//! human, standing rules, the ready top rows, where each epic stands, Debt.
+//! The gate keeps a quiet notebook to one line. Under a Budget the sections
+//! degrade in fixed order — ready rows first, then epics to a count, then
+//! Debt to a count, then rules to a count, then the log and review lines —
+//! and the in-flight line is never dropped.
 //! Every full dashboard ends with the budget line; when something was cut,
 //! it names the cut and carries the command that restores it.
 
 use crate::debt::DebtSignal;
 use crate::encode::json_quoted;
-use crate::notebook::ReadyTask;
+use crate::notebook::{Epic, ReadyTask};
 use crate::tokens::estimate_tokens;
 use std::fmt::Write as _;
 
@@ -86,6 +87,7 @@ pub struct Status {
     pub review: Vec<String>,
     pub rules: Vec<StatusRule>,
     pub ready: Vec<ReadyTask>,
+    pub epics: Vec<Epic>,
     pub debt: Vec<DebtSignal>,
     /// The budget line's number: the body's and the line's own estimates
     /// summed, so it never falls under the whole text's estimate and may
@@ -99,6 +101,7 @@ pub(crate) struct StatusInputs {
     pub review: Vec<String>,
     pub rules: Vec<StatusRule>,
     pub ready: Vec<ReadyTask>,
+    pub epics: Vec<Epic>,
     pub debt: Vec<DebtSignal>,
     pub today_day: i64,
 }
@@ -127,6 +130,7 @@ impl StatusInputs {
 enum Collapse {
     #[default]
     Nothing,
+    Epics,
     Debt,
     Rules,
     Log,
@@ -150,7 +154,8 @@ impl Ladder {
             return true;
         }
         let next = match self.collapsed {
-            Collapse::Nothing => Collapse::Debt,
+            Collapse::Nothing => Collapse::Epics,
+            Collapse::Epics => Collapse::Debt,
             Collapse::Debt => Collapse::Rules,
             Collapse::Rules => Collapse::Log,
             Collapse::Log => Collapse::Floor,
@@ -178,6 +183,9 @@ impl Ladder {
                 "ready {ready_shown}\u{2192}{}",
                 ready_shown - self.ready_trimmed
             ));
+        }
+        if self.reached(Collapse::Epics) && !inputs.epics.is_empty() {
+            cuts.push("epics\u{2192}count".to_owned());
         }
         if self.reached(Collapse::Debt) && !inputs.debt.is_empty() {
             cuts.push("debt\u{2192}count".to_owned());
@@ -226,6 +234,7 @@ fn status_from(inputs: StatusInputs, text: String, spent: u32, quiet: bool) -> S
         review: inputs.review,
         rules: inputs.rules,
         ready: inputs.ready,
+        epics: inputs.epics,
         debt: inputs.debt,
         spent,
     }
@@ -305,8 +314,41 @@ fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> Str
         ready_shown - ladder.ready_trimmed,
         inputs.today_day,
     );
+    render_epics(&mut out, &inputs.epics, ladder);
     render_debt(&mut out, &inputs.debt, ladder);
     out
+}
+
+/// Where each epic stands, so a session that opens with "continue <epic>"
+/// can see which one it means and what it would pick up.
+fn render_epics(out: &mut String, epics: &[Epic], ladder: Ladder) {
+    if epics.is_empty() {
+        return;
+    }
+    if ladder.reached(Collapse::Epics) {
+        let _ = writeln!(out, "epics: {} — anb list --for <id>", epics.len());
+        return;
+    }
+    let _ = writeln!(out, "epics[{}]:", epics.len());
+    for epic in epics {
+        let _ = writeln!(out, "  {}", epic_line(epic));
+    }
+}
+
+/// Where one epic stands, in the one spelling every surface that prints an
+/// epic uses. Progress, then what to do about it: the next Task to pick up,
+/// the acceptance close the hub is now waiting for, or the plain fact that
+/// nothing inside is dispatchable.
+#[must_use]
+pub fn epic_line(epic: &Epic) -> String {
+    let progress = format!("{}: {}/{} closed", epic.id, epic.closed, epic.total);
+    match &epic.next {
+        Some(next) => format!("{progress}, next: {next}"),
+        None if epic.closed == epic.total => {
+            format!("{progress} — awaiting its acceptance close")
+        }
+        None => format!("{progress} — nothing ready"),
+    }
 }
 
 fn render_review(out: &mut String, review: &[String], ladder: Ladder) {

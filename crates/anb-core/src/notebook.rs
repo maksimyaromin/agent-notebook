@@ -203,6 +203,16 @@ pub struct ListedRecord {
     pub title: Option<String>,
 }
 
+/// An epic and where it stands: the hub Task, how many of the children it
+/// waits on have closed, and the next dispatchable Task inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Epic {
+    pub id: String,
+    pub closed: usize,
+    pub total: usize,
+    pub next: Option<String>,
+}
+
 /// A record removed as a mistake, and every file that is gone. One id can
 /// claim two files after an interrupted archive move; leaving no trace
 /// means leaving neither.
@@ -282,6 +292,7 @@ pub struct TypeSection {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Overview {
     pub live: Counts,
+    pub epics: Vec<Epic>,
     pub sections: Vec<TypeSection>,
     pub archived: Counts,
 }
@@ -514,6 +525,65 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok(ready_rows(&records, &resolvable_by_id(&records)))
     }
 
+    /// [`Notebook::ready`] narrowed to one hub's scope: the queue for
+    /// "what is next inside this epic".
+    ///
+    /// # Errors
+    /// [`NotebookError::UnknownId`] when the hub names no record,
+    /// [`NotebookError::InvalidArgument`] on a malformed id, or a storage
+    /// failure.
+    pub fn ready_for(&self, hub: &str) -> Result<Vec<ReadyTask>, NotebookError> {
+        let (records, scope) = self.scoped(hub)?;
+        Ok(ready_rows(&records, &resolvable_by_id(&records))
+            .into_iter()
+            .filter(|row| scope.contains(&row.id))
+            .collect())
+    }
+
+    /// [`Notebook::list`] narrowed to one hub's scope, the hub itself
+    /// included: what a reader opening an epic wants to see.
+    ///
+    /// # Errors
+    /// See [`Notebook::ready_for`].
+    pub fn list_for(&self, hub: &str) -> Result<Vec<ListedRecord>, NotebookError> {
+        let (records, scope) = self.scoped(hub)?;
+        let resolvable = resolvable_by_id(&records);
+        Ok(records
+            .iter()
+            .filter(|record| {
+                !is_archived(record.path()) && scope.contains(path_stem(record.path()))
+            })
+            .map(|record| listed_row(record, &resolvable))
+            .collect())
+    }
+
+    /// The whole notebook and the ids inside `hub`'s scope. A scope narrows
+    /// what is *shown*, never what is *read*: a row is blocked, excluded and
+    /// resolved against every record, so scoping a query cannot change any
+    /// row's verdict — only which rows reach the reader.
+    fn scoped(&self, hub: &str) -> Result<(Vec<Record>, BTreeSet<String>), NotebookError> {
+        parsed_type(hub)?;
+        if self.holder_path(hub)?.is_none() {
+            return Err(NotebookError::UnknownId { id: hub.to_owned() });
+        }
+        let records = self.read_records()?;
+        let scope = scope_of(&records, hub)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        Ok((records, scope))
+    }
+
+    /// The hubs of the notebook with their progress: every epic a reader
+    /// might be asked to continue, and where each stands.
+    ///
+    /// # Errors
+    /// A storage failure.
+    pub fn epics(&self) -> Result<Vec<Epic>, NotebookError> {
+        let records = self.read_records()?;
+        Ok(epic_rows(&records))
+    }
+
     /// The session-start dashboard under `budget`, gated: one quiet line
     /// when the notebook carries no signal, the full budgeted composite
     /// otherwise. The caller resolves `budget` — a CLI flag outranks the
@@ -543,6 +613,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
             review: review_tasks(&live_valid),
             rules: standing_rules(&live_valid),
             ready: ready_rows(&records, &resolvable),
+            epics: epic_rows(&records),
             debt: debt::signals(&sources, &thresholds),
             today_day,
         };
@@ -610,6 +681,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
             .collect();
         Ok(Overview {
             live: live_counts(&records),
+            epics: epic_rows(&records),
             sections,
             archived: archived_counts(&records),
         })
@@ -2125,6 +2197,98 @@ fn open_rows(
         .collect();
     rows.sort_by(|left, right| ready_rank(left).cmp(&ready_rank(right)));
     rows
+}
+
+/// An epic is a hub Task, distinguished by its edges: it is blocked by at
+/// least one record that also carries it as Origin — one edge written from
+/// each end. The pairing is the discriminator. A Task blocked by a plain
+/// dependency did not give birth to it, and a Task that spawned a Question
+/// does not wait on it, so neither becomes an epic by accident.
+///
+/// A hub that no longer binds is not an epic in flight: its acceptance
+/// close has happened, and a dashboard that still asked for it would be
+/// asking for work already done.
+fn is_hub(record: &Record, records: &[Record], resolvable: &BTreeMap<&str, &Record>) -> bool {
+    if record.record_type() != Some(RecordType::Task)
+        || !record.is_live()
+        || is_archived(record.path())
+        || debt::is_excluded(record, resolvable)
+    {
+        return false;
+    }
+    let hub = path_stem(record.path());
+    let blocks: BTreeSet<&str> = record.file().field_values("blocked-by").collect();
+    records
+        .iter()
+        .any(|other| other.origin() == Some(hub) && blocks.contains(path_stem(other.path())))
+}
+
+/// Every record inside `hub`'s scope, the hub among them: what the epic
+/// waits on, and what was born inside it, each followed as far as it goes.
+///
+/// Both edges mean membership, written from opposite ends, and both carry
+/// through depth. A blocker of a child must close before the child, which
+/// must close before the hub, so it is work this epic waits on however far
+/// down it sits — and following it only to the first tier would blind the
+/// queue to a hub whose children were themselves assembled from the hub
+/// side, which is how an epic older than the edit surface is built.
+fn scope_of<'a>(records: &'a [Record], hub: &'a str) -> BTreeSet<&'a str> {
+    let mut scope: BTreeSet<&str> = BTreeSet::from([hub]);
+    loop {
+        let reached: Vec<&str> = records
+            .iter()
+            .flat_map(|record| {
+                let inside = scope.contains(path_stem(record.path()));
+                let waits_on = inside
+                    .then(|| record.file().field_values("blocked-by"))
+                    .into_iter()
+                    .flatten();
+                let born_inside = record
+                    .origin()
+                    .filter(|origin| scope.contains(origin))
+                    .map(|_| path_stem(record.path()));
+                waits_on.chain(born_inside)
+            })
+            .filter(|id| !scope.contains(id))
+            .collect();
+        if reached.is_empty() {
+            return scope;
+        }
+        scope.extend(reached);
+    }
+}
+
+/// The hubs and where each stands, in notebook order. Progress counts the
+/// hub's own `blocked-by` children, which are its statement of what it
+/// waits on, while `next` reads the whole scope, since anything the epic
+/// waits on is work it still owes. A hub never nominates itself: one that
+/// reaches `ready` is asking for its acceptance close, not for work.
+fn epic_rows(records: &[Record]) -> Vec<Epic> {
+    let resolvable = resolvable_by_id(records);
+    let queue = ready_rows(records, &resolvable);
+    let closed = |id: &str| {
+        records.iter().any(|record| {
+            path_stem(record.path()) == id && record.state() == Some(TaskState::Closed.word())
+        })
+    };
+    records
+        .iter()
+        .filter(|record| is_hub(record, records, &resolvable))
+        .map(|hub| {
+            let id = path_stem(hub.path());
+            let children: Vec<&str> = hub.file().field_values("blocked-by").collect();
+            let scope = scope_of(records, id);
+            Epic {
+                id: id.to_owned(),
+                closed: children.iter().filter(|child| closed(child)).count(),
+                total: children.len(),
+                next: queue
+                    .iter()
+                    .find(|row| row.id != id && scope.contains(row.id.as_str()))
+                    .map(|row| row.id.clone()),
+            }
+        })
+        .collect()
 }
 
 /// The still-open, valid Questions whose Origin is this Task; an invalid
