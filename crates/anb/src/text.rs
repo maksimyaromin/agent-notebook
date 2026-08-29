@@ -77,6 +77,11 @@ pub fn render(reply: &Reply, today: &str) -> String {
                 )
             }
         }
+        Reply::Expunged(gone) => format!(
+            "ok: expunge {} — {} removed\n",
+            gone.id,
+            gone.paths.join(", ")
+        ),
         Reply::Edited(edited) => {
             let mut out = if edited.changed.is_empty() {
                 format!("ok: edit {} — unchanged (already)\n", edited.id)

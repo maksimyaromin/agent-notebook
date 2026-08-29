@@ -91,6 +91,7 @@ pub fn render(reply: &Reply) -> String {
         }
         Reply::Checked { findings, all } => checked_value(findings, *all),
         Reply::Archived(moved) => archived_value(moved),
+        Reply::Expunged(gone) => json!({"ok": "expunge", "id": gone.id, "paths": gone.paths}),
         Reply::Edited(edited) => edited_value(edited),
         Reply::Searched { rows, all, .. } => json!({
             "count": rows.len(),
