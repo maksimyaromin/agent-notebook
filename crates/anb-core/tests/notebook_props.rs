@@ -172,11 +172,20 @@ mod status_fits_its_budget {
             open_tasks in 0usize..8,
             active_tasks in 0usize..3,
             aged_questions in 0usize..4,
+            epics in 0usize..4,
             ceiling in 1u32..600,
         ) {
             let mut files: Vec<(String, String)> = Vec::new();
             for index in 0..open_tasks {
                 files.push(task(index, "open", ""));
+            }
+            // Each hub adopts one open Task, so the epics section grows with
+            // the notebook and the ladder's newest rung is generated too.
+            for index in 0..epics.min(open_tasks) {
+                files.push(task(200 + index, "open", &format!("blocked-by: task.t{index}\n")));
+                files[index].1 = files[index]
+                    .1
+                    .replace("\ncreated:", &format!("\nfrom: task.t{}\ncreated:", 200 + index));
             }
             for index in 0..active_tasks {
                 files.push(task(100 + index, "active", ""));

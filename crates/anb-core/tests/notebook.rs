@@ -4008,16 +4008,26 @@ mod budget_ladder {
     use super::*;
 
     /// A notebook with every section populated: an in-flight Task with a
-    /// log, review work, rules, seven ready rows, and aged debt.
+    /// log, review work, rules, seven ready rows, an epic, and aged debt.
     fn full_notebook() -> MemoryStorage {
         let mut files: Vec<(String, String)> = vec![
+            (
+                "tasks/task.epic.md".into(),
+                record_file(
+                    "task.epic",
+                    "task",
+                    "open",
+                    &["blocked-by: task.flight"],
+                    "",
+                ),
+            ),
             (
                 "tasks/task.flight.md".into(),
                 record_file(
                     "task.flight",
                     "task",
                     "active",
-                    &[],
+                    &["from: task.epic"],
                     "- 2026-08-25 claude: stopped at the ladder\n",
                 ),
             ),
@@ -4104,6 +4114,38 @@ mod budget_ladder {
     /// rows go first, then debt collapses, then rules, then the log line —
     /// never the other way around — and the text fits every budget the
     /// floor has not been forced past.
+    /// The indented rows under one section header, wherever the ladder has
+    /// moved the sections around it.
+    fn rows_under(text: &str, header: &str) -> usize {
+        text.lines()
+            .skip_while(|line| !line.starts_with(header))
+            .skip(1)
+            .take_while(|line| line.starts_with("  "))
+            .count()
+    }
+
+    #[test]
+    fn the_epic_block_states_progress_and_collapses_to_a_count() {
+        let full = rendered(Budget::Unbounded);
+        assert!(
+            full.text.contains("epics[1]:\n  task.epic: 0/1 closed"),
+            "an epic whose only child is in flight has nothing ready: {}",
+            full.text
+        );
+
+        let tight = rendered(Budget::Tokens(110));
+        assert!(
+            tight.text.contains("epics: 1 — anb list --for <id>"),
+            "collapsed, it keeps the count and names the way back: {}",
+            tight.text
+        );
+        assert!(
+            tight.text.contains("epics\u{2192}count"),
+            "and the budget line says what it cut: {}",
+            tight.text
+        );
+    }
+
     #[test]
     fn sections_degrade_in_the_fixed_order_as_the_budget_shrinks() {
         let mut stages = Vec::new();
@@ -4111,15 +4153,21 @@ mod budget_ladder {
             400, 150, 130, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 1,
         ] {
             let step = rendered(Budget::Tokens(ceiling));
-            let ready_rows = step.text.matches("\n  task.").count();
+            let ready_rows = rows_under(&step.text, "ready[");
+            let epics_itemized = step.text.contains("epics[");
             let debt_itemized = step.text.contains("debt[");
             let rules_itemized = step.text.contains("rules[");
             let has_log = step.text.contains("log: ");
             let floor = !step.text.contains("ready") && !step.text.contains("debt");
 
             assert!(
-                debt_itemized || ready_rows == 0,
-                "debt collapsed while ready rows remain at {ceiling}: {}",
+                epics_itemized || ready_rows == 0,
+                "epics collapsed while ready rows remain at {ceiling}: {}",
+                step.text
+            );
+            assert!(
+                debt_itemized || !epics_itemized,
+                "debt collapsed before epics at {ceiling}: {}",
                 step.text
             );
             assert!(
@@ -5568,5 +5616,354 @@ mod unreadable_files {
             Notebook::new(storage).create(&draft, TODAY).unwrap_err(),
             NotebookError::DuplicateId { .. }
         ));
+    }
+}
+
+/// The epic pattern: a hub Task, its scope, and where it stands.
+mod epics {
+    use super::*;
+    use anb_core::Epic;
+
+    fn task(id: &str, state: &str, extra: &[&str]) -> (String, String) {
+        (
+            format!("tasks/{id}.md"),
+            record_file(id, "task", state, extra, ""),
+        )
+    }
+
+    /// A hub with three children, one of them closed, and a Question born
+    /// inside it — the shape the pattern describes, written from both ends.
+    fn an_epic() -> MemoryStorage {
+        let files = [
+            task(
+                "task.epic-auth",
+                "open",
+                &[
+                    "blocked-by: task.auth-login",
+                    "blocked-by: task.auth-tokens",
+                    "blocked-by: task.auth-audit",
+                ],
+            ),
+            task("task.auth-login", "closed", &["from: task.epic-auth"]),
+            task("task.auth-tokens", "open", &["from: task.epic-auth"]),
+            task("task.auth-audit", "open", &["from: task.epic-auth"]),
+            (
+                "questions/question.auth-doubt.md".to_owned(),
+                record_file(
+                    "question.auth-doubt",
+                    "question",
+                    "open",
+                    &["from: task.auth-tokens"],
+                    "",
+                ),
+            ),
+            task("task.unrelated", "open", &[]),
+        ];
+        storage_with(
+            &files
+                .iter()
+                .map(|(path, text)| (path.as_str(), text.as_str()))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn a_hub_reports_the_children_it_waits_on_and_what_to_pick_up_next() {
+        assert_eq!(
+            Notebook::new(&mut an_epic()).epics().unwrap(),
+            vec![Epic {
+                id: "task.epic-auth".to_owned(),
+                closed: 1,
+                total: 3,
+                next: Some("task.auth-audit".to_owned()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_task_that_merely_spawned_a_question_is_no_hub() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &record_file("task.demo", "task", "open", &[], ""),
+            ),
+            (
+                "questions/question.doubt.md",
+                &record_file(
+                    "question.doubt",
+                    "question",
+                    "open",
+                    &["from: task.demo"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).epics().unwrap(),
+            vec![],
+            "origin alone is not decomposition — the task does not wait on the doubt"
+        );
+    }
+
+    #[test]
+    fn a_task_blocked_by_a_plain_dependency_is_no_hub() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &record_file("task.demo", "task", "open", &["blocked-by: task.other"], ""),
+            ),
+            (
+                "tasks/task.other.md",
+                &record_file("task.other", "task", "open", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).epics().unwrap(),
+            vec![],
+            "waiting on something is not having given birth to it"
+        );
+    }
+
+    #[test]
+    fn scope_reaches_what_was_born_inside_it_however_deep() {
+        assert_eq!(
+            ids(Notebook::new(&mut an_epic())
+                .list_for("task.epic-auth")
+                .unwrap()),
+            // Notebook order: type-major, then by path.
+            vec![
+                "task.auth-audit",
+                "task.auth-login",
+                "task.auth-tokens",
+                "task.epic-auth",
+                "question.auth-doubt",
+            ],
+            "the Question two Origins down belongs to the epic; the unrelated Task does not"
+        );
+    }
+
+    #[test]
+    fn the_scoped_queue_is_the_queue_narrowed_and_nothing_else() {
+        let mut storage = an_epic();
+        let notebook = Notebook::new(&mut storage);
+        let scoped: Vec<String> = notebook
+            .ready_for("task.epic-auth")
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(scoped, vec!["task.auth-audit", "task.auth-tokens"]);
+        assert!(
+            notebook
+                .ready()
+                .unwrap()
+                .iter()
+                .any(|row| row.id == "task.unrelated"),
+            "the unscoped queue still carries what the scope left out"
+        );
+    }
+
+    #[test]
+    fn a_hub_whose_children_have_all_closed_is_awaiting_its_acceptance() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic-auth.md",
+                &record_file(
+                    "task.epic-auth",
+                    "task",
+                    "open",
+                    &["blocked-by: task.auth-login"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.auth-login.md",
+                &record_file(
+                    "task.auth-login",
+                    "task",
+                    "closed",
+                    &["from: task.epic-auth"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).epics().unwrap(),
+            vec![Epic {
+                id: "task.epic-auth".to_owned(),
+                closed: 1,
+                total: 1,
+                next: None,
+            }],
+            "a hub that reaches ready asks for its close, not for more work"
+        );
+    }
+
+    #[test]
+    fn a_scope_named_by_no_record_is_refused_rather_than_answered_empty() {
+        let mut storage = an_epic();
+        assert_eq!(
+            Notebook::new(&mut storage)
+                .ready_for("task.no-such-epic")
+                .unwrap_err(),
+            NotebookError::UnknownId {
+                id: "task.no-such-epic".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn what_a_child_waits_on_is_work_the_epic_waits_on_too() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic.md",
+                &record_file("task.epic", "task", "open", &["blocked-by: task.child"], ""),
+            ),
+            (
+                "tasks/task.child.md",
+                &record_file(
+                    "task.child",
+                    "task",
+                    "open",
+                    &["from: task.epic", "blocked-by: task.outside"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.outside.md",
+                &record_file("task.outside", "task", "open", &[], ""),
+            ),
+        ]);
+        let notebook = Notebook::new(&mut storage);
+        assert_eq!(
+            ids(notebook.list_for("task.epic").unwrap()),
+            vec!["task.child", "task.epic", "task.outside"],
+            "it must close before the child, which must close before the hub"
+        );
+        assert_eq!(
+            notebook
+                .ready_for("task.epic")
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<Vec<String>>(),
+            vec!["task.outside"],
+            "and it is the one thing the epic can actually be got on with"
+        );
+    }
+
+    #[test]
+    fn a_tier_assembled_from_the_hub_side_is_still_reached() {
+        // The shape of an epic older than the edit surface: the middle tier
+        // names its children, and they carry no Origin back.
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.outer.md",
+                &record_file(
+                    "task.outer",
+                    "task",
+                    "open",
+                    &["blocked-by: task.born", "blocked-by: task.middle"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.born.md",
+                &record_file("task.born", "task", "closed", &["from: task.outer"], ""),
+            ),
+            (
+                "tasks/task.middle.md",
+                &record_file(
+                    "task.middle",
+                    "task",
+                    "open",
+                    &["blocked-by: task.g1", "blocked-by: task.g2"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.g1.md",
+                &record_file("task.g1", "task", "open", &[], ""),
+            ),
+            (
+                "tasks/task.g2.md",
+                &record_file("task.g2", "task", "open", &[], ""),
+            ),
+        ]);
+        let notebook = Notebook::new(&mut storage);
+        assert_eq!(
+            notebook
+                .ready_for("task.outer")
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<Vec<String>>(),
+            vec!["task.g1", "task.g2"],
+            "an epic with dispatchable work must never report an empty queue"
+        );
+        assert_eq!(
+            notebook.epics().unwrap()[0].next.as_deref(),
+            Some("task.g1")
+        );
+    }
+
+    #[test]
+    fn a_closed_hub_is_no_longer_an_epic_in_flight() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic.md",
+                &record_file(
+                    "task.epic",
+                    "task",
+                    "closed",
+                    &["blocked-by: task.child"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.child.md",
+                &record_file("task.child", "task", "closed", &["from: task.epic"], ""),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).epics().unwrap(),
+            vec![],
+            "its acceptance close has happened; asking for it again asks for done work"
+        );
+    }
+
+    #[test]
+    fn an_invalid_hub_is_excluded_like_every_other_derived_query() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic.md",
+                &record_file(
+                    "task.epic",
+                    "task",
+                    "open",
+                    &["blocked-by: question.doubt"],
+                    "",
+                ),
+            ),
+            (
+                "questions/question.doubt.md",
+                &record_file(
+                    "question.doubt",
+                    "question",
+                    "open",
+                    &["from: task.epic"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).epics().unwrap(),
+            vec![],
+            "one command must not call a record invalid in one block and an epic in another"
+        );
+    }
+
+    fn ids(rows: Vec<anb_core::ListedRecord>) -> Vec<String> {
+        rows.into_iter().map(|row| row.id).collect()
     }
 }

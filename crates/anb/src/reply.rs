@@ -196,12 +196,12 @@ where
                 today,
             )?))
         }
-        Command::Ready { all } => Ok(Reply::Ready {
-            rows: notebook.ready()?,
+        Command::Ready { scope, all } => Ok(Reply::Ready {
+            rows: queued(&notebook, scope.as_deref())?,
             all,
         }),
-        Command::List { all } => Ok(Reply::Listing {
-            rows: notebook.list()?,
+        Command::List { scope, all } => Ok(Reply::Listing {
+            rows: listed(&notebook, scope.as_deref())?,
             all,
         }),
         Command::View { id } => Ok(Reply::Viewed(notebook.view(&id)?)),
@@ -494,6 +494,28 @@ fn chosen_routing(to: Option<String>, drop: Option<String>) -> Result<Routing, N
         (Some(_), Some(_)) => Err(NotebookError::InvalidArgument {
             reason: "answer: pass exactly one of --to, --drop".to_owned(),
         }),
+    }
+}
+
+/// The dispatch queue, whole or narrowed to one epic.
+fn queued<S: Storage>(
+    notebook: &Notebook<'_, S>,
+    scope: Option<&str>,
+) -> Result<Vec<ReadyTask>, NotebookError> {
+    match scope {
+        Some(hub) => notebook.ready_for(hub),
+        None => notebook.ready(),
+    }
+}
+
+/// The live listing, whole or narrowed to one epic.
+fn listed<S: Storage>(
+    notebook: &Notebook<'_, S>,
+    scope: Option<&str>,
+) -> Result<Vec<ListedRecord>, NotebookError> {
+    match scope {
+        Some(hub) => notebook.list_for(hub),
+        None => notebook.list(),
     }
 }
 

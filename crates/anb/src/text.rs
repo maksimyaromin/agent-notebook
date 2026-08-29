@@ -281,6 +281,12 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
 
 fn overview_page(overview: &Overview) -> String {
     let mut out = format!("notebook: {}\n", counts_phrase(&overview.live));
+    if !overview.epics.is_empty() {
+        let _ = writeln!(out, "epics[{}]:", overview.epics.len());
+        for epic in &overview.epics {
+            let _ = writeln!(out, "  {}", anb_core::epic_line(epic));
+        }
+    }
     for section in &overview.sections {
         if section.rows.is_empty() {
             continue;

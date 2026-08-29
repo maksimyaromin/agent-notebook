@@ -1253,6 +1253,8 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "archive", "task.x"],
         vec!["anb", "expunge", "task.x"],
         vec!["anb", "--notebook", "elsewhere", "list"],
+        vec!["anb", "ready", "--for", "task.epic"],
+        vec!["anb", "list", "--for", "task.epic"],
         vec!["anb", "list", "--notebook", "elsewhere"],
         vec![
             "anb",
@@ -1490,6 +1492,93 @@ mod maintenance_replies {
           task.holder — from
           task.holder — body
         try: anb view task.holder
+        "
+        );
+    }
+
+    /// A hub with two children, one closed, and a Question born a level
+    /// down — enough for every epic surface to have something to say.
+    fn an_epic() -> MemoryStorage {
+        storage_with(&[
+            (
+                "tasks/task.epic-auth.md".to_owned(),
+                record_file(
+                    "task.epic-auth",
+                    "task",
+                    "open",
+                    "Auth end to end",
+                    &[
+                        "blocked-by: task.auth-login",
+                        "blocked-by: task.auth-tokens",
+                    ],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.auth-login.md".to_owned(),
+                record_file(
+                    "task.auth-login",
+                    "task",
+                    "closed",
+                    "The login screen",
+                    &["from: task.epic-auth"],
+                    "",
+                ),
+            ),
+            open_task(
+                "task.auth-tokens",
+                "Token rotation",
+                &["from: task.epic-auth"],
+            ),
+        ])
+    }
+
+    #[test]
+    fn the_epic_block_names_progress_and_what_to_pick_up() {
+        assert_snapshot!(
+            ok(&mut an_epic(), &["overview"]),
+            @r"
+        notebook: 3 tasks, 0 decisions, 0 notes, 0 questions
+        epics[1]:
+          task.epic-auth: 1/2 closed, next: task.auth-tokens
+        tasks[3]{id,state,priority,title}:
+          task.auth-login,closed,-,The login screen
+          task.auth-tokens,open,-,Token rotation
+          task.epic-auth,open,-,Auth end to end
+        "
+        );
+    }
+
+    #[test]
+    fn the_epic_block_is_a_shape_the_json_carries_too() {
+        assert_eq!(
+            ok(&mut an_epic(), &["overview", "--json"]),
+            r#"{"live":{"tasks":3,"decisions":0,"notes":0,"questions":0},"epics":[{"id":"task.epic-auth","closed":1,"total":2,"next":"task.auth-tokens"}],"tasks":[{"id":"task.auth-login","state":"closed","title":"The login screen"},{"id":"task.auth-tokens","state":"open","title":"Token rotation"},{"id":"task.epic-auth","state":"open","title":"Auth end to end"}],"decisions":[],"notes":[],"questions":[],"archive":{"tasks":0,"decisions":0,"notes":0,"questions":0}}"#
+        );
+    }
+
+    #[test]
+    fn a_scoped_queue_answers_only_the_epic_it_was_asked_about() {
+        let mut storage = an_epic();
+        ok(&mut storage, &["add", "Something else entirely"]);
+        assert_snapshot!(
+            ok(&mut storage, &["ready", "--for", "task.epic-auth"]),
+            @r"
+        count: 1
+        ready[1]{id,priority,age,title}:
+          task.auth-tokens,-,4d,Token rotation
+        "
+        );
+    }
+
+    #[test]
+    fn a_scope_named_by_no_record_is_a_recovery_payload() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            refused(&mut storage, &["ready", "--for", "task.no-such-epic"]),
+            @r"
+        error[unknown-id]: no record `task.no-such-epic`
+        try: anb list
         "
         );
     }
