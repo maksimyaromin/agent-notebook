@@ -1066,7 +1066,10 @@ mod session_status {
         let value: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(value["quiet"], serde_json::json!(false));
         assert_eq!(value["counts"]["tasks"], serde_json::json!(1));
-        assert_eq!(value["in-flight"][0]["id"], serde_json::json!("task.demo"));
+        assert_eq!(
+            value["in-flight"]["rows"][0]["id"],
+            serde_json::json!("task.demo")
+        );
     }
 }
 
@@ -1568,7 +1571,7 @@ mod maintenance_replies {
     fn the_epic_block_is_a_shape_the_json_carries_too() {
         assert_eq!(
             ok(&mut an_epic(), &["overview", "--json"]),
-            r#"{"live":{"tasks":3,"decisions":0,"notes":0,"questions":0},"epics":[{"id":"task.epic-auth","closed":1,"total":2,"next":"task.auth-tokens"}],"tasks":[{"id":"task.auth-login","state":"closed","title":"The login screen"},{"id":"task.auth-tokens","state":"open","title":"Token rotation"},{"id":"task.epic-auth","state":"open","title":"Auth end to end"}],"decisions":[],"notes":[],"questions":[],"archive":{"tasks":0,"decisions":0,"notes":0,"questions":0}}"#
+            r#"{"live":{"tasks":3,"decisions":0,"notes":0,"questions":0},"epics":{"count":1,"rows":[{"id":"task.epic-auth","closed":1,"total":2,"next":"task.auth-tokens"}]},"tasks":{"count":3,"rows":[{"id":"task.auth-login","state":"closed","title":"The login screen"},{"id":"task.auth-tokens","state":"open","title":"Token rotation"},{"id":"task.epic-auth","state":"open","title":"Auth end to end"}]},"decisions":{"count":0,"rows":[]},"notes":{"count":0,"rows":[]},"questions":{"count":0,"rows":[]},"archive":{"tasks":0,"decisions":0,"notes":0,"questions":0}}"#
         );
     }
 
@@ -1929,8 +1932,8 @@ mod json_maintenance_surface {
         let value: serde_json::Value =
             serde_json::from_str(&ok(&mut storage, &["overview", "--json"])).unwrap();
         assert_eq!(value["live"]["tasks"], serde_json::json!(1));
-        assert_eq!(value["tasks"][0]["id"], serde_json::json!("task.a"));
-        assert_eq!(value["decisions"], serde_json::json!([]));
+        assert_eq!(value["tasks"]["rows"][0]["id"], serde_json::json!("task.a"));
+        assert_eq!(value["decisions"]["count"], serde_json::json!(0));
         assert_eq!(value["archive"]["tasks"], serde_json::json!(1));
     }
 }

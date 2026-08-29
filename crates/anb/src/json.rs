@@ -100,7 +100,7 @@ pub fn render(reply: &Reply) -> String {
                 .map(listed_row)
                 .collect::<Vec<Value>>(),
         }),
-        Reply::Overviewed(overview) => overview_value(overview),
+        Reply::Overviewed { overview, all } => overview_value(overview, *all),
         Reply::Silence => return String::new(),
     };
     value.to_string()
@@ -272,17 +272,14 @@ fn epic_value(epic: &anb_core::Epic) -> Value {
     Value::Object(object)
 }
 
-fn overview_value(overview: &Overview) -> Value {
+fn overview_value(overview: &Overview, all: bool) -> Value {
     let mut object = Map::new();
     object.insert("live".into(), counts_value(&overview.live));
-    object.insert(
-        "epics".into(),
-        Value::Array(overview.epics.iter().map(epic_value).collect()),
-    );
-    for section in &overview.sections {
+    object.insert("epics".into(), section(&overview.epics, all, epic_value));
+    for grouped in &overview.sections {
         object.insert(
-            section.record_type.directory().into(),
-            Value::Array(section.rows.iter().map(listed_row).collect()),
+            grouped.record_type.directory().into(),
+            section(&grouped.rows, all, listed_row),
         );
     }
     object.insert("archive".into(), counts_value(&overview.archived));
@@ -315,22 +312,37 @@ fn status_value(status: &Status) -> Value {
         "quiet": status.quiet,
         "spent": status.spent,
         "counts": counts_value(&status.counts),
-        "in-flight": status.in_flight.iter().map(|task| {
-            let mut object = Map::new();
-            object.insert("id".into(), json!(task.id));
-            object.insert("title".into(), json!(task.title));
-            if let Some(log) = &task.log {
-                object.insert("log".into(), json!(log));
-            }
-            Value::Object(object)
-        }).collect::<Vec<Value>>(),
-        "review": status.review,
-        "rules": status.rules.iter().map(|rule| json!({"id": rule.id, "title": rule.title})).collect::<Vec<Value>>(),
-        "ready": status.ready.iter().map(ready_row).collect::<Vec<Value>>(),
-        "epics": status.epics.iter().map(epic_value).collect::<Vec<Value>>(),
-        "debt": status.debt.iter().map(debt_value).collect::<Vec<Value>>(),
+        "in-flight": section(&status.in_flight, false, in_flight_value),
+        "review": section(&status.review, false, |id| json!(id)),
+        "rules": section(&status.rules, false, |rule| json!({"id": rule.id, "title": rule.title})),
+        "ready": section(&status.ready, false, ready_row),
+        "epics": section(&status.epics, false, epic_value),
+        "debt": section(&status.debt, false, debt_value),
         "text": status.text,
     })
+}
+
+/// One section of a grouped reply as data: how many there are, and the head
+/// the reply shows. A reply an agent reads must not grow with the notebook,
+/// whichever format it asks for.
+fn section<T>(rows: &[T], all: bool, row: impl Fn(&T) -> Value) -> Value {
+    json!({
+        "count": rows.len(),
+        "rows": rows[..shown(rows.len(), all)]
+            .iter()
+            .map(row)
+            .collect::<Vec<Value>>(),
+    })
+}
+
+fn in_flight_value(task: &anb_core::ActiveTask) -> Value {
+    let mut object = Map::new();
+    object.insert("id".into(), json!(task.id));
+    object.insert("title".into(), json!(task.title));
+    if let Some(log) = &task.log {
+        object.insert("log".into(), json!(log));
+    }
+    Value::Object(object)
 }
 
 fn debt_value(signal: &DebtSignal) -> Value {

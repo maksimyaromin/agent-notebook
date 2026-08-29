@@ -486,15 +486,16 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// # Errors
     /// A storage failure.
     pub fn check(&self) -> Result<Vec<FileFinding>, NotebookError> {
-        let records = self.read_records()?;
-        let resolvable = resolvable_by_id(&records);
+        let corpus = self.whole_corpus()?;
+        let records = corpus.records();
+        let resolvable = corpus.resolver();
         let by_stem: BTreeMap<&str, &Record> = records
             .iter()
             .map(|record| (path_stem(record.path()), record))
             .collect();
 
         let mut located = Vec::new();
-        for record in &records {
+        for record in records {
             for finding in record.findings() {
                 located.push(FileFinding {
                     path: record.path().to_owned(),
@@ -504,8 +505,8 @@ impl<'a, S: Storage> Notebook<'a, S> {
             check_refs(record, &resolvable, &mut located);
             check_supersession_pair(record, &by_stem, &mut located);
         }
-        check_duplicate_ids(&records, &mut located);
-        check_dep_cycles(&records, &by_stem, &mut located);
+        check_duplicate_ids(records, &mut located);
+        check_dep_cycles(records, &by_stem, &mut located);
         self.check_config(&mut located)?;
 
         located.sort_by(|left, right| finding_order(left).cmp(&finding_order(right)));
@@ -543,8 +544,8 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// # Errors
     /// A storage failure.
     pub fn ready(&self) -> Result<Vec<ReadyTask>, NotebookError> {
-        let records = self.read_records()?;
-        Ok(ready_rows(&records, &resolvable_by_id(&records)))
+        let corpus = self.live_corpus()?;
+        Ok(ready_rows(corpus.records(), &corpus.resolver()))
     }
 
     /// [`Notebook::ready`] narrowed to one hub's scope: the queue for
@@ -555,8 +556,8 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// [`NotebookError::InvalidArgument`] on a malformed id, or a storage
     /// failure.
     pub fn ready_for(&self, hub: &str) -> Result<Vec<ReadyTask>, NotebookError> {
-        let (records, scope) = self.scoped(hub)?;
-        Ok(ready_rows(&records, &resolvable_by_id(&records))
+        let (corpus, scope) = self.scoped(hub)?;
+        Ok(ready_rows(corpus.records(), &corpus.resolver())
             .into_iter()
             .filter(|row| scope.contains(&row.id))
             .collect())
@@ -568,13 +569,12 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// # Errors
     /// See [`Notebook::ready_for`].
     pub fn list_for(&self, hub: &str) -> Result<Vec<ListedRecord>, NotebookError> {
-        let (records, scope) = self.scoped(hub)?;
-        let resolvable = resolvable_by_id(&records);
-        Ok(records
+        let (corpus, scope) = self.scoped(hub)?;
+        let resolvable = corpus.resolver();
+        Ok(corpus
+            .records()
             .iter()
-            .filter(|record| {
-                !is_archived(record.path()) && scope.contains(path_stem(record.path()))
-            })
+            .filter(|record| scope.contains(path_stem(record.path())))
             .map(|record| listed_row(record, &resolvable))
             .collect())
     }
@@ -583,42 +583,19 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// what is *shown*, never what is *read*: a row is blocked, excluded and
     /// resolved against every record, so scoping a query cannot change any
     /// row's verdict — only which rows reach the reader.
-    fn scoped(&self, hub: &str) -> Result<(Vec<Record>, BTreeSet<String>), NotebookError> {
+    fn scoped(&self, hub: &str) -> Result<(Corpus, BTreeSet<String>), NotebookError> {
         parsed_type(hub)?;
         if self.holder_path(hub)?.is_none() {
             return Err(NotebookError::UnknownId { id: hub.to_owned() });
         }
-        let records = self.read_records()?;
-        let scope = scope_of(&records, hub)
+        let corpus = self.live_corpus()?;
+        let kin = self.archived_kin(&corpus)?;
+        let scope = MembershipIndex::of(corpus.records(), &kin)
+            .scope_of(hub)
             .into_iter()
             .map(str::to_owned)
             .collect();
-        Ok((records, scope))
-    }
-
-    /// Every proof the notebook cites that names something outside it — a
-    /// commit, or a file — so the host can ask git and the filesystem which
-    /// of them are still there. A link naming another record resolves
-    /// inside the notebook and is `check`'s to judge, not the world's.
-    ///
-    /// # Errors
-    /// A storage failure.
-    pub fn cited_proofs(&self) -> Result<Vec<CitedProof>, NotebookError> {
-        let records = self.read_records()?;
-        Ok(records
-            .iter()
-            .flat_map(|record| {
-                let id = path_stem(record.path());
-                record.file().field_values("link").filter_map(move |link| {
-                    let (kind, target) = split_link(link)?;
-                    ["sha", "report"].contains(&kind).then(|| CitedProof {
-                        record: id.to_owned(),
-                        kind: kind.to_owned(),
-                        target: target.to_owned(),
-                    })
-                })
-            })
-            .collect())
+        Ok((corpus, scope))
     }
 
     /// The hubs of the notebook with their progress: every epic a reader
@@ -627,14 +604,73 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// # Errors
     /// A storage failure.
     pub fn epics(&self) -> Result<Vec<Epic>, NotebookError> {
-        let records = self.read_records()?;
-        Ok(epic_rows(&records))
+        let corpus = self.live_corpus()?;
+        let kin = self.archived_kin(&corpus)?;
+        Ok(epic_rows(corpus.records(), &kin, &corpus.resolver()))
+    }
+
+    /// The archived records the live ones still name as a blocker or an
+    /// Origin, and the ones those name in turn.
+    ///
+    /// An epic archives its children as they settle, so a hub read from the
+    /// live records alone would forget its own progress and, in the end,
+    /// that it was ever a hub; and a live record born inside an archived
+    /// one belongs to the same epic through a lineage only that archived
+    /// record spells out. Reading follows declared edges out of the live
+    /// notebook, so it costs the history still connected to today rather
+    /// than the archive's size — how much that is, is how much of the
+    /// archive the live records still point at.
+    ///
+    /// The edges are followed the way they are written, so an archived
+    /// record that only *carries* an Origin into the walk — one born inside
+    /// a member, named by nothing live — is not reached, and a live record
+    /// waiting on it alone falls outside the scope. Finding it would mean
+    /// opening the archive to read Origins backwards, which is the cost
+    /// this avoids.
+    fn archived_kin(&self, corpus: &Corpus) -> Result<Vec<Record>, NotebookError> {
+        let archived = corpus.resolver();
+        let mut wanted: Vec<String> = corpus
+            .records()
+            .iter()
+            .flat_map(kin_of)
+            .filter(|target| archived.archived(target))
+            .map(str::to_owned)
+            .collect();
+        let mut seen = BTreeSet::new();
+        let mut kin = Vec::new();
+        while let Some(id) = wanted.pop() {
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            let Ok(record_type) = parsed_type(&id) else {
+                continue;
+            };
+            let path = record_path(&id, record_type, true);
+            let record = match self.storage.read(&path) {
+                Ok(text) => Record::parse(&path, &text),
+                Err(StorageError::NotUtf8 { .. }) => Record::unreadable(&path),
+                Err(StorageError::NotFound { .. }) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            wanted.extend(
+                kin_of(&record)
+                    .filter(|target| archived.archived(target))
+                    .map(str::to_owned),
+            );
+            kin.push(record);
+        }
+        Ok(kin)
     }
 
     /// The session-start dashboard under `budget`, gated: one quiet line
     /// when the notebook carries no signal, the full budgeted composite
     /// otherwise. The caller resolves `budget` — a CLI flag outranks the
     /// config key, which defaults to 1500.
+    ///
+    /// `settle` is the host's answer to "which of these proofs does the
+    /// world still hold": it is handed the proofs the live records cite and
+    /// returns the lost ones. It is asked from the records already read, so
+    /// a Status costs the notebook one pass and not two.
     ///
     /// # Errors
     /// [`NotebookError::InvalidArgument`] on a malformed `today`, or a
@@ -643,30 +679,32 @@ impl<'a, S: Storage> Notebook<'a, S> {
         &self,
         today: &str,
         budget: Budget,
-        lost: &[CitedProof],
+        settle: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
     ) -> Result<Status, NotebookError> {
         let today_day = guarded_day(today)?;
         let thresholds = self.config()?.debt_thresholds();
-        let records = self.read_records()?;
-        let resolvable = resolvable_by_id(&records);
+        let corpus = self.live_corpus()?;
+        let records = corpus.records();
+        let resolvable = corpus.resolver();
         let live_valid: Vec<&Record> = records
             .iter()
-            .filter(|record| !is_archived(record.path()) && !debt::is_excluded(record, &resolvable))
+            .filter(|record| !debt::is_excluded(record, &resolvable))
             .collect();
 
+        let lost = settle(&cited_proofs(records));
         let sources = DebtSources {
-            records: &records,
+            records,
             resolvable: &resolvable,
             today_day,
-            lost_proofs: lost,
+            lost_proofs: &lost,
         };
         let inputs = StatusInputs {
-            counts: live_counts(&records),
+            counts: live_counts(records),
             in_flight: in_flight_tasks(&live_valid),
             review: review_tasks(&live_valid),
             rules: standing_rules(&live_valid),
-            ready: ready_rows(&records, &resolvable),
-            epics: epic_rows(&records),
+            ready: ready_rows(records, &resolvable),
+            epics: epic_rows(records, &self.archived_kin(&corpus)?, &resolvable),
             debt: debt::signals(&sources, &thresholds),
             today_day,
         };
@@ -680,11 +718,11 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// # Errors
     /// A storage failure.
     pub fn list(&self) -> Result<Vec<ListedRecord>, NotebookError> {
-        let records = self.read_records()?;
-        let resolvable = resolvable_by_id(&records);
-        Ok(records
+        let corpus = self.live_corpus()?;
+        let resolvable = corpus.resolver();
+        Ok(corpus
+            .records()
             .iter()
-            .filter(|record| !is_archived(record.path()))
             .map(|record| listed_row(record, &resolvable))
             .collect())
     }
@@ -703,9 +741,10 @@ impl<'a, S: Storage> Notebook<'a, S> {
                 reason: "search: the query must not be empty".to_owned(),
             });
         }
-        let records = self.read_records()?;
-        let resolvable = resolvable_by_id(&records);
-        Ok(records
+        let corpus = self.whole_corpus()?;
+        let resolvable = corpus.resolver();
+        Ok(corpus
+            .records()
             .iter()
             .filter(|record| matches_query(record, &needle))
             .map(|record| listed_row(record, &resolvable))
@@ -713,14 +752,15 @@ impl<'a, S: Storage> Notebook<'a, S> {
     }
 
     /// The whole notebook as one page: every live record grouped by type,
-    /// deliberately unbounded — this is the read-it-whole surface — with the
-    /// archive reduced to counts.
+    /// with the archive reduced to counts. The model is complete; what a
+    /// reader is shown of it is the reply's to bound.
     ///
     /// # Errors
     /// A storage failure.
     pub fn overview(&self) -> Result<Overview, NotebookError> {
-        let records = self.read_records()?;
-        let resolvable = resolvable_by_id(&records);
+        let corpus = self.live_corpus()?;
+        let records = corpus.records();
+        let resolvable = corpus.resolver();
         let sections = RecordType::ALL
             .into_iter()
             .map(|record_type| TypeSection {
@@ -733,10 +773,10 @@ impl<'a, S: Storage> Notebook<'a, S> {
             })
             .collect();
         Ok(Overview {
-            live: live_counts(&records),
-            epics: epic_rows(&records),
+            live: live_counts(records),
+            epics: epic_rows(records, &self.archived_kin(&corpus)?, &resolvable),
             sections,
-            archived: archived_counts(&records),
+            archived: corpus.archive_counts(),
         })
     }
 
@@ -749,15 +789,16 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// See [`Notebook::record`].
     pub fn view(&self, id: &str) -> Result<View, NotebookError> {
         let record = self.record(id)?;
-        let records = self.read_records()?;
+        let live = self.live_corpus()?;
         let mentions = mention::mentions(record.file().body())
             .into_iter()
             .filter(|target| *target != id)
             .map(str::to_owned)
             .collect();
-        let mentioned_by = records
+        let mentioned_by = live
+            .records()
             .iter()
-            .filter(|other| !is_archived(other.path()) && path_stem(other.path()) != id)
+            .filter(|other| path_stem(other.path()) != id)
             .filter(|other| mention::mentions(other.file().body()).contains(&id))
             .map(|other| path_stem(other.path()).to_owned())
             .collect();
@@ -810,9 +851,10 @@ impl<'a, S: Storage> Notebook<'a, S> {
         }
         let victim = self.guard_supersession(draft)?;
 
-        let records = self.read_records()?;
-        let id = resolve_draft_id(draft, &id_claims(&records))?;
-        let may_conflict = conflict_candidates(draft, &records);
+        let corpus = self.whole_corpus()?;
+        let records = corpus.records();
+        let id = resolve_draft_id(draft, &id_claims(records))?;
+        let may_conflict = conflict_candidates(draft, records, &corpus.resolver());
         let path = record_path(&id, draft.record_type, false);
         self.storage
             .write(&path, &render_draft(draft, &id, today))?;
@@ -882,12 +924,13 @@ impl<'a, S: Storage> Notebook<'a, S> {
                 file.append_field("link", &link);
             }
         })?;
-        let records = self.read_records()?;
-        let resolvable = resolvable_by_id(&records);
+        let corpus = self.live_corpus()?;
+        let records = corpus.records();
+        let resolvable = corpus.resolver();
         Ok(Closed {
             transition,
-            open_questions: open_questions_from(&records, &resolvable, id),
-            unblocked: unblocked_by_close(&records, &resolvable, id),
+            open_questions: open_questions_from(records, &resolvable, id),
+            unblocked: unblocked_by_close(records, &resolvable, id),
             report_note: None,
             dangling_mentions: Vec::new(),
         })
@@ -980,13 +1023,9 @@ impl<'a, S: Storage> Notebook<'a, S> {
     fn standing_report(&self, origin: &str, report: &str) -> Result<Option<String>, NotebookError> {
         let wanted = edited_body(report);
         Ok(self
-            .records_of(RecordType::Note)?
+            .records_in(RecordType::Note.directory())?
             .into_iter()
-            .find(|note| {
-                !is_archived(note.path())
-                    && note.origin() == Some(origin)
-                    && note.file().body() == wanted
-            })
+            .find(|note| note.origin() == Some(origin) && note.file().body() == wanted)
             .map(|note| path_stem(note.path()).to_owned()))
     }
 
@@ -1424,7 +1463,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         if paths.is_empty() {
             return Err(NotebookError::UnknownId { id: id.to_owned() });
         }
-        let blockers = inbound_edges(&self.read_records()?, id);
+        let blockers = inbound_edges(self.whole_corpus()?.records(), id);
         if !blockers.is_empty() {
             return Err(NotebookError::StillReferenced {
                 id: id.to_owned(),
@@ -1628,7 +1667,8 @@ impl<'a, S: Storage> Notebook<'a, S> {
         if id == on {
             return Ok(Some(vec![id.to_owned(), on.to_owned()]));
         }
-        let tasks = self.records_of(RecordType::Task)?;
+        let mut tasks = self.records_in(RecordType::Task.directory())?;
+        tasks.extend(self.records_in(&archive_of(RecordType::Task.directory()))?);
         let Some(chain) = task_graph(&tasks).path(on, id) else {
             return Ok(None);
         };
@@ -1741,64 +1781,203 @@ impl<'a, S: Storage> Notebook<'a, S> {
     }
 
     /// Where `id` lives, if anywhere: its live path, else its archive path.
+    /// The archive is probed only when the live home is empty — one probe
+    /// answers the question the caller asked.
     fn holder_path(&self, id: &str) -> Result<Option<String>, NotebookError> {
-        Ok(self.holder_paths(id)?.into_iter().next())
+        for path in canonical_paths(id) {
+            if self.holds(&path)? {
+                return Ok(Some(path));
+            }
+        }
+        Ok(None)
     }
 
     /// Every canonical path holding `id`, live before archived. Two is the
-    /// `duplicate-id` corruption an interrupted archive move leaves; the
-    /// verbs that read one record take the first, and only expunge, which
-    /// must leave nothing behind, needs them all.
+    /// `duplicate-id` corruption an interrupted archive move leaves, and
+    /// only expunge, which must leave nothing behind, needs them all.
     fn holder_paths(&self, id: &str) -> Result<Vec<String>, NotebookError> {
-        let Some(record_type) = id
-            .split_once('.')
-            .and_then(|(word, _)| RecordType::from_word(word))
-        else {
-            return Ok(Vec::new());
-        };
         let mut holders = Vec::new();
-        for archived in [false, true] {
-            let path = record_path(id, record_type, archived);
-            match self.storage.read(&path) {
-                // A file that is not UTF-8 still claims its id — ids are
-                // never reused, unreadable holders included.
-                Ok(_) | Err(StorageError::NotUtf8 { .. }) => holders.push(path),
-                Err(StorageError::NotFound { .. }) => {}
-                Err(error) => return Err(error.into()),
+        for path in canonical_paths(id) {
+            if self.holds(&path)? {
+                holders.push(path);
             }
         }
         Ok(holders)
     }
 
-    fn read_records(&self) -> Result<Vec<Record>, NotebookError> {
-        let mut records = Vec::new();
-        for record_type in RecordType::ALL {
-            records.extend(self.records_of(record_type)?);
+    /// Whether a file sits at `path`: the storage probe behind every
+    /// question about an id's existence. A file that is not UTF-8 still
+    /// claims its id — ids are never reused, unreadable holders included.
+    fn holds(&self, path: &str) -> Result<bool, NotebookError> {
+        match self.storage.read(path) {
+            Ok(_) | Err(StorageError::NotUtf8 { .. }) => Ok(true),
+            Err(StorageError::NotFound { .. }) => Ok(false),
+            Err(error) => Err(error.into()),
         }
-        Ok(records)
     }
 
-    /// One type's records, live and archived, invalid ones included: an
-    /// invalid record is a visible first-class state, never a silent drop.
-    fn records_of(&self, record_type: RecordType) -> Result<Vec<Record>, NotebookError> {
-        let live = record_type.directory().to_owned();
+    /// The whole notebook read: history's bytes among the rest. The corpus
+    /// of the verbs that must judge what an archived file says — verify it,
+    /// search it, or refuse an id it already claims.
+    fn whole_corpus(&self) -> Result<Corpus, NotebookError> {
         let mut records = Vec::new();
-        for dir in [live.clone(), format!("archive/{live}")] {
-            for path in self.storage.list(&dir)? {
+        for record_type in RecordType::ALL {
+            records.extend(self.records_in(record_type.directory())?);
+            records.extend(self.records_in(&archive_of(record_type.directory()))?);
+        }
+        self.corpus(records)
+    }
+
+    /// The live records, with the archive present by name alone: a query
+    /// about work in motion costs what the live notebook costs, however far
+    /// history has grown behind it.
+    fn live_corpus(&self) -> Result<Corpus, NotebookError> {
+        let mut records = Vec::new();
+        for record_type in RecordType::ALL {
+            records.extend(self.records_in(record_type.directory())?);
+        }
+        self.corpus(records)
+    }
+
+    fn corpus(&self, records: Vec<Record>) -> Result<Corpus, NotebookError> {
+        let mut archived = BTreeSet::new();
+        let mut held = [0; RecordType::ALL.len()];
+        for (record_type, tally) in RecordType::ALL.into_iter().zip(&mut held) {
+            for path in self.storage.list(&archive_of(record_type.directory()))? {
                 if !is_record_file(&path) {
                     continue;
                 }
-                match self.storage.read(&path) {
-                    Ok(text) => records.push(Record::parse(&path, &text)),
-                    // The adapter's duty ends at naming the encoding; the
-                    // file stays a visible invalid record, not an abort.
-                    Err(StorageError::NotUtf8 { .. }) => records.push(Record::unreadable(&path)),
-                    Err(error) => return Err(error.into()),
-                }
+                *tally += 1;
+                archived.extend(resolvable_id(&path).map(str::to_owned));
+            }
+        }
+        Ok(Corpus {
+            records,
+            archived,
+            archive: Counts {
+                tasks: held[0],
+                decisions: held[1],
+                notes: held[2],
+                questions: held[3],
+            },
+        })
+    }
+
+    /// One directory's records, invalid ones included: an invalid record is
+    /// a visible first-class state, never a silent drop.
+    fn records_in(&self, dir: &str) -> Result<Vec<Record>, NotebookError> {
+        let mut records = Vec::new();
+        for path in self.storage.list(dir)? {
+            if !is_record_file(&path) {
+                continue;
+            }
+            match self.storage.read(&path) {
+                Ok(text) => records.push(Record::parse(&path, &text)),
+                // The adapter's duty ends at naming the encoding; the
+                // file stays a visible invalid record, not an abort.
+                Err(StorageError::NotUtf8 { .. }) => records.push(Record::unreadable(&path)),
+                Err(error) => return Err(error.into()),
             }
         }
         Ok(records)
     }
+}
+
+/// Every proof these records cite that names something outside the
+/// notebook — a commit, or a file — so the host can ask git and the
+/// filesystem which of them are still there. A link naming another record
+/// resolves inside the notebook and is `check`'s to judge, not the world's.
+fn cited_proofs(records: &[Record]) -> Vec<CitedProof> {
+    records
+        .iter()
+        .flat_map(|record| {
+            let id = path_stem(record.path());
+            record.file().field_values("link").filter_map(move |link| {
+                let (kind, target) = split_link(link)?;
+                ["sha", "report"].contains(&kind).then(|| CitedProof {
+                    record: id.to_owned(),
+                    kind: kind.to_owned(),
+                    target: target.to_owned(),
+                })
+            })
+        })
+        .collect()
+}
+
+/// The records one query reads, beside the ids the archive holds. The two
+/// are separate because they cost differently: a record is a file opened,
+/// an archived id is a name in a listing.
+struct Corpus {
+    records: Vec<Record>,
+    archived: BTreeSet<String>,
+    archive: Counts,
+}
+
+impl Corpus {
+    fn records(&self) -> &[Record] {
+        &self.records
+    }
+
+    /// How many files the archive holds, per type — whatever they say,
+    /// since a tally of the archive is a tally of its files.
+    fn archive_counts(&self) -> Counts {
+        self.archive
+    }
+
+    fn resolver(&self) -> Resolver<'_> {
+        Resolver {
+            read: self
+                .records
+                .iter()
+                .filter_map(|record| Some((resolvable_id(record.path())?, record)))
+                .collect(),
+            archived: &self.archived,
+        }
+    }
+}
+
+/// What a reference may resolve to. An id resolves when a file bearing it
+/// sits at that id's canonical path — a property of the name and the place,
+/// never of the bytes — so the archive answers from its listing and stays
+/// closed to every query that has no use for what it says.
+pub(crate) struct Resolver<'a> {
+    read: BTreeMap<&'a str, &'a Record>,
+    archived: &'a BTreeSet<String>,
+}
+
+impl<'a> Resolver<'a> {
+    /// Whether the notebook still holds `id`, read or filed.
+    pub(crate) fn resolves(&self, id: &str) -> bool {
+        self.read.contains_key(id) || self.archived.contains(id)
+    }
+
+    /// The record behind `id`, when this query read it. A filed record the
+    /// query left closed answers `None`: it resolves, and says nothing.
+    pub(crate) fn read(&self, id: &str) -> Option<&'a Record> {
+        self.read.get(id).copied()
+    }
+
+    /// Whether `id` sits in the archive — an answer the listing carries, so
+    /// it holds whether or not the file was opened.
+    pub(crate) fn archived(&self, id: &str) -> bool {
+        self.archived.contains(id)
+    }
+}
+
+/// The id a path resolves as, if any: the stem of a file sitting at that
+/// stem's own canonical path. A file in the wrong directory carries a name
+/// but claims no id, so it resolves nothing anywhere.
+fn resolvable_id(path: &str) -> Option<&str> {
+    let stem = path_stem(path);
+    let record_type = stem
+        .split_once('.')
+        .and_then(|(word, _)| RecordType::from_word(word))?;
+    let canonical = record_path(stem, record_type, is_archived(path));
+    (grammar::id_error(stem).is_none() && path == canonical).then_some(stem)
+}
+
+fn archive_of(directory: &str) -> String {
+    format!("archive/{directory}")
 }
 
 struct LoadedLive {
@@ -1913,17 +2092,16 @@ fn id_claims(records: &[Record]) -> BTreeMap<String, String> {
 /// The standing Decisions a draft may conflict with. Computed at write
 /// time because the writing agent, holding full context, is the cheapest
 /// judge that will ever see the pair; the tool prints it and stops.
-fn conflict_candidates(draft: &Draft, records: &[Record]) -> Vec<Cited> {
+fn conflict_candidates(draft: &Draft, records: &[Record], resolvable: &Resolver<'_>) -> Vec<Cited> {
     if draft.record_type != RecordType::Decision || draft.supersedes.is_some() {
         return Vec::new();
     }
-    let resolvable = resolvable_by_id(records);
     let draft_tags: BTreeSet<&str> = draft.tags.iter().map(String::as_str).collect();
     let cited_ids = mention::mentions(&draft.body);
     let mut hits: Vec<&Record> = records
         .iter()
         .filter(|record| {
-            is_standing_decision(record, &resolvable)
+            is_standing_decision(record, resolvable)
                 && looks_related(record, &draft_tags, &cited_ids)
         })
         .collect();
@@ -1931,7 +2109,7 @@ fn conflict_candidates(draft: &Draft, records: &[Record]) -> Vec<Cited> {
     hits.into_iter().map(Cited::of).collect()
 }
 
-fn is_standing_decision(record: &Record, resolvable: &BTreeMap<&str, &Record>) -> bool {
+fn is_standing_decision(record: &Record, resolvable: &Resolver<'_>) -> bool {
     record.record_type() == Some(RecordType::Decision)
         && !is_archived(record.path())
         && record.is_live()
@@ -2011,6 +2189,17 @@ fn parsed_type(id: &str) -> Result<RecordType, NotebookError> {
     Ok(RecordType::from_word(word).expect("a valid id starts with a type word"))
 }
 
+/// The paths an id could be held at, its live home before its archived
+/// one; none at all when the id names no type.
+fn canonical_paths(id: &str) -> impl Iterator<Item = String> + '_ {
+    id.split_once('.')
+        .and_then(|(word, _)| RecordType::from_word(word))
+        .into_iter()
+        .flat_map(move |record_type| {
+            [false, true].map(move |archived| record_path(id, record_type, archived))
+        })
+}
+
 fn record_path(id: &str, record_type: RecordType, archived: bool) -> String {
     let dir = record_type.directory();
     if archived {
@@ -2028,6 +2217,15 @@ fn is_record_file(path: &str) -> bool {
 
 fn is_archived(path: &str) -> bool {
     path.starts_with("archive/")
+}
+
+/// The records this one names as a blocker or as its Origin: the edges a
+/// scope walk follows, from the end that carries them.
+fn kin_of(record: &Record) -> impl Iterator<Item = &str> {
+    record
+        .file()
+        .field_values("blocked-by")
+        .chain(record.origin())
 }
 
 fn edge_exists(record: &Record, target: &str) -> bool {
@@ -2123,26 +2321,7 @@ fn type_list(types: &[RecordType]) -> String {
     words.join(" or ")
 }
 
-/// The records a reference can resolve to, keyed by id: exactly those
-/// sitting at their id's canonical live or archive path — the listing-side
-/// twin of the mutation gate's storage probe, so a file in the wrong
-/// directory resolves nothing anywhere.
-fn resolvable_by_id(records: &[Record]) -> BTreeMap<&str, &Record> {
-    records
-        .iter()
-        .filter_map(|record| {
-            let stem = path_stem(record.path());
-            let record_type = stem
-                .split_once('.')
-                .and_then(|(word, _)| RecordType::from_word(word))?;
-            let canonical = record_path(stem, record_type, is_archived(record.path()));
-            (grammar::id_error(stem).is_none() && record.path() == canonical)
-                .then_some((stem, record))
-        })
-        .collect()
-}
-
-fn listed_row(record: &Record, resolvable: &BTreeMap<&str, &Record>) -> ListedRecord {
+fn listed_row(record: &Record, resolvable: &Resolver<'_>) -> ListedRecord {
     let file = record.file();
     let state = if debt::is_excluded(record, resolvable) {
         "invalid".to_owned()
@@ -2176,21 +2355,6 @@ fn sits_in(record: &Record, record_type: RecordType, home: Residence) -> bool {
     grammar::residence(record.path(), record_type.word()) == Some(home)
 }
 
-fn archived_counts(records: &[Record]) -> Counts {
-    let of = |record_type| {
-        records
-            .iter()
-            .filter(|record| sits_in(record, record_type, Residence::Archive))
-            .count()
-    };
-    Counts {
-        tasks: of(RecordType::Task),
-        decisions: of(RecordType::Decision),
-        notes: of(RecordType::Note),
-        questions: of(RecordType::Question),
-    }
-}
-
 /// The commands that carry a still-live record toward its settled state —
 /// the recovery payload of an archive refused too early.
 fn settling_commands(record_type: RecordType, state: &str) -> Vec<&'static str> {
@@ -2204,7 +2368,7 @@ fn settling_commands(record_type: RecordType, state: &str) -> Vec<&'static str> 
 
 /// The dispatch queue's rows: live, open, valid, unblocked, unheld Tasks
 /// in ready order.
-fn ready_rows(records: &[Record], resolvable: &BTreeMap<&str, &Record>) -> Vec<ReadyTask> {
+fn ready_rows(records: &[Record], resolvable: &Resolver<'_>) -> Vec<ReadyTask> {
     let graph = task_graph(records);
     let keep =
         |record: &Record| record.hold().is_none() && !graph.is_blocked(path_stem(record.path()));
@@ -2214,11 +2378,7 @@ fn ready_rows(records: &[Record], resolvable: &BTreeMap<&str, &Record>) -> Vec<R
 /// The open Tasks a close of `id` released, in ready order: their last live
 /// blocker was that Task. A held one is named too — the hold gates
 /// `ready`, not the fact.
-fn unblocked_by_close(
-    records: &[Record],
-    resolvable: &BTreeMap<&str, &Record>,
-    id: &str,
-) -> Vec<String> {
+fn unblocked_by_close(records: &[Record], resolvable: &Resolver<'_>, id: &str) -> Vec<String> {
     let freed = task_graph(records).unblocked_by(id);
     let keep = |record: &Record| {
         freed
@@ -2234,7 +2394,7 @@ fn unblocked_by_close(
 /// The live, open, valid Tasks passing `keep`, in ready order.
 fn open_rows(
     records: &[Record],
-    resolvable: &BTreeMap<&str, &Record>,
+    resolvable: &Resolver<'_>,
     keep: impl Fn(&Record) -> bool,
 ) -> Vec<ReadyTask> {
     let mut rows: Vec<ReadyTask> = records
@@ -2252,62 +2412,97 @@ fn open_rows(
     rows
 }
 
-/// An epic is a hub Task, distinguished by its edges: it is blocked by at
-/// least one record that also carries it as Origin — one edge written from
-/// each end. The pairing is the discriminator. A Task blocked by a plain
-/// dependency did not give birth to it, and a Task that spawned a Question
-/// does not wait on it, so neither becomes an epic by accident.
-///
-/// A hub that no longer binds is not an epic in flight: its acceptance
-/// close has happened, and a dashboard that still asked for it would be
-/// asking for work already done.
-fn is_hub(record: &Record, records: &[Record], resolvable: &BTreeMap<&str, &Record>) -> bool {
-    if record.record_type() != Some(RecordType::Task)
-        || !record.is_live()
-        || is_archived(record.path())
-        || debt::is_excluded(record, resolvable)
-    {
-        return false;
-    }
-    let hub = path_stem(record.path());
-    let blocks: BTreeSet<&str> = record.file().field_values("blocked-by").collect();
-    records
-        .iter()
-        .any(|other| other.origin() == Some(hub) && blocks.contains(path_stem(other.path())))
+/// The membership edges of the notebook, indexed once. Both are read from
+/// one end and followed from the other, so answering them by scanning every
+/// record per hub would cost the notebook squared.
+struct MembershipIndex<'a> {
+    /// What each record waits on, by id.
+    waits_on: BTreeMap<&'a str, Vec<&'a str>>,
+    /// What was born inside each record, by the origin's id.
+    born_inside: BTreeMap<&'a str, Vec<&'a str>>,
+    /// The ids of the Tasks that have closed.
+    closed: BTreeSet<&'a str>,
 }
 
-/// Every record inside `hub`'s scope, the hub among them: what the epic
-/// waits on, and what was born inside it, each followed as far as it goes.
-///
-/// Both edges mean membership, written from opposite ends, and both carry
-/// through depth. A blocker of a child must close before the child, which
-/// must close before the hub, so it is work this epic waits on however far
-/// down it sits — and following it only to the first tier would blind the
-/// queue to a hub whose children were themselves assembled from the hub
-/// side, which is how an epic older than the edit surface is built.
-fn scope_of<'a>(records: &'a [Record], hub: &'a str) -> BTreeSet<&'a str> {
-    let mut scope: BTreeSet<&str> = BTreeSet::from([hub]);
-    loop {
-        let reached: Vec<&str> = records
-            .iter()
-            .flat_map(|record| {
-                let inside = scope.contains(path_stem(record.path()));
-                let waits_on = inside
-                    .then(|| record.file().field_values("blocked-by"))
-                    .into_iter()
-                    .flatten();
-                let born_inside = record
-                    .origin()
-                    .filter(|origin| scope.contains(origin))
-                    .map(|_| path_stem(record.path()));
-                waits_on.chain(born_inside)
-            })
-            .filter(|id| !scope.contains(id))
-            .collect();
-        if reached.is_empty() {
-            return scope;
+impl<'a> MembershipIndex<'a> {
+    fn of(live: &'a [Record], archived: &'a [Record]) -> Self {
+        let mut index = MembershipIndex {
+            waits_on: BTreeMap::new(),
+            born_inside: BTreeMap::new(),
+            closed: BTreeSet::new(),
+        };
+        // Live before archived, so the duplicate-id corruption an
+        // interrupted archive move leaves reads as the live file's edges
+        // and not as the union of two.
+        for record in live.iter().chain(archived) {
+            let id = path_stem(record.path());
+            let waits: Vec<&str> = record.file().field_values("blocked-by").collect();
+            if !waits.is_empty() {
+                index.waits_on.entry(id).or_insert(waits);
+            }
+            if let Some(origin) = record.origin() {
+                index.born_inside.entry(origin).or_default().push(id);
+            }
+            if record.state() == Some(TaskState::Closed.word()) {
+                index.closed.insert(id);
+            }
         }
-        scope.extend(reached);
+        index
+    }
+
+    fn edges_from(&self, id: &str) -> impl Iterator<Item = &'a str> + '_ {
+        let waits_on = self.waits_on.get(id).map_or(&[][..], Vec::as_slice);
+        let born_inside = self.born_inside.get(id).map_or(&[][..], Vec::as_slice);
+        waits_on.iter().chain(born_inside).copied()
+    }
+
+    /// An epic is a hub Task, distinguished by its edges: it is blocked by
+    /// at least one record that also carries it as Origin — one edge
+    /// written from each end. The pairing is the discriminator. A Task
+    /// blocked by a plain dependency did not give birth to it, and a Task
+    /// that spawned a Question does not wait on it, so neither becomes an
+    /// epic by accident.
+    ///
+    /// A hub that no longer binds is not an epic in flight: its acceptance
+    /// close has happened, and a dashboard that still asked for it would be
+    /// asking for work already done.
+    fn is_hub(&self, record: &Record, resolvable: &Resolver<'_>) -> bool {
+        if record.record_type() != Some(RecordType::Task)
+            || !record.is_live()
+            || is_archived(record.path())
+            || debt::is_excluded(record, resolvable)
+        {
+            return false;
+        }
+        let hub = path_stem(record.path());
+        let children = self.born_inside.get(hub).map_or(&[][..], Vec::as_slice);
+        self.waits_on
+            .get(hub)
+            .is_some_and(|waits| waits.iter().any(|target| children.contains(target)))
+    }
+
+    /// Every record inside `hub`'s scope, the hub among them: what the epic
+    /// waits on, and what was born inside it, each followed as far as it
+    /// goes.
+    ///
+    /// Both edges mean membership, written from opposite ends, and both
+    /// carry through depth. A blocker of a child must close before the
+    /// child, which must close before the hub, so it is work this epic
+    /// waits on however far down it sits — and following it only to the
+    /// first tier would blind the queue to a hub whose children were
+    /// themselves assembled from the hub side, which is how an epic older
+    /// than the edit surface is built.
+    fn scope_of(&self, hub: &'a str) -> BTreeSet<&'a str> {
+        let mut scope = BTreeSet::from([hub]);
+        let mut frontier = vec![hub];
+        while let Some(id) = frontier.pop() {
+            for reached in self.edges_from(id) {
+                if scope.insert(reached) {
+                    frontier.push(reached);
+                }
+            }
+        }
+        scope
     }
 }
 
@@ -2316,24 +2511,22 @@ fn scope_of<'a>(records: &'a [Record], hub: &'a str) -> BTreeSet<&'a str> {
 /// waits on, while `next` reads the whole scope, since anything the epic
 /// waits on is work it still owes. A hub never nominates itself: one that
 /// reaches `ready` is asking for its acceptance close, not for work.
-fn epic_rows(records: &[Record]) -> Vec<Epic> {
-    let resolvable = resolvable_by_id(records);
-    let queue = ready_rows(records, &resolvable);
-    let closed = |id: &str| {
-        records.iter().any(|record| {
-            path_stem(record.path()) == id && record.state() == Some(TaskState::Closed.word())
-        })
-    };
+fn epic_rows(records: &[Record], archived: &[Record], resolvable: &Resolver<'_>) -> Vec<Epic> {
+    let index = MembershipIndex::of(records, archived);
+    let queue = ready_rows(records, resolvable);
     records
         .iter()
-        .filter(|record| is_hub(record, records, &resolvable))
+        .filter(|record| index.is_hub(record, resolvable))
         .map(|hub| {
             let id = path_stem(hub.path());
             let children: Vec<&str> = hub.file().field_values("blocked-by").collect();
-            let scope = scope_of(records, id);
+            let scope = index.scope_of(id);
             Epic {
                 id: id.to_owned(),
-                closed: children.iter().filter(|child| closed(child)).count(),
+                closed: children
+                    .iter()
+                    .filter(|child| index.closed.contains(*child))
+                    .count(),
                 total: children.len(),
                 next: queue
                     .iter()
@@ -2348,7 +2541,7 @@ fn epic_rows(records: &[Record]) -> Vec<Epic> {
 /// one is `check`'s to name, as everywhere.
 fn open_questions_from(
     records: &[Record],
-    resolvable: &BTreeMap<&str, &Record>,
+    resolvable: &Resolver<'_>,
     task_id: &str,
 ) -> Vec<String> {
     records
@@ -2831,9 +3024,9 @@ fn error_findings(record: &Record) -> Vec<Finding> {
         .collect()
 }
 
-fn check_refs(record: &Record, by_stem: &BTreeMap<&str, &Record>, out: &mut Vec<FileFinding>) {
+fn check_refs(record: &Record, resolvable: &Resolver<'_>, out: &mut Vec<FileFinding>) {
     let mut dangling = |key, target: &str, line| {
-        if grammar::id_error(target).is_some() || by_stem.contains_key(target) {
+        if grammar::id_error(target).is_some() || resolvable.resolves(target) {
             return;
         }
         out.push(FileFinding {

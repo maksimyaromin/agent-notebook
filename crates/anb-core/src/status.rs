@@ -8,7 +8,9 @@
 //! The gate keeps a quiet notebook to one line. Under a Budget the sections
 //! degrade in fixed order — ready rows first, then epics to a count, then
 //! Debt to a count, then rules to a count, then the log and review lines —
-//! and the in-flight line is never dropped.
+//! and the in-flight line is never dropped: at the floor all but the first
+//! collapse to a count, so no notebook, however much it holds in flight,
+//! can make a Status grow without bound.
 //! Every full dashboard ends with the budget line; when something was cut,
 //! it names the cut and carries the command that restores it.
 
@@ -18,9 +20,12 @@ use crate::notebook::{Epic, ReadyTask};
 use crate::tokens::estimate_tokens;
 use std::fmt::Write as _;
 
-/// How many ready rows a full dashboard shows; more exist behind the
-/// truncation hint.
-const READY_ROWS: usize = 5;
+/// How many rows any one section of the dashboard shows before it names the
+/// rest as a count. Status is a fixed opening, not a report. A section that
+/// grew with the notebook would spend a whole session's opening on itself,
+/// and it would do so at the worst moment: the Debt list is longest exactly
+/// when the least is tended.
+const SECTION_ROWS: usize = 5;
 
 /// The token ceiling a Status must fit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +82,7 @@ pub struct StatusRule {
 }
 
 /// The assembled dashboard: the budgeted plain text and the model it
-/// renders. `ready` holds the whole queue; the text bounds it.
+/// renders. Each list holds all of what it counts; the renderings bound it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Status {
     pub text: String,
@@ -139,7 +144,7 @@ enum Collapse {
 
 /// The degradation ladder: each rung buys tokens by collapsing one section,
 /// in the fixed order the module doc states; the floor keeps counts, the
-/// in-flight lines, and the budget line.
+/// first in-flight line, and the budget line.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Ladder {
     ready_trimmed: usize,
@@ -175,7 +180,7 @@ impl Ladder {
             return None;
         }
         if self.reached(Collapse::Floor) {
-            return Some("all but in-flight".to_owned());
+            return Some("all but the first in-flight".to_owned());
         }
         let mut cuts = Vec::new();
         if self.ready_trimmed > 0 {
@@ -215,7 +220,7 @@ pub(crate) fn assemble(inputs: StatusInputs, budget: Budget) -> Status {
         return status_from(inputs, text, spent, true);
     }
 
-    let ready_shown = inputs.ready.len().min(READY_ROWS);
+    let ready_shown = inputs.ready.len().min(SECTION_ROWS);
     let mut ladder = Ladder::default();
     loop {
         let (text, spent) = render(&inputs, ladder, ready_shown, budget);
@@ -294,15 +299,7 @@ fn budget_line(spent: u32, budget: Budget, cut: Option<&str>) -> String {
 
 fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> String {
     let mut out = format!("ok: notebook — {}\n", counts_phrase(&inputs.counts));
-    for (position, task) in inputs.in_flight.iter().enumerate() {
-        let _ = writeln!(out, "in-flight: {} {}", task.id, json_quoted(&task.title));
-        if position == 0
-            && !ladder.reached(Collapse::Log)
-            && let Some(log) = &task.log
-        {
-            let _ = writeln!(out, "log: {log}");
-        }
-    }
+    render_in_flight(&mut out, &inputs.in_flight, ladder);
     if ladder.reached(Collapse::Floor) {
         return out;
     }
@@ -319,6 +316,39 @@ fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> Str
     out
 }
 
+/// What is in motion, and where the first of it stopped. The floor keeps
+/// that one line — a session cannot resume without it — and counts the
+/// rest.
+fn render_in_flight(out: &mut String, in_flight: &[ActiveTask], ladder: Ladder) {
+    let shown = if ladder.reached(Collapse::Floor) {
+        1
+    } else {
+        SECTION_ROWS
+    }
+    .min(in_flight.len());
+    for (position, task) in in_flight.iter().take(shown).enumerate() {
+        let _ = writeln!(out, "in-flight: {} {}", task.id, json_quoted(&task.title));
+        if position == 0
+            && !ladder.reached(Collapse::Log)
+            && let Some(log) = &task.log
+        {
+            let _ = writeln!(out, "log: {log}");
+        }
+    }
+    if in_flight.len() > shown {
+        let _ = writeln!(out, "  \u{2026} {} more in flight", in_flight.len() - shown);
+    }
+}
+
+/// What a bounded section left unsaid. The rows above name what they are,
+/// so the count needs no noun — and needs no plural it would get wrong at
+/// one.
+fn section_hint(out: &mut String, total: usize, shown: usize) {
+    if total > shown {
+        let _ = writeln!(out, "  \u{2026} {} more", total - shown);
+    }
+}
+
 /// Where each epic stands, so a session that opens with "continue <epic>"
 /// can see which one it means and what it would pick up.
 fn render_epics(out: &mut String, epics: &[Epic], ladder: Ladder) {
@@ -330,9 +360,10 @@ fn render_epics(out: &mut String, epics: &[Epic], ladder: Ladder) {
         return;
     }
     let _ = writeln!(out, "epics[{}]:", epics.len());
-    for epic in epics {
+    for epic in epics.iter().take(SECTION_ROWS) {
         let _ = writeln!(out, "  {}", epic_line(epic));
     }
+    section_hint(out, epics.len(), SECTION_ROWS);
 }
 
 /// Where one epic stands, in the one spelling every surface that prints an
@@ -357,14 +388,20 @@ fn render_review(out: &mut String, review: &[String], ladder: Ladder) {
     }
     if ladder.reached(Collapse::Log) {
         let _ = writeln!(out, "review: {}", review.len());
-    } else {
-        let _ = writeln!(
-            out,
-            "review[{}]: {} — waiting on a human",
-            review.len(),
-            review.join(", ")
-        );
+        return;
     }
+    let shown = review.len().min(SECTION_ROWS);
+    let rest = if review.len() > shown {
+        format!(", \u{2026} {} more", review.len() - shown)
+    } else {
+        String::new()
+    };
+    let _ = writeln!(
+        out,
+        "review[{}]: {}{rest} — waiting on a human",
+        review.len(),
+        review[..shown].join(", ")
+    );
 }
 
 fn render_rules(out: &mut String, rules: &[StatusRule], ladder: Ladder) {
@@ -376,9 +413,10 @@ fn render_rules(out: &mut String, rules: &[StatusRule], ladder: Ladder) {
         return;
     }
     let _ = writeln!(out, "rules[{}]:", rules.len());
-    for rule in rules {
+    for rule in rules.iter().take(SECTION_ROWS) {
         let _ = writeln!(out, "  {}: {}", rule.id, rule.title);
     }
+    section_hint(out, rules.len(), SECTION_ROWS);
 }
 
 fn render_ready(out: &mut String, ready: &[ReadyTask], shown: usize, today_day: i64) {
@@ -395,11 +433,9 @@ fn render_ready(out: &mut String, ready: &[ReadyTask], shown: usize, today_day: 
     }
 }
 
-/// How many lines each mention-borne class may spend before its hint; the
-/// hint is one line, shorter than what it truncates. The clock classes list
-/// in full — the notebook itself bounds them.
-const MENTION_CLASS_ROWS: usize = 5;
-
+/// The Debt list, class by class, each bounded on its own so one crowded
+/// class cannot bury the rest. Classes appear in the order the list gives
+/// them, whether or not their signals arrive together.
 fn render_debt(out: &mut String, debt: &[DebtSignal], ladder: Ladder) {
     if debt.is_empty() {
         return;
@@ -409,30 +445,16 @@ fn render_debt(out: &mut String, debt: &[DebtSignal], ladder: Ladder) {
         return;
     }
     let _ = writeln!(out, "debt[{}]:", debt.len());
-    for (bounded_class, plural) in [
-        (None, ""),
-        (Some("dangling-mention"), "dangling mentions"),
-        (Some("undeclared-pair"), "undeclared pairs"),
-    ] {
-        let mut shown = 0;
-        let mut hidden = 0;
-        for signal in debt {
-            let in_class = match bounded_class {
-                None => !matches!(signal.code(), "dangling-mention" | "undeclared-pair"),
-                Some(code) => signal.code() == code,
-            };
-            if !in_class {
-                continue;
-            }
-            if bounded_class.is_some() && shown == MENTION_CLASS_ROWS {
-                hidden += 1;
-                continue;
-            }
-            let _ = writeln!(out, "  {}", signal.line());
-            shown += 1;
+    let mut rendered: Vec<&'static str> = Vec::new();
+    for signal in debt {
+        if rendered.contains(&signal.code()) {
+            continue;
         }
-        if hidden > 0 {
-            let _ = writeln!(out, "  \u{2026} {hidden} more {plural}");
+        rendered.push(signal.code());
+        let class = debt.iter().filter(|other| other.code() == signal.code());
+        for line in class.clone().take(SECTION_ROWS) {
+            let _ = writeln!(out, "  {}", line.line());
         }
+        section_hint(out, class.count(), SECTION_ROWS);
     }
 }
