@@ -442,11 +442,26 @@ mod reconciliation {
         let gone = cited("report", "notes/gone.md");
         assert_eq!(
             lost_proofs(
-                dir.path(),
+                &dir.path().join(".agent-notebook"),
                 &[cited("report", "notes/there.md"), gone.clone()]
             ),
             vec![gone],
             "a file left where it lies is a claim a stat settles"
+        );
+    }
+
+    #[test]
+    fn a_report_path_is_read_from_the_project_not_the_notebook_directory() {
+        let (dir, _) = a_repository();
+        fs::create_dir_all(dir.path().join("reports")).unwrap();
+        fs::write(dir.path().join("reports/r.md"), "the report").unwrap();
+        assert_eq!(
+            lost_proofs(
+                &dir.path().join("elsewhere/notebook"),
+                &[cited("report", "reports/r.md")]
+            ),
+            vec![],
+            "a path in a record outlives the shell that typed it; the project is the base"
         );
     }
 

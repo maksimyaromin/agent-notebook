@@ -10,10 +10,13 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-/// The directory a relative notebook path is read from: the nearest
-/// ancestor of `start` already holding a notebook or a repository, else
-/// `start` itself. A directory above `.git` belongs to another project.
-fn project_anchor(start: &Path) -> &Path {
+/// The project `start` belongs to: the nearest ancestor already holding a
+/// notebook or a repository, else `start` itself. A directory above `.git`
+/// belongs to another project. It is what a relative path in the notebook
+/// is read from — the working directory of the moment is not stable enough
+/// to mean anything to a later reader.
+#[must_use]
+pub fn project_anchor(start: &Path) -> &Path {
     for dir in start.ancestors() {
         if dir.join(NOTEBOOK_DIR).is_dir() || dir.join(".git").exists() {
             return dir;
