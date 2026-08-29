@@ -78,15 +78,14 @@ fn removing_a_missing_path_is_not_found() {
 }
 
 #[test]
-fn bytes_outside_utf8_read_as_a_named_io_error() {
+fn bytes_outside_utf8_read_as_the_not_utf8_error() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("tasks")).unwrap();
     fs::write(dir.path().join("tasks/task.demo.md"), [0xFF, 0xFE, 0x00]).unwrap();
     assert_eq!(
         storage_in(&dir).read("tasks/task.demo.md"),
-        Err(StorageError::Io {
+        Err(StorageError::NotUtf8 {
             path: "tasks/task.demo.md".to_owned(),
-            detail: "not valid UTF-8".to_owned()
         })
     );
 }

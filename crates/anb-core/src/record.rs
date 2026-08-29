@@ -245,6 +245,18 @@ impl Record {
         }
     }
 
+    /// The record at `path` whose bytes could not cross the Storage seam:
+    /// an empty envelope carrying only the `not-utf8` finding, so the file
+    /// stays visible as invalid instead of aborting the command that met it.
+    #[must_use]
+    pub fn unreadable(path: &str) -> Self {
+        Record {
+            path: path.to_owned(),
+            file: RecordFile::parse(""),
+            findings: vec![not_utf8_finding()],
+        }
+    }
+
     #[must_use]
     pub fn path(&self) -> &str {
         &self.path
@@ -330,6 +342,14 @@ impl Record {
     pub fn hold_until(&self) -> Option<&str> {
         self.file.field("hold-until")
     }
+}
+
+/// The finding a file that is not UTF-8 carries, wherever a read meets one.
+pub(crate) fn not_utf8_finding() -> Finding {
+    Finding::for_file(
+        FindingCode::NotUtf8,
+        "the file is not valid UTF-8".to_owned(),
+    )
 }
 
 /// Fields legal only on some types; elsewhere they are orphans.

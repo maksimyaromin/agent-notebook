@@ -75,9 +75,8 @@ impl Storage for FsStorage {
             }
             Err(error) => return Err(io_error(path, &error)),
         };
-        String::from_utf8(bytes).map_err(|_| StorageError::Io {
+        String::from_utf8(bytes).map_err(|_| StorageError::NotUtf8 {
             path: path.to_owned(),
-            detail: "not valid UTF-8".to_owned(),
         })
     }
 

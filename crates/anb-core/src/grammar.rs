@@ -437,6 +437,25 @@ impl RecordFile {
         self.body.push('\n');
     }
 
+    /// Replace the body wholesale — the deliberate correction `edit` makes,
+    /// as opposed to the log's [`Self::append_body`]. The envelope stays
+    /// verbatim; a close fence left without its newline gains one so a
+    /// non-empty body starts on its own line.
+    ///
+    /// # Panics
+    /// On a file with no envelope; a caller mutates only accepted records.
+    pub fn set_body(&mut self, body: &str) {
+        if !body.is_empty() {
+            let close_fence = &mut self.envelope_for_mutation().close_fence;
+            if let Some(fence) = close_fence
+                && !fence.ends_with('\n')
+            {
+                fence.push('\n');
+            }
+        }
+        body.clone_into(&mut self.body);
+    }
+
     fn envelope_for_mutation(&mut self) -> &mut Envelope {
         self.envelope
             .as_mut()

@@ -15,6 +15,16 @@ pub enum Severity {
     Warning,
 }
 
+impl Severity {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+        }
+    }
+}
+
 /// The stable kebab-case finding codes: the grammar layer's and the
 /// record model's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -36,6 +46,7 @@ pub enum FindingCode {
     DepCycle,
     DuplicateId,
     BrokenSupersession,
+    NotUtf8,
     Crlf,
     Bom,
     NoFinalNewline,
@@ -59,7 +70,8 @@ impl FindingCode {
             | FindingCode::DanglingRef
             | FindingCode::DepCycle
             | FindingCode::DuplicateId
-            | FindingCode::BrokenSupersession => Severity::Error,
+            | FindingCode::BrokenSupersession
+            | FindingCode::NotUtf8 => Severity::Error,
             FindingCode::UnknownField
             | FindingCode::OrphanField
             | FindingCode::Crlf
@@ -88,6 +100,7 @@ impl FindingCode {
             FindingCode::DepCycle => "dep-cycle",
             FindingCode::DuplicateId => "duplicate-id",
             FindingCode::BrokenSupersession => "broken-supersession",
+            FindingCode::NotUtf8 => "not-utf8",
             FindingCode::Crlf => "crlf",
             FindingCode::Bom => "bom",
             FindingCode::NoFinalNewline => "no-final-newline",

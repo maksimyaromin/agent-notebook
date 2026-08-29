@@ -3,9 +3,11 @@
 //! programmatically. Pretty JSON is never emitted.
 
 use crate::cli::Subject;
-use crate::reply::{Reply, shown};
-use crate::text::Recovery;
-use anb_core::{Cited, DebtSignal, Held, ListedRecord, NotebookError, ReadyTask, Status, View};
+use crate::reply::{Recovery, Reply, shown};
+use anb_core::{
+    Cited, Counts, DebtSignal, FileFinding, Held, ListedRecord, NotebookError, Overview, ReadyTask,
+    Status, View,
+};
 use serde_json::{Map, Value, json};
 
 #[must_use]
@@ -92,6 +94,17 @@ pub fn render(reply: &Reply) -> String {
             }
             status_value(status)
         }
+        Reply::Checked { findings, all } => checked_value(findings, *all),
+        Reply::Archived(moved) => archived_value(moved),
+        Reply::Edited(edited) => edited_value(edited),
+        Reply::Searched { rows, all, .. } => json!({
+            "count": rows.len(),
+            "matches": rows[..shown(rows.len(), *all)]
+                .iter()
+                .map(listed_row)
+                .collect::<Vec<Value>>(),
+        }),
+        Reply::Overviewed(overview) => overview_value(overview),
         Reply::Silence => return String::new(),
     };
     value.to_string()
@@ -99,7 +112,11 @@ pub fn render(reply: &Reply) -> String {
 
 #[must_use]
 pub fn render_error(error: &NotebookError, subject: &Subject) -> String {
-    let recovery = Recovery::new(error, subject);
+    render_recovery(&Recovery::new(error, subject))
+}
+
+#[must_use]
+pub fn render_recovery(recovery: &Recovery) -> String {
     let mut object = Map::new();
     object.insert("error".into(), json!(recovery.code));
     object.insert("message".into(), json!(recovery.message));
@@ -185,8 +202,78 @@ fn listed_row(row: &ListedRecord) -> Value {
     if let Some(priority) = row.priority {
         object.insert("priority".into(), json!(priority));
     }
-    object.insert("title".into(), json!(row.title));
+    if let Some(title) = &row.title {
+        object.insert("title".into(), json!(title));
+    }
     Value::Object(object)
+}
+
+fn checked_value(findings: &[FileFinding], all: bool) -> Value {
+    json!({
+        "count": findings.len(),
+        "findings": findings[..shown(findings.len(), all)]
+            .iter()
+            .map(finding_value)
+            .collect::<Vec<Value>>(),
+    })
+}
+
+fn archived_value(moved: &anb_core::Archived) -> Value {
+    json!({
+        "ok": "archive",
+        "id": moved.id,
+        "from": moved.from,
+        "to": moved.to,
+        "already": moved.already,
+    })
+}
+
+fn edited_value(edited: &anb_core::Edited) -> Value {
+    let mut object = Map::new();
+    object.insert("ok".into(), json!("edit"));
+    object.insert("id".into(), json!(edited.id));
+    object.insert("changed".into(), json!(edited.changed));
+    object.insert("already".into(), json!(edited.changed.is_empty()));
+    insert_dangling_mentions(&mut object, &edited.dangling_mentions);
+    Value::Object(object)
+}
+
+/// An absent line is omitted: the finding is about the whole file.
+fn finding_value(located: &FileFinding) -> Value {
+    let mut object = Map::new();
+    object.insert("file".into(), json!(located.path));
+    if let Some(line) = located.finding.line {
+        object.insert("line".into(), json!(line));
+    }
+    object.insert(
+        "severity".into(),
+        json!(located.finding.code.severity().as_str()),
+    );
+    object.insert("code".into(), json!(located.finding.code.as_str()));
+    object.insert("message".into(), json!(located.finding.message));
+    Value::Object(object)
+}
+
+fn overview_value(overview: &Overview) -> Value {
+    let mut object = Map::new();
+    object.insert("live".into(), counts_value(&overview.live));
+    for section in &overview.sections {
+        object.insert(
+            section.record_type.directory().into(),
+            Value::Array(section.rows.iter().map(listed_row).collect()),
+        );
+    }
+    object.insert("archive".into(), counts_value(&overview.archived));
+    Value::Object(object)
+}
+
+fn counts_value(counts: &Counts) -> Value {
+    json!({
+        "tasks": counts.tasks,
+        "decisions": counts.decisions,
+        "notes": counts.notes,
+        "questions": counts.questions,
+    })
 }
 
 fn view_value(view: &View) -> Value {
@@ -205,12 +292,7 @@ fn status_value(status: &Status) -> Value {
     json!({
         "quiet": status.quiet,
         "spent": status.spent,
-        "counts": {
-            "tasks": status.counts.tasks,
-            "decisions": status.counts.decisions,
-            "notes": status.counts.notes,
-            "questions": status.counts.questions,
-        },
+        "counts": counts_value(&status.counts),
         "in-flight": status.in_flight.iter().map(|task| {
             let mut object = Map::new();
             object.insert("id".into(), json!(task.id));

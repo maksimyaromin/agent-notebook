@@ -21,10 +21,11 @@ pub use debt::{Cited, DebtSignal, DebtThresholds};
 pub use finding::{Finding, FindingCode, Severity};
 pub use grammar::RecordFile;
 pub use notebook::{
-    Closed, Commented, Created, Draft, Dropped, Edged, FileFinding, Held, Link, ListedRecord,
-    Notebook, NotebookError, Proof, ReadyTask, Transitioned, View,
+    Archived, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited, FileFinding, Held,
+    Link, ListedRecord, Notebook, NotebookError, Overview, Proof, ReadyTask, Transitioned,
+    TypeSection, View,
 };
 pub use record::{Record, RecordType, TaskState};
-pub use status::{ActiveTask, Budget, Counts, Status, StatusRule};
+pub use status::{ActiveTask, Budget, Counts, Status, StatusRule, counts_phrase};
 pub use storage::{MemoryStorage, Storage, StorageError};
 pub use tokens::estimate_tokens;

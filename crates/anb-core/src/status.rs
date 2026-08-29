@@ -238,7 +238,10 @@ fn quiet_line(counts: &Counts) -> String {
     )
 }
 
-fn counts_phrase(counts: &Counts) -> String {
+/// The one spelling of a per-type tally, shared by every surface that
+/// prints one.
+#[must_use]
+pub fn counts_phrase(counts: &Counts) -> String {
     format!(
         "{} tasks, {} decisions, {} notes, {} questions",
         counts.tasks, counts.decisions, counts.notes, counts.questions

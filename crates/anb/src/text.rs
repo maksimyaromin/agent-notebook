@@ -5,10 +5,12 @@
 
 use crate::cli::Subject;
 use crate::json;
-use crate::reply::{Reply, shown};
+use crate::reply::{Recovery, Reply, shown};
 use anb_core::encode::quoted_if_delimited;
-use anb_core::notebook::path_stem;
-use anb_core::{Finding, ListedRecord, NotebookError, ReadyTask, View, encode, grammar};
+use anb_core::{
+    FileFinding, ListedRecord, NotebookError, Overview, ReadyTask, View, counts_phrase, encode,
+    grammar,
+};
 use std::fmt::Write as _;
 
 #[must_use]
@@ -60,8 +62,37 @@ pub fn render(reply: &Reply, today: &str) -> String {
         ),
         Reply::Commented(commented) => commented_lines(commented),
         Reply::Ready { rows, all } => ready_table(rows, shown(rows.len(), *all), today),
-        Reply::Listing { rows, all } => listing_table(rows, shown(rows.len(), *all)),
+        Reply::Listing { rows, all } => {
+            listing_table(rows, shown(rows.len(), *all), "records", "anb list --all")
+        }
         Reply::Viewed(view) => single_record(view),
+        Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
+        Reply::Archived(moved) => {
+            if moved.already {
+                format!("ok: archive {} — archived (already)\n", moved.id)
+            } else {
+                format!(
+                    "ok: archive {} — {}\u{2192}{}\n",
+                    moved.id, moved.from, moved.to
+                )
+            }
+        }
+        Reply::Edited(edited) => {
+            let mut out = if edited.changed.is_empty() {
+                format!("ok: edit {} — unchanged (already)\n", edited.id)
+            } else {
+                format!("ok: edit {} — {}\n", edited.id, edited.changed.join(", "))
+            };
+            dangling_mention_line(&mut out, &edited.dangling_mentions);
+            out
+        }
+        Reply::Searched { query, rows, all } => listing_table(
+            rows,
+            shown(rows.len(), *all),
+            "matches",
+            &format!("anb search {} --all", shell_quoted(query)),
+        ),
+        Reply::Overviewed(overview) => overview_page(overview),
         Reply::Status { status, hook } => {
             if *hook {
                 json::hook_payload(status)
@@ -77,7 +108,11 @@ pub fn render(reply: &Reply, today: &str) -> String {
 /// repair needs, and the literal next commands.
 #[must_use]
 pub fn render_error(error: &NotebookError, subject: &Subject) -> String {
-    let recovery = Recovery::new(error, subject);
+    render_recovery(&Recovery::new(error, subject))
+}
+
+#[must_use]
+pub fn render_recovery(recovery: &Recovery) -> String {
     let mut out = format!("error[{}]: {}\n", recovery.code, recovery.message);
     for detail in &recovery.details {
         let _ = writeln!(out, "  {detail}");
@@ -86,119 +121,6 @@ pub fn render_error(error: &NotebookError, subject: &Subject) -> String {
         let _ = writeln!(out, "try: {suggestion}");
     }
     out
-}
-
-/// A refusal decomposed for either output format: the stable kebab-case
-/// code, the one-line message, detail lines, and the next commands computed
-/// from the refusal's own state.
-pub struct Recovery {
-    pub code: &'static str,
-    pub message: String,
-    pub details: Vec<String>,
-    pub tries: Vec<String>,
-}
-
-impl Recovery {
-    #[must_use]
-    pub fn new(error: &NotebookError, subject: &Subject) -> Self {
-        let mut recovery = Recovery {
-            code: error_code(error),
-            message: error.to_string(),
-            details: Vec::new(),
-            tries: Vec::new(),
-        };
-        match error {
-            NotebookError::UnknownId { .. } => {
-                recovery.tries.push("anb list".to_owned());
-            }
-            NotebookError::DanglingRef { target, .. } => {
-                if target.starts_with("task.") {
-                    recovery
-                        .tries
-                        .push(format!("anb add \"<title>\" --id {target}"));
-                }
-                recovery.tries.push("anb list".to_owned());
-            }
-            NotebookError::Archived { id } | NotebookError::WrongType { id, .. } => {
-                recovery.tries.push(format!("anb view {id}"));
-            }
-            NotebookError::InvalidRecord { path, findings } => {
-                recovery.details = findings.iter().map(finding_line).collect();
-                recovery.tries.push(format!("anb view {}", path_stem(path)));
-            }
-            NotebookError::InvalidTransition { id, valid, .. } => {
-                for action in valid {
-                    recovery.tries.push(match *action {
-                        "close" => format!("anb close {id} --report <path>"),
-                        action => format!("anb {action} {id}"),
-                    });
-                }
-            }
-            NotebookError::DuplicateId { id, .. } => {
-                recovery.tries.push(format!("anb view {id}"));
-                recovery.tries.push("anb add \"<title>\"".to_owned());
-            }
-            NotebookError::InvalidArgument { .. } => {
-                recovery.tries = argument_retries(subject);
-            }
-            NotebookError::WouldCycle { chain } => {
-                // The chain's first pair is the refused edge; the rest
-                // already stand, and erasing any one of them opens it.
-                recovery.tries = chain
-                    .windows(2)
-                    .skip(1)
-                    .map(|edge| format!("anb unblock {} {}", edge[0], edge[1]))
-                    .collect();
-            }
-            NotebookError::CannotSupersede { .. } | NotebookError::Storage(_) => {}
-        }
-        recovery
-    }
-}
-
-/// The retry a refused argument points at, keyed by the verb it refused;
-/// the create verbs carry no id and retry as a command shape.
-fn argument_retries(subject: &Subject) -> Vec<String> {
-    match (subject.verb, &subject.id) {
-        ("close", Some(id)) => vec![
-            format!("anb close {id} --pr <url>"),
-            format!("anb close {id} --no-proof"),
-        ],
-        ("hold", Some(id)) => vec![format!("anb hold {id} --reason \"<why>\"")],
-        ("comment", Some(id)) => vec![format!("anb comment {id} \"<one line>\"")],
-        ("answer", Some(id)) => vec![
-            format!("anb answer {id} --to <id>"),
-            format!("anb answer {id} --drop \"<why>\""),
-        ],
-        ("add", _) => vec!["anb add \"<title>\"".to_owned()],
-        ("decide", _) => vec!["anb decide \"<title>\" --kind rule".to_owned()],
-        ("note", _) => vec!["anb note \"<title>\" --kind fact".to_owned()],
-        ("ask", _) => vec!["anb ask \"<title>\"".to_owned()],
-        _ => Vec::new(),
-    }
-}
-
-fn error_code(error: &NotebookError) -> &'static str {
-    match error {
-        NotebookError::UnknownId { .. } => "unknown-id",
-        NotebookError::Archived { .. } => "archived",
-        NotebookError::InvalidRecord { .. } => "invalid-record",
-        NotebookError::WrongType { .. } => "wrong-type",
-        NotebookError::InvalidTransition { .. } => "invalid-transition",
-        NotebookError::InvalidArgument { .. } => "invalid-argument",
-        NotebookError::DuplicateId { .. } => "duplicate-id",
-        NotebookError::DanglingRef { .. } => "dangling-ref",
-        NotebookError::CannotSupersede { .. } => "cannot-supersede",
-        NotebookError::WouldCycle { .. } => "would-cycle",
-        NotebookError::Storage(_) => "storage",
-    }
-}
-
-fn finding_line(finding: &Finding) -> String {
-    match finding.line {
-        Some(line) => format!("line {line}: {} {}", finding.code.as_str(), finding.message),
-        None => format!("{} {}", finding.code.as_str(), finding.message),
-    }
 }
 
 fn already_mark(already: bool) -> &'static str {
@@ -298,26 +220,86 @@ fn ready_table(rows: &[ReadyTask], shown: usize, today: &str) -> String {
     out
 }
 
-fn listing_table(rows: &[ListedRecord], shown: usize) -> String {
+fn listing_table(rows: &[ListedRecord], shown: usize, label: &str, restore: &str) -> String {
     let mut out = format!("count: {}\n", rows.len());
     if rows.is_empty() {
         return out;
     }
-    let _ = writeln!(out, "records[{shown}]{{id,state,priority,title}}:");
+    out.push_str(&record_rows(rows, shown, label));
+    truncation_hint(&mut out, rows.len(), shown, restore);
+    out
+}
+
+/// The one shape of a record-listing block: header, then comma rows.
+fn record_rows(rows: &[ListedRecord], shown: usize, label: &str) -> String {
+    let mut out = format!("{label}[{shown}]{{id,state,priority,title}}:\n");
     for row in &rows[..shown] {
         let priority = row
             .priority
             .map_or_else(|| "-".to_owned(), |priority| priority.to_string());
+        let title = row
+            .title
+            .as_deref()
+            .map_or_else(|| "-".to_owned(), quoted_if_delimited);
+        let _ = writeln!(out, "  {},{},{priority},{title}", row.id, row.state);
+    }
+    out
+}
+
+fn findings_table(findings: &[FileFinding], shown: usize) -> String {
+    let mut out = format!("count: {}\n", findings.len());
+    if findings.is_empty() {
+        return out;
+    }
+    let _ = writeln!(out, "findings[{shown}]{{file,line,severity,code,message}}:");
+    for located in &findings[..shown] {
+        let line = located
+            .finding
+            .line
+            .map_or_else(|| "-".to_owned(), |line| line.to_string());
         let _ = writeln!(
             out,
-            "  {},{},{priority},{}",
-            row.id,
-            row.state,
-            quoted_if_delimited(&row.title)
+            "  {},{line},{},{},{}",
+            located.path,
+            located.finding.code.severity().as_str(),
+            located.finding.code.as_str(),
+            quoted_if_delimited(&located.finding.message)
         );
     }
-    truncation_hint(&mut out, rows.len(), shown, "anb list --all");
+    truncation_hint(&mut out, findings.len(), shown, "anb check --all");
     out
+}
+
+fn overview_page(overview: &Overview) -> String {
+    let mut out = format!("notebook: {}\n", counts_phrase(&overview.live));
+    for section in &overview.sections {
+        if section.rows.is_empty() {
+            continue;
+        }
+        out.push_str(&record_rows(
+            &section.rows,
+            section.rows.len(),
+            section.record_type.directory(),
+        ));
+    }
+    let archived = &overview.archived;
+    if archived.tasks + archived.decisions + archived.notes + archived.questions > 0 {
+        let _ = writeln!(out, "archive: {}", counts_phrase(archived));
+    }
+    out
+}
+
+/// The query as one shell word, single-quoted so every character stays
+/// literal and the truncation hint stays executable.
+fn shell_quoted(query: &str) -> String {
+    let bare = query
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if bare && !query.is_empty() {
+        query.to_owned()
+    } else {
+        format!("'{}'", query.replace('\'', "'\\''"))
+    }
 }
 
 fn truncation_hint(out: &mut String, total: usize, shown: usize, restore: &str) {
