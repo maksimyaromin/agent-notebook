@@ -6,6 +6,7 @@ title: GitHub dev-flow: Actions CI (fmt + clippy + tests)
 by: Maksim Yaromin
 via: claude-code
 tags: dist
+blocked-by: task.milestone-cli-complete
 created: 2026-08-29
 updated: 2026-08-29
 ---

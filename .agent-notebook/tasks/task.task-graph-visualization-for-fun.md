@@ -2,12 +2,16 @@
 id: task.task-graph-visualization-for-fun
 type: task
 state: open
-title: Task graph visualization (for fun)
+title: Graph epic (hub)
 by: Maksim Yaromin
 via: claude-code
-tags: idea
+tags: epic
+blocked-by: task.graph-emit-html
+blocked-by: task.graph-lavish-loop
 created: 2026-08-29
 updated: 2026-08-29
 ---
 
-For fun and flair: visualize the notebook's Tasks and their blocked-by graph. Vision: something like Lavish reports with diagrams inside, or the Nx interactive project graph — an HTML view of the dependency graph (nodes = Tasks colored by state and priority, edges = blocked-by, ready queue highlighted). Builds on anb-core's TaskGraph; the data is already there. Not scheduled — pick up when it sounds fun.
+Epic hub for the interactive graph: any slice of the task graph as a map before the owner's eyes, with per-node comments returned to the agent as one batch of targeted instructions — instead of opening record files one by one. Task-centric, id-only tiles colored by state, full record in a modal, blocked-by and origin edges unlabeled, mentions only inside the modal; slices: full map, epic branch, ready lens. An intent surface, never a write surface: anb emits a self-contained HTML artifact and ships no server; the feedback loop belongs to the review harness. Children carry the work; closing this hub is the epic's acceptance. Ordered strictly after the release gate: the product is fully usable for read/write and released first.
+- 2026-08-29 Maksim Yaromin: Promoted from idea to the graph epic hub (owner's grill 2026-08-29). Title, tag, and body were updated by hand with the owner's explicit permission: the edit verb does not exist yet — it ships with task.cli-check-archive-edit-search-overview. Children: task.graph-emit-html, task.graph-lavish-loop.
+- 2026-08-29 Maksim Yaromin: Finding, to groom when the epic starts: no slice owns the picture of finished work. The read contract must state that the graph reads live + archive; the epic-branch slice shows closed/archived children (grey tiles plus a counter on the hub, e.g. 12/17); consider a dedicated progress lens. Origin: the owner's observation 2026-08-29 — the folder view gives no sense of done vs not-done, archive at hundreds of tasks will not either, and visible progress is a core function of the tool, not cosmetics.

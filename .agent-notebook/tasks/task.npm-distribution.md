@@ -7,6 +7,7 @@ by: Maksim Yaromin
 via: claude-code
 tags: dist
 blocked-by: task.cli-task-cycle
+blocked-by: task.milestone-cli-complete
 created: 2026-08-29
 updated: 2026-08-29
 ---
