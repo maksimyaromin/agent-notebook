@@ -1,15 +1,17 @@
 ---
 id: task.cli-check-archive-edit-search-overview
 type: task
-state: review
+state: closed
 title: CLI: check / archive / edit / search / overview
 by: Maksim Yaromin
 via: claude-code
 tags: cli
+link: sha 14ea75d
 blocked-by: task.core-grammar-parser-renderer
 blocked-by: task.core-record-model-invariants
 created: 2026-08-29
 updated: 2026-08-29
+closed: 2026-08-29
 ---
 
 Check names file, line, reason; archive moves records with history; search and overview ship in v1. Adapter duty: a non-UTF-8 file must surface through the CLI as the not-utf8 finding — visible to the calling LLM, never a crash or a silent skip; the Core cannot detect it (Storage feeds it strings), so the fs adapter owns it.
