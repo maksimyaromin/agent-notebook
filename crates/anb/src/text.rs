@@ -161,6 +161,10 @@ fn commented_lines(commented: &anb_core::Commented) -> String {
 
 fn closed_lines(closed: &anb_core::Closed) -> String {
     let mut out = transition_line("close", &closed.transition);
+    if let Some(note) = &closed.report_note {
+        let _ = writeln!(out, "report: {note}");
+    }
+    dangling_mention_line(&mut out, &closed.dangling_mentions);
     if !closed.unblocked.is_empty() {
         let _ = writeln!(
             out,

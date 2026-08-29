@@ -44,12 +44,7 @@ pub fn render(reply: &Reply) -> String {
             insert_dangling_mentions(&mut object, &dropped.dangling_mentions);
             Value::Object(object)
         }
-        Reply::Closed(closed) => {
-            let mut object = transition_map("close", &closed.transition);
-            object.insert("unblocked".into(), json!(closed.unblocked));
-            object.insert("open-questions".into(), json!(closed.open_questions));
-            Value::Object(object)
-        }
+        Reply::Closed(closed) => closed_value(closed),
         Reply::Held { held, until } => {
             let mut object = held_map("hold", held);
             if let Some(until) = until {
@@ -141,6 +136,17 @@ pub fn hook_payload(status: &Status) -> String {
         }
     })
     .to_string()
+}
+
+fn closed_value(closed: &anb_core::Closed) -> Value {
+    let mut object = transition_map("close", &closed.transition);
+    if let Some(note) = &closed.report_note {
+        object.insert("report".into(), json!(note));
+    }
+    insert_dangling_mentions(&mut object, &closed.dangling_mentions);
+    object.insert("unblocked".into(), json!(closed.unblocked));
+    object.insert("open-questions".into(), json!(closed.open_questions));
+    Value::Object(object)
 }
 
 fn transition_value(command: &str, transition: &anb_core::Transitioned) -> Value {

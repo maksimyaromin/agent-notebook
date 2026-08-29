@@ -3,9 +3,10 @@
 //! the output contract, never from running the code.
 
 use anb::cli::{Cli, Command};
-use anb::reply::execute;
+use anb::reply::{Host, execute};
 use anb::{json, text};
 use anb_core::MemoryStorage;
+use anb_core::storage::StorageError;
 use clap::Parser;
 use insta::assert_snapshot;
 
@@ -15,17 +16,36 @@ const GIT_IDENTITY: &str = "Maks";
 /// Parse and run one command line; `Ok` is stdout, `Err` is the payload a
 /// failure prints.
 fn run(storage: &mut MemoryStorage, line: &[&str]) -> Result<String, String> {
+    run_reading(storage, line, &[])
+}
+
+/// [`run`] with files the shell may read by path — the report `--note`
+/// ingests lives outside the notebook, so no Storage serves it.
+fn run_reading(
+    storage: &mut MemoryStorage,
+    line: &[&str],
+    reports: &[(&str, &str)],
+) -> Result<String, String> {
     let mut args = vec!["anb"];
     args.extend_from_slice(line);
     let cli = Cli::try_parse_from(args).expect("the test drives a well-formed command line");
     let subject = anb::cli::subject(&cli.command);
     let wants_json = cli.json;
-    match execute(
-        cli.command,
-        storage,
-        || Some(GIT_IDENTITY.to_owned()),
-        TODAY,
-    ) {
+    let read_report = |path: &str| {
+        reports
+            .iter()
+            .find(|(named, _)| *named == path)
+            .map(|(_, text)| (*text).to_owned())
+            .ok_or_else(|| StorageError::NotFound {
+                path: path.to_owned(),
+            })
+    };
+    let host = Host {
+        git_by: || Some(GIT_IDENTITY.to_owned()),
+        read_report,
+        today: TODAY,
+    };
+    match execute(cli.command, storage, host) {
         Ok(reply) => Ok(if wants_json {
             json::render(&reply)
         } else {
@@ -37,6 +57,27 @@ fn run(storage: &mut MemoryStorage, line: &[&str]) -> Result<String, String> {
             text::render_error(&error, &subject)
         }),
     }
+}
+
+/// A host built from plain functions, so a case can name one without
+/// spelling out two closure types.
+type PlainHost = Host<'static, fn() -> Option<String>, fn(&str) -> Result<String, StorageError>>;
+
+/// The host of a shell whose clock has gone wrong: the one fact these cases
+/// vary.
+fn undated_host() -> PlainHost {
+    Host {
+        git_by: || None,
+        read_report: missing_report,
+        today: "not-a-date",
+    }
+}
+
+/// The reader for tests that never pass `--note`: every path is absent.
+fn missing_report(path: &str) -> Result<String, StorageError> {
+    Err(StorageError::NotFound {
+        path: path.to_owned(),
+    })
 }
 
 fn ok(storage: &mut MemoryStorage, line: &[&str]) -> String {
@@ -165,6 +206,73 @@ mod task_cycle_replies {
     }
 
     #[test]
+    fn close_with_a_note_ingests_the_report_and_names_it() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "active", "A demo record", &[], ""),
+        )]);
+        assert_snapshot!(
+            run_reading(
+                &mut storage,
+                &["close", "task.demo", "--note", "reports/demo.md"],
+                &[("reports/demo.md", "# What shipped\n")],
+            )
+            .expect("the command must succeed"),
+            @r"
+        ok: close task.demo — active→closed
+        report: note.report-a-demo-record
+        "
+        );
+        // The Core owns the Note's shape; the shell's own contribution is
+        // the identity it resolved from git.
+        assert!(
+            storage
+                .read("notes/note.report-a-demo-record.md")
+                .unwrap()
+                .contains("\nby: Maks\n"),
+            "the report is signed by whoever closed the task"
+        );
+    }
+
+    #[test]
+    fn close_with_a_note_naming_no_file_is_a_recovery_payload() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "active", "A demo record", &[], ""),
+        )]);
+        assert_snapshot!(
+            run_reading(&mut storage, &["close", "task.demo", "--note", "gone.md"], &[])
+                .expect_err("the command must be refused"),
+            @r"
+        error[invalid-argument]: note: no file at `gone.md`
+        try: anb close task.demo --note <path>
+        try: anb close task.demo --no-proof
+        "
+        );
+        assert_eq!(
+            storage.read("tasks/task.demo.md").unwrap(),
+            record_file("task.demo", "task", "active", "A demo record", &[], ""),
+            "an unreadable report closes nothing"
+        );
+    }
+
+    #[test]
+    fn close_with_two_proofs_names_the_conflict() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "active", "A demo record", &[], ""),
+        )]);
+        assert_snapshot!(
+            refused(&mut storage, &["close", "task.demo", "--sha", "f00d", "--no-proof"]),
+            @r"
+        error[invalid-argument]: close: pass exactly one of --note <path>, --pr <url>, --sha <sha>, --report <path>, or --no-proof
+        try: anb close task.demo --note <path>
+        try: anb close task.demo --no-proof
+        "
+        );
+    }
+
+    #[test]
     fn close_without_a_proof_is_a_recovery_payload() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md".to_owned(),
@@ -173,8 +281,8 @@ mod task_cycle_replies {
         assert_snapshot!(
             refused(&mut storage, &["close", "task.demo"]),
             @r"
-        error[invalid-argument]: close: a proof is required — pass --pr <url>, --sha <sha>, --report <path>, or --no-proof
-        try: anb close task.demo --pr <url>
+        error[invalid-argument]: close: a proof is required — pass --note <path>, --pr <url>, --sha <sha>, --report <path>, or --no-proof
+        try: anb close task.demo --note <path>
         try: anb close task.demo --no-proof
         "
         );
@@ -202,7 +310,7 @@ mod task_cycle_replies {
             refused(&mut storage, &["start", "task.demo"]),
             @r"
         error[invalid-transition]: `task.demo` is review; valid: close, return
-        try: anb close task.demo --report <path>
+        try: anb close task.demo --note <path>
         try: anb return task.demo
         "
         );
@@ -922,7 +1030,7 @@ mod session_status {
     fn the_hook_fails_soft_to_silence() {
         let mut storage = MemoryStorage::new();
         let cli = Cli::try_parse_from(["anb", "status", "--hook"]).unwrap();
-        let reply = execute(cli.command, &mut storage, || None, "not-a-date")
+        let reply = execute(cli.command, &mut storage, undated_host())
             .expect("the hook never surfaces a failure");
         assert_eq!(text::render(&reply, "not-a-date"), "");
         assert_eq!(json::render(&reply), "");
@@ -932,7 +1040,7 @@ mod session_status {
     fn without_the_hook_the_same_failure_is_a_payload() {
         let mut storage = MemoryStorage::new();
         let cli = Cli::try_parse_from(["anb", "status"]).unwrap();
-        let error = execute(cli.command, &mut storage, || None, "not-a-date").unwrap_err();
+        let error = execute(cli.command, &mut storage, undated_host()).unwrap_err();
         assert!(matches!(
             error,
             anb_core::NotebookError::InvalidArgument { .. }
@@ -1088,6 +1196,23 @@ mod json_surface {
             r#"{"ok":"close","id":"task.demo","from":"active","to":"closed","already":false,"unblocked":[],"open-questions":[]}"#
         );
     }
+
+    #[test]
+    fn an_ingested_report_is_named_in_json_too() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "active", "A demo record", &[], ""),
+        )]);
+        assert_eq!(
+            run_reading(
+                &mut storage,
+                &["close", "task.demo", "--note", "r.md", "--json"],
+                &[("r.md", "# What shipped\n")],
+            )
+            .expect("the command must succeed"),
+            r#"{"ok":"close","id":"task.demo","from":"active","to":"closed","already":false,"report":"note.report-a-demo-record","unblocked":[],"open-questions":[]}"#
+        );
+    }
 }
 
 /// The surface itself: every verb of the task cycle parses, so a rename in
@@ -1197,7 +1322,16 @@ mod maintenance_replies {
             record_file("task.demo", "task", "cancelled", "A demo record", &[], ""),
         )]);
         let cli = Cli::try_parse_from(["anb", "check"]).unwrap();
-        let reply = execute(cli.command, &mut storage, || None, TODAY).unwrap();
+        let reply = execute(
+            cli.command,
+            &mut storage,
+            Host {
+                git_by: || None,
+                read_report: missing_report,
+                today: TODAY,
+            },
+        )
+        .unwrap();
         assert!(reply.failed(), "error findings must gate a caller like CI");
     }
 
@@ -1215,7 +1349,16 @@ mod maintenance_replies {
             ),
         )]);
         let cli = Cli::try_parse_from(["anb", "check"]).unwrap();
-        let reply = execute(cli.command, &mut storage, || None, TODAY).unwrap();
+        let reply = execute(
+            cli.command,
+            &mut storage,
+            Host {
+                git_by: || None,
+                read_report: missing_report,
+                today: TODAY,
+            },
+        )
+        .unwrap();
         assert!(!reply.failed(), "warnings keep the record usable");
     }
 
@@ -1248,7 +1391,7 @@ mod maintenance_replies {
             refused(&mut storage, &["archive", "task.demo"]),
             @r"
         error[invalid-transition]: `task.demo` is active; valid: close
-        try: anb close task.demo --report <path>
+        try: anb close task.demo --note <path>
         "
         );
     }

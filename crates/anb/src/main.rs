@@ -3,7 +3,7 @@
 
 use anb::cli::{Cli, Command};
 use anb::fs_storage::{FsStorage, resolve_root};
-use anb::reply::execute;
+use anb::reply::{Host, execute};
 use anb::{json, text};
 use anb_core::NotebookError;
 use anb_core::storage::StorageError;
@@ -72,7 +72,12 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     let mut storage = FsStorage::new(resolve_root(&cwd));
     let today = jiff::Zoned::now().date().to_string();
 
-    match execute(cli.command, &mut storage, git_user_name, &today) {
+    let host = Host {
+        git_by: git_user_name,
+        read_report,
+        today: &today,
+    };
+    match execute(cli.command, &mut storage, host) {
         Ok(reply) => {
             let exit = if reply.failed() {
                 ExitCode::FAILURE
@@ -97,6 +102,24 @@ fn terminated(mut output: String) -> String {
         output.push('\n');
     }
     output
+}
+
+/// A report the caller named by path, read from wherever the work left it:
+/// outside the notebook root as often as in it, so this is the shell's
+/// read, not Storage's.
+fn read_report(path: &str) -> Result<String, StorageError> {
+    std::fs::read_to_string(path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => StorageError::NotFound {
+            path: path.to_owned(),
+        },
+        std::io::ErrorKind::InvalidData => StorageError::NotUtf8 {
+            path: path.to_owned(),
+        },
+        _ => StorageError::Io {
+            path: path.to_owned(),
+            detail: error.to_string(),
+        },
+    })
 }
 
 /// The accountable identity, as git knows it; absence is legal.

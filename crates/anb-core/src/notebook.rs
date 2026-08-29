@@ -81,6 +81,8 @@ pub enum Proof {
     Pr(String),
     Sha(String),
     Report(String),
+    /// A Note holding the report, so the proof travels with the notebook.
+    Note(String),
     Waived,
 }
 
@@ -90,6 +92,7 @@ impl Proof {
             Proof::Pr(target) => Some(format!("pr {target}")),
             Proof::Sha(target) => Some(format!("sha {target}")),
             Proof::Report(target) => Some(format!("report {target}")),
+            Proof::Note(target) => Some(format!("note {target}")),
             Proof::Waived => None,
         }
     }
@@ -112,6 +115,17 @@ pub struct Closed {
     pub transition: Transitioned,
     pub open_questions: Vec<String>,
     pub unblocked: Vec<String>,
+    /// The Note this close ingested its report into, when it did.
+    pub report_note: Option<String>,
+    /// The ingested report's own dangling citations; a report names ids as
+    /// freely as any body, and the nudge belongs at the write.
+    pub dangling_mentions: Vec<String>,
+}
+
+/// A report landed in the notebook, and what its body cited.
+struct IngestedReport {
+    id: String,
+    dangling_mentions: Vec<String>,
 }
 
 /// A hold set or cleared; `already` marks the replay.
@@ -702,7 +716,106 @@ impl<'a, S: Storage> Notebook<'a, S> {
             transition,
             open_questions: open_questions_from(&records, &resolvable, id),
             unblocked: unblocked_by_close(&records, &resolvable, id),
+            report_note: None,
+            dangling_mentions: Vec::new(),
         })
+    }
+
+    /// Close carrying `report` as its proof: the text becomes a Note born
+    /// from the Task, and the close links that Note. One motion, and the
+    /// proof travels with the notebook instead of pointing out of it.
+    ///
+    /// The Note is minted only when the close is a real move, so a replay
+    /// creates nothing; the one Note this call will ever reuse is the one
+    /// its own interrupted run left behind, recognised by
+    /// [`Notebook::standing_report`].
+    ///
+    /// # Errors
+    /// [`NotebookError::InvalidArgument`] on an empty report — a proof with
+    /// nothing in it is not a proof — plus the refusals of
+    /// [`Notebook::close`] and the draft refusals of [`Notebook::create`].
+    pub fn close_with_report(
+        &mut self,
+        id: &str,
+        report: &str,
+        by: Option<&str>,
+        today: &str,
+    ) -> Result<Closed, NotebookError> {
+        if report.trim().is_empty() {
+            return Err(NotebookError::InvalidArgument {
+                reason: "note: the report is empty — a close carries a proof or waives one"
+                    .to_owned(),
+            });
+        }
+        let task = self.load_live(id, &[RecordType::Task])?;
+        let moves = TaskState::from_word(task.state_word()).is_some_and(|state| {
+            matches!(
+                state.transition(TaskAction::Close),
+                Ok(Transition::Move { .. })
+            )
+        });
+        if !moves {
+            // Nothing will be written, so nothing may be minted. `close`
+            // owns the transition rules: it answers a replay with `already`
+            // and anything else with its refusal, and the waiver claims
+            // nothing because no proof is ever reached.
+            return self.close(id, &Proof::Waived, today);
+        }
+        let title = report_note_title(task.record.file().field("title").unwrap_or(id));
+        let note = self.ingest_report(id, &title, report, by, today)?;
+        let mut closed = self.close(id, &Proof::Note(note.id.clone()), today)?;
+        closed.report_note = Some(note.id);
+        closed.dangling_mentions = note.dangling_mentions;
+        Ok(closed)
+    }
+
+    /// The Note holding `report`, recovered if this call already wrote it,
+    /// created otherwise.
+    fn ingest_report(
+        &mut self,
+        origin: &str,
+        title: &str,
+        report: &str,
+        by: Option<&str>,
+        today: &str,
+    ) -> Result<IngestedReport, NotebookError> {
+        if let Some(id) = self.standing_report(origin, report)? {
+            return Ok(IngestedReport {
+                id,
+                dangling_mentions: Vec::new(),
+            });
+        }
+        let mut draft = Draft::new(RecordType::Note, title);
+        draft.from = Some(origin.to_owned());
+        draft.by = by.map(str::to_owned);
+        report.clone_into(&mut draft.body);
+        let created = self.create(&draft, today)?;
+        Ok(IngestedReport {
+            id: created.id,
+            dangling_mentions: created.dangling_mentions,
+        })
+    }
+
+    /// The Note an interrupted [`Notebook::close_with_report`] left behind,
+    /// if this is that call resuming.
+    ///
+    /// Only one shape can be that Note: live, born from this Task, and
+    /// holding this very report. Each condition rules out a record that
+    /// merely resembles it — an archived one is history a new close must
+    /// not revive, and a differing body is an earlier report that a reopened
+    /// Task is now replacing, which is why the id is never recomputed to
+    /// find it.
+    fn standing_report(&self, origin: &str, report: &str) -> Result<Option<String>, NotebookError> {
+        let wanted = edited_body(report);
+        Ok(self
+            .records_of(RecordType::Note)?
+            .into_iter()
+            .find(|note| {
+                !is_archived(note.path())
+                    && note.origin() == Some(origin)
+                    && note.file().body() == wanted
+            })
+            .map(|note| path_stem(note.path()).to_owned()))
     }
 
     /// `review → active`: the human returned the work; what to fix comes
@@ -1619,9 +1732,17 @@ fn shared_tag_count(record: &Record, draft_tags: &BTreeSet<&str>) -> usize {
         .count()
 }
 
+/// What an ingested report is called, so a reader scanning `list` sees
+/// whose report it is and never mistakes it for the Task itself.
+fn report_note_title(task_title: &str) -> String {
+    format!("Report: {task_title}")
+}
+
 /// A proof is a link value: one non-empty line, or an explicit waiver.
 fn guard_proof(proof: &Proof) -> Result<(), NotebookError> {
-    let (Proof::Pr(target) | Proof::Sha(target) | Proof::Report(target)) = proof else {
+    let (Proof::Pr(target) | Proof::Sha(target) | Proof::Report(target) | Proof::Note(target)) =
+        proof
+    else {
         return Ok(());
     };
     guard_single_line("proof", target)?;
