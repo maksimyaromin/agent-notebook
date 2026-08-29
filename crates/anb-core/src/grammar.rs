@@ -21,6 +21,30 @@ fn type_directory(type_word: &str) -> Option<String> {
         .then(|| format!("{type_word}s"))
 }
 
+/// Which of a type's two homes holds a file: the working set, or the
+/// archive that is history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Residence {
+    Live,
+    Archive,
+}
+
+/// The home `path` puts a record of `type_word` in, or `None` when the file
+/// sits outside both — a placement the caller reports, never a residence.
+/// Placement and residence answer from this one function, so a file can
+/// never be judged misplaced and lodged somewhere at the same time.
+pub(crate) fn residence(path: &str, type_word: &str) -> Option<Residence> {
+    let directory = type_directory(type_word)?;
+    let (parents, _) = path.rsplit_once('/')?;
+    if parents == directory {
+        Some(Residence::Live)
+    } else if parents.strip_prefix("archive/") == Some(directory.as_str()) {
+        Some(Residence::Archive)
+    } else {
+        None
+    }
+}
+
 /// What a field's value must look like, checked by key.
 #[derive(Clone, Copy)]
 enum Form {
@@ -463,15 +487,16 @@ impl RecordFile {
     }
 
     /// Check the record against where it sits: the filename must equal the id
-    /// and the directory must match the type. `path` is notebook-relative
-    /// (`tasks/task.x.md`, `archive/tasks/task.x.md`). A malformed id or type
-    /// already carries its own finding and is not re-reported here.
+    /// and the file must be in one of its type's two homes. `path` is
+    /// notebook-relative (`tasks/task.x.md`, `archive/tasks/task.x.md`). A
+    /// malformed id or type already carries its own finding and is not
+    /// re-reported here.
     #[must_use]
     pub fn placement_findings(&self, path: &str) -> Vec<Finding> {
         let Some(envelope) = &self.envelope else {
             return Vec::new();
         };
-        let (directory, filename) = split_path(path);
+        let (parents, filename) = split_path(path);
         let stem = filename.strip_suffix(".md").unwrap_or(filename);
 
         let mut findings = Vec::new();
@@ -486,13 +511,13 @@ impl RecordFile {
                 message,
             ));
         }
-        if let Some(directory) = directory
+        if let Some(parents) = parents
             && let Some(type_field) = envelope.first("type")
             && let Some(expected) = type_directory(&type_field.value)
-            && directory != expected
+            && residence(path, &type_field.value).is_none()
         {
             let message = format!(
-                "type `{}` belongs under `{expected}/`, not `{directory}/`",
+                "type `{}` belongs under `{expected}/` or `archive/{expected}/`, not `{parents}/`",
                 type_field.value
             );
             findings.push(Finding::located(
@@ -663,11 +688,12 @@ pub(crate) fn parse_field_line(content: &str) -> Option<(String, String)> {
     Some((key.to_owned(), value.to_owned()))
 }
 
-/// `tasks/task.x.md` → (`Some("tasks")`, `task.x.md`); a bare filename has no
-/// directory to claim.
+/// `archive/tasks/task.x.md` → (`Some("archive/tasks")`, `task.x.md`): the
+/// whole parent path, since a home is a path and not a directory name. A
+/// bare filename has no parents to claim.
 fn split_path(path: &str) -> (Option<&str>, &str) {
     match path.rsplit_once('/') {
-        Some((parents, filename)) => (parents.rsplit('/').next(), filename),
+        Some((parents, filename)) => (Some(parents), filename),
         None => (None, path),
     }
 }
@@ -1139,6 +1165,22 @@ mod tests {
             file.placement_findings("archive/tasks/task.demo-record.md"),
             vec![]
         );
+    }
+
+    #[test]
+    fn placement_names_a_home_nested_below_the_two_a_type_has() {
+        let file = RecordFile::parse(&record(&REQUIRED, ""));
+        for path in [
+            "stuff/tasks/task.demo-record.md",
+            "archive/archive/tasks/task.demo-record.md",
+        ] {
+            let findings = file.placement_findings(path);
+            assert_eq!(
+                findings.iter().map(|f| f.code).collect::<Vec<_>>(),
+                vec![FindingCode::TypeDirMismatch],
+                "{path} is neither home"
+            );
+        }
     }
 
     #[test]

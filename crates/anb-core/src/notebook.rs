@@ -17,7 +17,7 @@
 use crate::config::{CONFIG_PATH, Config};
 use crate::debt::{self, Cited, DebtSources};
 use crate::finding::{Finding, FindingCode, Severity};
-use crate::grammar::{self, RecordFile};
+use crate::grammar::{self, RecordFile, Residence};
 use crate::graph::{TaskGraph, TaskNode};
 use crate::mention;
 use crate::record::{Record, RecordType, TaskAction, TaskState, Transition, not_utf8_finding};
@@ -387,7 +387,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
 
     /// Verify the whole notebook: every record's own findings plus the
     /// cross-record rules — duplicate ids, dangling references, supersession
-    /// pairs, routing threads. Sorted by file, then line.
+    /// pairs, routing threads. Errors first, then by file and line.
     ///
     /// # Errors
     /// A storage failure.
@@ -542,7 +542,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
                 record_type,
                 rows: records
                     .iter()
-                    .filter(|record| sits_in(record, record_type, false))
+                    .filter(|record| sits_in(record, record_type, Residence::Live))
                     .map(|record| listed_row(record, &resolvable))
                     .collect(),
             })
@@ -1078,7 +1078,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         };
         let loaded = match self.resolve_live(id, record_type) {
             Ok(loaded) => loaded,
-            Err(NotebookError::Archived { .. }) => return Ok(moved(true)),
+            Err(NotebookError::Archived { .. }) => return self.replayed_archive(moved(true)),
             Err(error) => return Err(error),
         };
         if loaded.record.is_live() {
@@ -1094,6 +1094,25 @@ impl<'a, S: Storage> Notebook<'a, S> {
             .write(&moved.to, &loaded.record.file().render())?;
         self.storage.remove(&moved.from)?;
         Ok(moved)
+    }
+
+    /// Judge the copy already in the archive before calling the move done.
+    /// Only a clean one proves this very move happened; on any error finding
+    /// — the same gate every write passes — answering `already` would report
+    /// a corruption as a success.
+    fn replayed_archive(&self, moved: Archived) -> Result<Archived, NotebookError> {
+        let record = match self.storage.read(&moved.to) {
+            Ok(text) => Record::parse(&moved.to, &text),
+            Err(StorageError::NotUtf8 { .. }) => Record::unreadable(&moved.to),
+            Err(error) => return Err(error.into()),
+        };
+        if !record.has_errors() {
+            return Ok(moved);
+        }
+        Err(NotebookError::InvalidRecord {
+            path: moved.to,
+            findings: error_findings(&record),
+        })
     }
 
     /// Refuse the move when the destination already holds different bytes —
@@ -1298,12 +1317,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// derived queries answer from the resolvable map, adapted here to a
     /// single record so the gate never has to read the whole notebook.
     fn exclusion_errors(&self, record: &Record) -> Result<Vec<Finding>, NotebookError> {
-        let mut errors: Vec<Finding> = record
-            .findings()
-            .iter()
-            .filter(|finding| finding.code.severity() == Severity::Error)
-            .cloned()
-            .collect();
+        let mut errors = error_findings(record);
         for key in REF_KEYS {
             for (target, line) in record.file().field_entries(key) {
                 if grammar::id_error(target).is_some() {
@@ -1734,9 +1748,17 @@ fn ready_rank(row: &ReadyTask) -> (u8, &str, &str) {
     (row.priority.unwrap_or(2), &row.created, &row.id)
 }
 
-/// File, then line (file-level findings last), then code.
-fn finding_order(located: &FileFinding) -> (&str, usize, &'static str) {
+/// Errors first, then file, then line (file-level findings last), then code.
+/// Severity outranks the file because the reply prints a bounded head: a
+/// warning the tool's own happy path produces must never push an error out
+/// of a truncated report.
+fn finding_order(located: &FileFinding) -> (u8, &str, usize, &'static str) {
+    let severity = match located.finding.code.severity() {
+        Severity::Error => 0,
+        Severity::Warning => 1,
+    };
     (
+        severity,
         located.path.as_str(),
         located.finding.line.unwrap_or(usize::MAX),
         located.finding.code.as_str(),
@@ -1808,21 +1830,15 @@ fn matches_query(record: &Record, needle: &str) -> bool {
 
 /// Whether the record's file sits in `record_type`'s live or archive
 /// directory — residence, the axis a reader browsing the tree sees.
-fn sits_in(record: &Record, record_type: RecordType, archived: bool) -> bool {
-    let dir = record_type.directory();
-    let prefix = if archived {
-        format!("archive/{dir}/")
-    } else {
-        format!("{dir}/")
-    };
-    record.path().starts_with(&prefix)
+fn sits_in(record: &Record, record_type: RecordType, home: Residence) -> bool {
+    grammar::residence(record.path(), record_type.word()) == Some(home)
 }
 
 fn archived_counts(records: &[Record]) -> Counts {
     let of = |record_type| {
         records
             .iter()
-            .filter(|record| sits_in(record, record_type, true))
+            .filter(|record| sits_in(record, record_type, Residence::Archive))
             .count()
     };
     Counts {
@@ -2298,6 +2314,15 @@ fn dangling_finding(record: &Record, key: &str, target: &str, line: Option<usize
             format!("{key}: `{target}` names no record"),
         )
     }
+}
+
+fn error_findings(record: &Record) -> Vec<Finding> {
+    record
+        .findings()
+        .iter()
+        .filter(|finding| finding.code.severity() == Severity::Error)
+        .cloned()
+        .collect()
 }
 
 fn check_refs(record: &Record, by_stem: &BTreeMap<&str, &Record>, out: &mut Vec<FileFinding>) {

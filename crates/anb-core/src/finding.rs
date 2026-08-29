@@ -40,6 +40,8 @@ pub enum FindingCode {
     BadId,
     IdFilenameMismatch,
     TypeDirMismatch,
+    ArchivedLiveRecord,
+    UnarchivedSettledRecord,
     OrphanField,
     BrokenRouting,
     DanglingRef,
@@ -66,6 +68,7 @@ impl FindingCode {
             | FindingCode::BadId
             | FindingCode::IdFilenameMismatch
             | FindingCode::TypeDirMismatch
+            | FindingCode::ArchivedLiveRecord
             | FindingCode::BrokenRouting
             | FindingCode::DanglingRef
             | FindingCode::DepCycle
@@ -73,6 +76,7 @@ impl FindingCode {
             | FindingCode::BrokenSupersession
             | FindingCode::NotUtf8 => Severity::Error,
             FindingCode::UnknownField
+            | FindingCode::UnarchivedSettledRecord
             | FindingCode::OrphanField
             | FindingCode::Crlf
             | FindingCode::Bom
@@ -94,6 +98,8 @@ impl FindingCode {
             FindingCode::BadId => "bad-id",
             FindingCode::IdFilenameMismatch => "id-filename-mismatch",
             FindingCode::TypeDirMismatch => "type-dir-mismatch",
+            FindingCode::ArchivedLiveRecord => "archived-live-record",
+            FindingCode::UnarchivedSettledRecord => "unarchived-settled-record",
             FindingCode::OrphanField => "orphan-field",
             FindingCode::BrokenRouting => "broken-routing",
             FindingCode::DanglingRef => "dangling-ref",
