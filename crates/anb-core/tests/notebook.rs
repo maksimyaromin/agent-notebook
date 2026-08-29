@@ -2257,8 +2257,56 @@ mod check {
     }
 
     #[test]
+    fn errors_lead_the_report_however_late_their_file_sorts() {
+        // The reply prints a bounded head, and the settling verbs leave
+        // warnings behind by the dozen: on file order alone an error in a
+        // late-sorting file would fall off the end of a real notebook.
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.aaa.md",
+                &record_file("task.aaa", "task", "closed", &[], ""),
+            ),
+            (
+                "tasks/task.zzz.md",
+                &record_file("task.zzz", "task", "open", &["blocked-by: task.nobody"], ""),
+            ),
+        ]);
+        assert_eq!(
+            findings_for(&mut storage),
+            vec![
+                ("tasks/task.zzz.md".to_owned(), FindingCode::DanglingRef),
+                (
+                    "tasks/task.aaa.md".to_owned(),
+                    FindingCode::UnarchivedSettledRecord
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_task_stranded_in_the_archive_is_named_against_its_own_file() {
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task_file("open", &[])),
+            (
+                "archive/tasks/task.stranded.md",
+                &record_file("task.stranded", "task", "open", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            findings_for(&mut storage),
+            vec![(
+                "archive/tasks/task.stranded.md".to_owned(),
+                FindingCode::ArchivedLiveRecord
+            )],
+            "the finding lands on the stranded file, not on the live record that is fine"
+        );
+    }
+
+    #[test]
     fn two_files_claiming_one_id_are_both_named() {
-        let text = task_file("open", &[]);
+        // The shape an archive move leaves when it dies between its write
+        // and its remove: identical settled bytes in both homes.
+        let text = task_file("closed", &[]);
         let mut storage = storage_with(&[
             ("tasks/task.demo.md", &text),
             ("archive/tasks/task.demo.md", &text),
@@ -2271,6 +2319,10 @@ mod check {
                     FindingCode::DuplicateId
                 ),
                 ("tasks/task.demo.md".to_owned(), FindingCode::DuplicateId),
+                (
+                    "tasks/task.demo.md".to_owned(),
+                    FindingCode::UnarchivedSettledRecord
+                ),
             ]
         );
     }
@@ -2301,7 +2353,7 @@ mod check {
                 ),
             ),
             (
-                "decisions/decision.old.md",
+                "archive/decisions/decision.old.md",
                 &record_file("decision.old", "decision", "retired", &[], ""),
             ),
         ]);
@@ -2309,11 +2361,11 @@ mod check {
             findings_for(&mut storage),
             vec![
                 (
-                    "decisions/decision.new.md".to_owned(),
+                    "archive/decisions/decision.old.md".to_owned(),
                     FindingCode::BrokenSupersession
                 ),
                 (
-                    "decisions/decision.old.md".to_owned(),
+                    "decisions/decision.new.md".to_owned(),
                     FindingCode::BrokenSupersession
                 ),
             ]
@@ -2540,7 +2592,7 @@ mod check {
     #[test]
     fn a_routed_question_pointing_at_nothing_has_lost_its_thread() {
         let mut storage = storage_with(&[(
-            "questions/question.demo.md",
+            "archive/questions/question.demo.md",
             &record_file(
                 "question.demo",
                 "question",
@@ -2552,7 +2604,7 @@ mod check {
         assert_eq!(
             findings_for(&mut storage),
             vec![(
-                "questions/question.demo.md".to_owned(),
+                "archive/questions/question.demo.md".to_owned(),
                 FindingCode::BrokenRouting
             )]
         );
@@ -3623,12 +3675,41 @@ mod debt_signals {
     }
 
     #[test]
-    fn archived_records_do_not_age() {
+    fn the_archive_raises_no_debt_of_its_own() {
+        // A settled record, valid where it sits, carrying the one signal
+        // that outlives a settled state: a body citing an id nobody holds.
+        // Only residence can silence it.
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.demo.md",
+            &record_file(
+                "task.demo",
+                "task",
+                "closed",
+                &[],
+                "the work task.ghost asked for\n",
+            ),
+        )]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![],
+            "history is over: it neither ages nor asks anything of the reader"
+        );
+    }
+
+    #[test]
+    fn a_record_that_binds_from_inside_the_archive_reaches_the_dashboard() {
         let mut storage = storage_with(&[(
             "archive/questions/question.demo.md",
             &aged("question.demo", "question", "open", "2026-06-01", &[]),
         )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
+        assert_eq!(
+            debt_of(&mut storage),
+            vec![DebtSignal::Invalid {
+                path: "archive/questions/question.demo.md".to_owned(),
+                errors: 1
+            }],
+            "no verb can move it out, so the dashboard is the last place that may stay quiet"
+        );
     }
 
     #[test]
@@ -4188,6 +4269,30 @@ mod archive_verb {
         let replay = Notebook::new(&mut storage).archive("task.demo").unwrap();
         assert!(replay.already);
         assert_eq!(storage.read("archive/tasks/task.demo.md").unwrap(), text);
+    }
+
+    #[test]
+    fn a_corrupt_archived_copy_is_refused_not_called_already() {
+        for (state, expected) in [
+            ("open", FindingCode::ArchivedLiveRecord),
+            ("bogus", FindingCode::BadValue),
+        ] {
+            let mut storage =
+                storage_with(&[("archive/tasks/task.demo.md", &task_file(state, &[]))]);
+            let refusal = Notebook::new(&mut storage)
+                .archive("task.demo")
+                .unwrap_err();
+            match refusal {
+                NotebookError::InvalidRecord { path, findings } => {
+                    assert_eq!(path, "archive/tasks/task.demo.md");
+                    assert_eq!(
+                        findings.iter().map(|f| f.code).collect::<Vec<_>>(),
+                        vec![expected]
+                    );
+                }
+                other => panic!("`{state}` must not answer as a replayed move: {other:?}"),
+            }
+        }
     }
 
     #[test]
@@ -4857,6 +4962,22 @@ mod unreadable_files {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].path, "tasks/task.binary.md");
         assert_eq!(findings[0].finding.code, FindingCode::NotUtf8);
+    }
+
+    #[test]
+    fn an_unreadable_archived_copy_refuses_the_move_as_an_invalid_record() {
+        let storage = &mut BinaryHolding::with_binary_at("archive/tasks/task.demo.md", &[]);
+        let refusal = Notebook::new(storage).archive("task.demo").unwrap_err();
+        match refusal {
+            NotebookError::InvalidRecord { path, findings } => {
+                assert_eq!(path, "archive/tasks/task.demo.md");
+                assert_eq!(
+                    findings.iter().map(|f| f.code).collect::<Vec<_>>(),
+                    vec![FindingCode::NotUtf8]
+                );
+            }
+            other => panic!("bytes that cannot be read name a record, not the medium: {other:?}"),
+        }
     }
 
     #[test]

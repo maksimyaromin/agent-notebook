@@ -8,7 +8,7 @@
 //! rules that need a second record live in the notebook.
 
 use crate::finding::{Finding, FindingCode, Severity};
-use crate::grammar::{self, RecordFile};
+use crate::grammar::{self, RecordFile, Residence};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordType {
@@ -238,6 +238,7 @@ impl Record {
         let mut findings = file.findings().to_vec();
         findings.extend(file.placement_findings(path));
         findings.extend(semantic_findings(&file));
+        findings.extend(residence_finding(path, &file));
         Record {
             path: path.to_owned(),
             file,
@@ -378,6 +379,43 @@ fn semantic_findings(file: &RecordFile) -> Vec<Finding> {
     findings
 }
 
+/// The state word says whether a record still binds; its directory says
+/// whether it is history. The two may disagree only as a named finding.
+///
+/// Reading is not the axis — the archive is history, and history is meant
+/// to be readable. Moving is: a verb that acts on an existing record
+/// resolves its id against the live directory and refuses an archived one.
+/// So a record that binds from inside the archive can never be settled,
+/// corrected, or filed, while a settled record still in the working set is
+/// one command from its home. That gap is the whole severity split.
+fn residence_finding(path: &str, file: &RecordFile) -> Option<Finding> {
+    let type_word = file.field("type")?;
+    let record_type = RecordType::from_word(type_word)?;
+    let (state, line) = file.field_entry("state")?;
+    if !record_type.states().contains(&state) {
+        return None;
+    }
+    let binds = record_type.live_states().contains(&state);
+    let directory = record_type.directory();
+    match (binds, grammar::residence(path, type_word)?) {
+        (true, Residence::Archive) => Some(Finding::located(
+            line,
+            FindingCode::ArchivedLiveRecord,
+            format!(
+                "state: `{state}` still binds, but the file sits in `archive/{directory}/` — every verb that would move it on refuses an archived id"
+            ),
+        )),
+        (false, Residence::Live) => Some(Finding::located(
+            line,
+            FindingCode::UnarchivedSettledRecord,
+            format!(
+                "state: `{state}` is settled, but the file still sits in `{directory}/` — `archive` files it"
+            ),
+        )),
+        _ => None,
+    }
+}
+
 fn check_state(record_type: RecordType, file: &RecordFile, findings: &mut Vec<Finding>) {
     let Some((value, line)) = file.field_entry("state") else {
         return;
@@ -515,7 +553,9 @@ mod tests {
         text
     }
 
-    fn question(state_line: &str, extra: &[&str]) -> Record {
+    /// A question in its filed home: state and residence agree there, so a
+    /// routing finding is the only one these cases can produce.
+    fn archived_question(state_line: &str, extra: &[&str]) -> Record {
         let mut lines = vec![
             "id: question.demo",
             "type: question",
@@ -524,7 +564,10 @@ mod tests {
             "created: 2026-08-24",
         ];
         lines.extend_from_slice(extra);
-        Record::parse("questions/question.demo.md", &record_text(&lines, ""))
+        Record::parse(
+            "archive/questions/question.demo.md",
+            &record_text(&lines, ""),
+        )
     }
 
     fn task_with(extra: &[&str]) -> Record {
@@ -684,7 +727,7 @@ mod tests {
 
     #[test]
     fn a_question_routed_without_routed_to_is_broken_routing() {
-        let record = question("state: routed", &[]);
+        let record = archived_question("state: routed", &[]);
         assert_eq!(codes(&record), vec![FindingCode::BrokenRouting]);
         assert_eq!(
             record.findings()[0].code.severity(),
@@ -695,20 +738,134 @@ mod tests {
 
     #[test]
     fn a_question_routed_with_routed_to_is_clean_for_this_record_alone() {
-        let record = question("state: routed", &["routed-to: decision.the-answer"]);
+        let record = archived_question("state: routed", &["routed-to: decision.the-answer"]);
         assert_eq!(record.findings(), &[]);
         assert_eq!(record.routed_to(), Some("decision.the-answer"));
     }
 
     #[test]
     fn a_question_routed_into_a_type_no_answer_becomes_is_broken_routing() {
-        let record = question("state: routed", &["routed-to: note.a-fact"]);
+        let record = archived_question("state: routed", &["routed-to: note.a-fact"]);
         assert_eq!(codes(&record), vec![FindingCode::BrokenRouting]);
         assert!(
             record.findings()[0].message.contains("decision or a task"),
             "the message names where a question may route: {}",
             record.findings()[0].message
         );
+    }
+
+    fn record_at(directory: &str, record_type: RecordType, state: &str) -> Record {
+        let word = record_type.word();
+        let id = format!("{word}.demo");
+        let lines = [
+            format!("id: {id}"),
+            format!("type: {word}"),
+            format!("state: {state}"),
+            "title: A demo record".to_owned(),
+            "created: 2026-08-24".to_owned(),
+        ];
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        Record::parse(&format!("{directory}/{id}.md"), &record_text(&lines, ""))
+    }
+
+    fn task_at(directory: &str, state: &str) -> Record {
+        record_at(directory, RecordType::Task, state)
+    }
+
+    #[test]
+    fn every_binding_state_is_one_of_its_types_states() {
+        for record_type in RecordType::ALL {
+            for live in record_type.live_states() {
+                assert!(
+                    record_type.states().contains(live),
+                    "{live} binds for a {} but is not one of its states",
+                    record_type.word()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_state_and_a_home_that_agree_leave_the_residence_axis_silent() {
+        for record_type in RecordType::ALL {
+            for state in record_type.states() {
+                let binds = record_type.live_states().contains(state);
+                let directory = record_type.directory();
+                let home = if binds {
+                    directory.to_owned()
+                } else {
+                    format!("archive/{directory}")
+                };
+                let record = record_at(&home, record_type, state);
+                assert!(
+                    !record.findings().iter().any(|finding| matches!(
+                        finding.code,
+                        FindingCode::ArchivedLiveRecord | FindingCode::UnarchivedSettledRecord
+                    )),
+                    "{state} in {home}/ must not disagree: {:?}",
+                    record.findings()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_state_in_the_wrong_home_is_named_by_its_direction() {
+        for record_type in RecordType::ALL {
+            for state in record_type.states() {
+                let binds = record_type.live_states().contains(state);
+                let directory = record_type.directory();
+                let wrong = if binds {
+                    format!("archive/{directory}")
+                } else {
+                    directory.to_owned()
+                };
+                let expected = if binds {
+                    FindingCode::ArchivedLiveRecord
+                } else {
+                    FindingCode::UnarchivedSettledRecord
+                };
+                let record = record_at(&wrong, record_type, state);
+                assert!(
+                    codes(&record).contains(&expected),
+                    "{state} in {wrong}/ must be named {expected}: {:?}",
+                    record.findings()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_record_that_still_binds_from_inside_the_archive_is_an_error() {
+        let record = task_at("archive/tasks", "open");
+        assert_eq!(codes(&record), vec![FindingCode::ArchivedLiveRecord]);
+        assert_eq!(
+            record.findings()[0].code.severity(),
+            Severity::Error,
+            "a record no verb can move is invalid, not untidy"
+        );
+    }
+
+    #[test]
+    fn a_settled_record_still_in_the_working_set_is_only_unfiled() {
+        let record = task_at("tasks", "closed");
+        assert_eq!(codes(&record), vec![FindingCode::UnarchivedSettledRecord]);
+        assert!(
+            !record.has_errors(),
+            "an unfiled record loses nothing and stays fully usable"
+        );
+    }
+
+    #[test]
+    fn a_state_outside_the_enum_is_not_also_a_residence_finding() {
+        let record = task_at("tasks", "routed");
+        assert_eq!(codes(&record), vec![FindingCode::BadValue]);
+    }
+
+    #[test]
+    fn a_file_in_another_types_directory_is_named_by_placement_alone() {
+        let record = task_at("decisions", "closed");
+        assert_eq!(codes(&record), vec![FindingCode::TypeDirMismatch]);
     }
 
     #[test]

@@ -159,9 +159,10 @@ fn reference_targets(record: &Record) -> impl Iterator<Item = &str> {
 }
 
 /// Every Debt signal of the notebook, in the clock table's order, oldest
-/// first within a class. Live records only: the archive is history and
-/// history does not age.
+/// first within a class.
 pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) -> Vec<DebtSignal> {
+    // History asks nothing of the reader, so no clock and no hint reads the
+    // archive.
     let live: Vec<&Record> = sources
         .records
         .iter()
@@ -179,7 +180,10 @@ pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) ->
         collect_dangling_mentions(record, sources.resolvable, &mut classes);
     }
     classes.pairs = undeclared_pairs(&valid, sources.resolvable);
-    for record in &live {
+    // A corrupt file is not a hint the reader may decline: no verb can move
+    // a record out of the archive, so an invalid one there is the least
+    // recoverable of all and the last that may go unsaid.
+    for record in sources.records {
         let errors = excluding_errors(record, sources.resolvable);
         if errors > 0 {
             classes.invalid.push(DebtSignal::Invalid {

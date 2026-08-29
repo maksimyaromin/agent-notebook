@@ -3,10 +3,15 @@
 //! cases above all — round-trips byte-exact.
 //!
 //! Case layout under `testdata/corpus/{valid,invalid}/`:
-//! - `<case>.md` — the input. A case nested under a type directory
-//!   (`invalid/tasks/task.x.md`) runs the full record pass — placement and
-//!   the record model's semantic findings — at that notebook-relative path;
-//!   a flat case exercises the grammar alone.
+//! - `<case>.md` — the input. A case with a directory in its relative path
+//!   (`invalid/tasks/task.x.md`, `invalid/archive/tasks/task.x.md`) runs the
+//!   full record pass — placement, residence, and the record model's semantic
+//!   findings — at that notebook-relative path; a flat case exercises the
+//!   grammar alone.
+//!   A case whose home is part of what it tests sits where a real notebook
+//!   would hold it, so its sidecar lists every finding that home produces,
+//!   interactions included; isolating one rule from the others is the unit
+//!   tests' job, not the corpus's.
 //! - `<case>.findings` — expected findings, one `<line> <code>` per line
 //!   (`-` for findings without a line). Absent means none expected; an
 //!   invalid case must have one.
@@ -48,8 +53,8 @@ struct Case {
     rel: String,
     input: String,
     file: RecordFile,
-    /// Parse findings; a case nested under a type directory carries the
-    /// full record pass at that path instead.
+    /// Parse findings; a case with a directory in its relative path carries
+    /// the full record pass at that path instead.
     findings: Vec<Finding>,
 }
 
