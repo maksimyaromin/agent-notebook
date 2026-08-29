@@ -2483,6 +2483,17 @@ fn render_draft(draft: &Draft, id: &str, today: &str) -> String {
     file.render()
 }
 
+/// How much of a title an id carries. An id must stay recognisable at a
+/// glance and must fit the id grammar's own length limit with room for a
+/// collision suffix; the rest of the title is a `view` away.
+const SLUG_CAP: usize = 40;
+
+/// The slug an id takes from a title: ASCII alphanumerics lowercased, every
+/// other run a single hyphen, cut to [`SLUG_CAP`] at a word boundary.
+///
+/// An id is read far more often than it is minted, and a mid-word cut costs
+/// its reader more than the characters it saves. A first word longer than
+/// the cap offers no boundary to cut at, so it is cut short.
 fn slugify(title: &str) -> String {
     let mut slug = String::new();
     for character in title.chars() {
@@ -2492,8 +2503,16 @@ fn slugify(title: &str) -> String {
             slug.push('-');
         }
     }
-    slug.truncate(40);
-    slug.trim_end_matches('-').to_owned()
+    let slug = slug.trim_end_matches('-');
+    if slug.len() <= SLUG_CAP {
+        return slug.to_owned();
+    }
+    // One past the cap, so a boundary sitting exactly on it still counts.
+    let within_cap = &slug[..=SLUG_CAP];
+    match within_cap.rfind('-') {
+        Some(boundary) => slug[..boundary].to_owned(),
+        None => slug[..SLUG_CAP].to_owned(),
+    }
 }
 
 fn fnv1a(text: &str) -> u64 {

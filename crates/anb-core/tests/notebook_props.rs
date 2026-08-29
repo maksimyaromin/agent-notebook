@@ -210,3 +210,46 @@ mod status_fits_its_budget {
         }
     }
 }
+
+mod minting {
+    use super::*;
+    use anb_core::{Draft, Record, RecordType};
+
+    proptest! {
+        /// A title is free text a caller types; the record minted from it
+        /// is not. Whatever the title, the file that lands reads back clean.
+        #[test]
+        fn a_minted_record_reads_back_clean(title in "\\PC{0,200}") {
+            let mut storage = MemoryStorage::new();
+            let draft = Draft::new(RecordType::Task, &title);
+            if let Ok(created) = Notebook::new(&mut storage).create(&draft, TODAY) {
+                let text = storage.read(&created.path).unwrap();
+                let record = Record::parse(&created.path, &text);
+                prop_assert!(
+                    !record.has_errors(),
+                    "{title:?} minted {}: {:?}",
+                    created.id,
+                    record.findings()
+                );
+            }
+        }
+
+        /// The cut lands on a boundary whenever one exists: a slug that was
+        /// shortened either kept whole words or, its first word already over
+        /// the cap, had no hyphen to stop at. The first word ranges past the
+        /// cap so both halves are generated.
+        #[test]
+        fn a_shortened_slug_keeps_whole_words(title in "[a-z]{1,60}( [a-z]{1,12}){0,20}") {
+            let mut storage = MemoryStorage::new();
+            let draft = Draft::new(RecordType::Task, &title);
+            let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+            let slug = created.id.strip_prefix("task.").expect("a task id");
+            let words: Vec<&str> = title.split(' ').collect();
+            prop_assert!(
+                words.starts_with(&slug.split('-').collect::<Vec<&str>>())
+                    || words[0].len() > slug.len(),
+                "`{slug}` is neither a whole-word prefix of {words:?} nor a cut first word"
+            );
+        }
+    }
+}
