@@ -27,6 +27,9 @@ blocked-by: task.github-dev-flow-actions-ci-fmt-clippy-te
 blocked-by: task.epic-pattern-scoped-queries-status-hub-g
 blocked-by: task.release-gate-v1
 blocked-by: task.milestone-self-host-switch
+blocked-by: task.milestone-cli-complete
+blocked-by: task.global-notebook
+blocked-by: task.task-graph-visualization-for-fun
 created: 2026-08-29
 updated: 2026-08-29
 ---

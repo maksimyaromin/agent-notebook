@@ -15,6 +15,7 @@ blocked-by: task.gate-final-cli-name
 blocked-by: task.why-rust-dossier-release-gate
 blocked-by: task.git-reconciliation
 blocked-by: task.github-dev-flow-actions-ci-fmt-clippy-te
+blocked-by: task.global-notebook
 created: 2026-08-29
 updated: 2026-08-29
 ---

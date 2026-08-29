@@ -6,6 +6,7 @@ title: Gate: final CLI name
 by: Maksim Yaromin
 via: claude-code
 tags: gate
+blocked-by: task.milestone-cli-complete
 hold: Owner decision at pre-release; not dispatchable work
 created: 2026-08-29
 updated: 2026-08-29
