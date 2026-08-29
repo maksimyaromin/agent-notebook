@@ -143,3 +143,106 @@ fn id_at(text: &str, at: usize) -> Option<&str> {
     let id = &rest[..prefix.len() + slug.len()];
     grammar::id_error(id).is_none().then_some(id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::mentions;
+
+    /// The scan's rules, each as a text carrying it and the ids that text
+    /// cites, in order of first appearance.
+    const CITATIONS: &[(&str, &str, &[&str])] = &[
+        (
+            "a candidate stands at a word boundary on both sides",
+            "The subtask.gone helper and task.goneBar are prose, not citations.",
+            &[],
+        ),
+        (
+            "a sentence-final id cites without its stop",
+            "Blocked by task.gone.",
+            &["task.gone"],
+        ),
+        (
+            "a trailing hyphen falls off",
+            "See task.gone- for why.",
+            &["task.gone"],
+        ),
+        (
+            "a dotted chain cites up to its first stop",
+            "See task.foo.bar here.",
+            &["task.foo"],
+        ),
+        (
+            "an underscore joins the word, so what follows is a symbol",
+            "The _task.gone symbol is code.",
+            &[],
+        ),
+        (
+            "an underscore runs the id on into a symbol, which cites nothing",
+            "The task.gone_bar handle is code.",
+            &[],
+        ),
+        (
+            "an id cited twice is one hit, and hits keep their order",
+            "task.gone above, decision.rule between, task.gone again.",
+            &["task.gone", "decision.rule"],
+        ),
+        (
+            "an id in a code span is a quotation; a bare one beside it still cites",
+            "The corpus case `task.quoted` waits on task.gone.",
+            &["task.gone"],
+        ),
+        (
+            "a fenced block is a quotation, and the scan resumes after it",
+            "```\nanb view task.gone\n```\nthen task.after cites.",
+            &["task.after"],
+        ),
+        (
+            "a fence closes on a run at least as long as its opener",
+            "```\nanb view task.gone\n````\nthen task.after cites.",
+            &["task.after"],
+        ),
+        (
+            "an unclosed fence quotes to the end",
+            "```\nanb view task.gone\nand task.after too.",
+            &[],
+        ),
+        (
+            "span backticks pair within one line, never across log entries",
+            "- 2026-08-26 -: the ` character is special\n- 2026-08-27 -: renamed the `task.ghost` case\n",
+            &[],
+        ),
+        (
+            "an unpaired run quotes nothing, so what follows it still cites",
+            "A stray ` backtick, then task.gone.",
+            &["task.gone"],
+        ),
+        (
+            "a span closes only on a run of its own length",
+            "``a `task.inner` chain`` beside task.gone.",
+            &["task.gone"],
+        ),
+        (
+            "multi-byte neighbors leave the scan intact",
+            "A café note — task.gone cites, «`task.quoted`» does not.",
+            &["task.gone"],
+        ),
+    ];
+
+    #[test]
+    fn a_text_cites_the_ids_the_scan_s_rules_leave_standing() {
+        let broken: Vec<String> = CITATIONS
+            .iter()
+            .filter(|(_, text, cited)| mentions(text) != *cited)
+            .map(|(rule, text, cited)| {
+                format!("{rule}: {text:?} cites {:?}, not {cited:?}", mentions(text))
+            })
+            .collect();
+        assert!(broken.is_empty(), "{}", broken.join("\n"));
+    }
+
+    #[test]
+    fn an_id_longer_than_the_grammar_allows_is_not_a_mention() {
+        let past_the_cap = format!("See task.{} maybe.", "a".repeat(70));
+        assert_eq!(mentions(&past_the_cap), Vec::<&str>::new());
+    }
+}

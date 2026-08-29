@@ -25,7 +25,7 @@ use std::fmt::Write as _;
 /// grew with the notebook would spend a whole session's opening on itself,
 /// and it would do so at the worst moment: the Debt list is longest exactly
 /// when the least is tended.
-const SECTION_ROWS: usize = 5;
+pub const SECTION_ROWS: usize = 5;
 
 /// The token ceiling a Status must fit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -434,8 +434,7 @@ fn render_ready(out: &mut String, ready: &[ReadyTask], shown: usize, today_day: 
 }
 
 /// The Debt list, class by class, each bounded on its own so one crowded
-/// class cannot bury the rest. Classes appear in the order the list gives
-/// them, whether or not their signals arrive together.
+/// class cannot bury the rest.
 fn render_debt(out: &mut String, debt: &[DebtSignal], ladder: Ladder) {
     if debt.is_empty() {
         return;
@@ -445,16 +444,39 @@ fn render_debt(out: &mut String, debt: &[DebtSignal], ladder: Ladder) {
         return;
     }
     let _ = writeln!(out, "debt[{}]:", debt.len());
-    let mut rendered: Vec<&'static str> = Vec::new();
+    for class in debt_classes(debt) {
+        for signal in &class.shown {
+            let _ = writeln!(out, "  {}", signal.line());
+        }
+        section_hint(out, class.held, SECTION_ROWS);
+    }
+}
+
+/// One Debt class as the dashboard shows it: the head, and how many the
+/// class holds behind it.
+pub struct DebtClass<'a> {
+    pub shown: Vec<&'a DebtSignal>,
+    pub held: usize,
+}
+
+/// The Debt classes the dashboard shows, in the order the list first names
+/// them, whether or not a class's signals arrive together. Debt is the one
+/// section bounded per class rather than as a whole, so both renderings ask
+/// here instead of each deriving the shape from the row bound.
+#[must_use]
+pub fn debt_classes(debt: &[DebtSignal]) -> Vec<DebtClass<'_>> {
+    let mut classes: Vec<DebtClass<'_>> = Vec::new();
+    let mut named: Vec<&'static str> = Vec::new();
     for signal in debt {
-        if rendered.contains(&signal.code()) {
+        if named.contains(&signal.code()) {
             continue;
         }
-        rendered.push(signal.code());
+        named.push(signal.code());
         let class = debt.iter().filter(|other| other.code() == signal.code());
-        for line in class.clone().take(SECTION_ROWS) {
-            let _ = writeln!(out, "  {}", line.line());
-        }
-        section_hint(out, class.count(), SECTION_ROWS);
+        classes.push(DebtClass {
+            shown: class.clone().take(SECTION_ROWS).collect(),
+            held: class.count(),
+        });
     }
+    classes
 }

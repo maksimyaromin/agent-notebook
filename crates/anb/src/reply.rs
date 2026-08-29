@@ -371,10 +371,12 @@ impl Recovery {
             }
             NotebookError::WouldCycle { chain } => {
                 // The chain's first pair is the refused edge; the rest
-                // already stand, and erasing any one of them opens it.
+                // already stand, and erasing any one of them opens it — so
+                // a long cycle needs no more retries than a short one.
                 recovery.tries = chain
                     .windows(2)
                     .skip(1)
+                    .take(ROW_BOUND)
                     .map(|edge| format!("anb unblock {} {}", edge[0], edge[1]))
                     .collect();
             }
