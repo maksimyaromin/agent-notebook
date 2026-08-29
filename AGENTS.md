@@ -7,7 +7,7 @@ Guidance for coding agents (Claude Code, Codex, Pi, and others) working in this 
 
 **agent-notebook** (anb) stores a project's working memory in the repository as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.agent-notebook/` (CLI named `anb`, directory the full word — owner's call, 2026-08-25) — read and mutated by any agent through a Rust CLI (owner's call, 2026-08-25 — for fun; ADR 0006 supersedes 0003 Go). The backlog is the deepest-worked pattern of the notebook, not the whole of it.
 
-Status: no code yet. The concept spec is grilled and frozen (2026-08-24); tickets are cut and live in the tasks-axi backlog; work starts on the owner's signal.
+Status: self-hosted. The backlog lives in the notebook itself (`.agent-notebook/`), read and mutated only through the anb CLI; the concept spec is grilled and frozen (2026-08-24).
 
 Goals, in priority order:
 
@@ -22,7 +22,7 @@ Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byt
 - `.tmp/` — git-ignored. Scratch space AND the standard home of all working documents at this stage: nothing under it may be moved or copied elsewhere in the repo. Never use `/tmp`.
 - `.claude/` — local agent config and skills, git-ignored.
 - `.agents/` — reserved for skills and agent config that must be committed and shared.
-- `.tasks.toml` — points tasks-axi at `.tmp/backlog.md`.
+- `.agent-notebook/` — the notebook: the committed source of truth for Tasks, Decisions, Notes, Questions. Mutate it only through the anb CLI, never by hand-editing the files.
 
 ## Working documents (all under `.tmp/`, deliberately uncommitted)
 
@@ -30,8 +30,7 @@ Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byt
 - `.tmp/docs/CONTEXT.md` — the domain glossary; use its canonical terms (Record, Task, Status, Check, ...) in every language.
 - `.tmp/docs/adr/` — decisions: 0001 own format, 0002 cross-project as ecosystem horizon, 0003 Go for the CLI (superseded), 0004 record file format, 0005 record model, 0006 Rust for the CLI (with the why-Rust release gate).
 - `.tmp/docs/research-method.md` — the scientific search method: novelty questions get a systematic sweep, findings classified tried-vs-theory (theory weighs more); research subagents are Sonnet 5 only.
-- `.tmp/docs/research/` — the evidence base (tasks-axi dissection, codemode-executor, prior art, kody).
-- `.tmp/backlog.md` — the tasks-axi backlog (19 tickets, dependency graph); mutate it only through `npx -y tasks-axi`.
+- `.tmp/docs/research/` — the evidence base (tasks-axi dissection, codemode-executor, prior art, kody, field tests).
 
 ## Engineering instruction
 
@@ -39,18 +38,20 @@ Before writing any code: load `.tmp/docs/engineering-instruction.md` and every s
 
 ## Task protocol
 
+The project dogfoods its own tool: the backlog is the notebook, and every task-state change goes through the anb CLI, invoked from the repo root as `cargo run --quiet -- <command>` until a binary ships. Every CLI failure, bug, or friction met on the way is a finding — file it into the notebook (a comment on the task it burdens, or a new Task/Question born `--from` the current one) instead of working around it silently.
+
 When the owner says **"continue the task"** (in any wording, any language), it means exactly this:
 
-1. Run `npx -y tasks-axi` (dashboard). A task **in flight** is THE task — there is never more than one. If none is in flight, take the first task from `npx -y tasks-axi ready` and `start` it.
-2. Read the task with `show <id> --full`, read the docs it references under `.tmp/docs/`, and resume from the progress notes in its body — not from scratch.
+1. Run `cargo run --quiet -- status`. The **in-flight** (active) task is THE task — there is never more than one. If none is active, take the top of `cargo run --quiet -- ready` and `start` it.
+2. Read the task with `view <id>`, read the docs it references under `.tmp/docs/`, and resume from its log — not from scratch.
 
 Every task moves through these stages:
 
-1. **Dispatch** — `tasks-axi start <id>`.
-2. **Work** — execute against the body's acceptance criteria; append progress notes to the task body (`tasks-axi update`) so any later session can resume mid-task. Deliverables are written under `.tmp/`.
+1. **Dispatch** — `anb start <id>`.
+2. **Work** — execute against the body's acceptance criteria; append progress notes with `anb comment <id> "<text>"` so any later session can resume mid-task. Deliverables are written under `.tmp/`.
 3. **Code review by Opus 5 (mandatory on coding tasks; owner's call, 2026-08-27)** — NEVER reviewed by the authoring model: spawn a separate agent on Opus 5 that loads the engineering instruction and its skills, re-reads the whole diff, code and tests, holding every line against them (story, naming, comments, test behavior), and returns findings with file:line. Fix what it finds and report the findings honestly. A review that finds nothing was not performed.
-4. **Review pause (mandatory, never skipped)** — when the work is done, STOP. Leave every produced or changed file in the working tree — **uncommitted and unstaged** (no `git add`). Report what is ready and where, then wait for the owner to review.
-5. **Close** — only after the owner's explicit approval: `tasks-axi done <id> --report <path>` (or `--pr`), and commit/push only if the owner asks.
+4. **Review pause (mandatory, never skipped)** — when the work is done, `anb submit <id>` and STOP. Leave every produced or changed file in the working tree — **uncommitted and unstaged** (no `git add`). Report what is ready and where, then wait for the owner to review.
+5. **Close** — only after the owner's explicit approval: `anb close <id> --report <path>` (or `--pr`, `--sha`), and commit/push only if the owner asks.
 
 No formal task closure, no commit, and no push ever happens before the review pause in stage 4.
 
