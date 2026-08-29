@@ -9,9 +9,9 @@ tags: core
 link: report .tmp/data/c1/report.md
 blocked-by: task.spike-storage-format
 blocked-by: task.rust-scaffold
-created: 2026-08-29
-updated: 2026-08-29
-closed: 2026-08-29
+created: 2026-08-24
+updated: 2026-08-26
+closed: 2026-08-26
 ---
 
 render(parse(x)) === x on untouched input; normalize idempotent; negative corpus green - every almost-valid file yields a named Check finding, never a silent drop.

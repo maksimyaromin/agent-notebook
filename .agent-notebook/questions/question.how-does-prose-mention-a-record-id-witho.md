@@ -1,11 +1,12 @@
 ---
 id: question.how-does-prose-mention-a-record-id-witho
 type: question
-state: open
+state: routed
 title: How does prose mention a record id without creating a mention edge?
 by: Maksim Yaromin
 via: claude-code
 from: task.milestone-self-host-switch
+routed-to: decision.backticked-id-is-a-quotation
 created: 2026-08-29
 updated: 2026-08-29
 ---

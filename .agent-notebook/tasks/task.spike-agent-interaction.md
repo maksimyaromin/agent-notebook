@@ -8,9 +8,9 @@ via: claude-code
 tags: spike
 link: report .tmp/data/s3/report.md
 blocked-by: task.spike-record-model
-created: 2026-08-29
-updated: 2026-08-29
-closed: 2026-08-29
+created: 2026-08-24
+updated: 2026-08-25
+closed: 2026-08-25
 ---
 
 Sweep per research-method.md (token-cost measurements of output encodings in the literature). Measure TOON vs JSON vs plain on fixtures, in tokens; hook designs for Claude Code, Codex, OpenCode, Pi; skill generation scheme from CLI help. Close: spec update + ADR.

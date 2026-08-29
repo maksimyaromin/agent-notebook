@@ -8,7 +8,7 @@ via: claude-code
 tags: cli
 link: report .tmp/data/l2/report.md
 blocked-by: task.core-record-model-invariants
-created: 2026-08-29
+created: 2026-08-24
 updated: 2026-08-29
 closed: 2026-08-29
 ---

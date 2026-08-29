@@ -7,9 +7,9 @@ by: Maksim Yaromin
 via: claude-code
 tags: scaffold
 link: report .tmp/data/g1/report.md
-created: 2026-08-29
-updated: 2026-08-29
-closed: 2026-08-29
+created: 2026-08-24
+updated: 2026-08-26
+closed: 2026-08-26
 ---
 
 Cargo workspace: anb-core (dependency-light library behind the Storage trait, no fs/git/network) + anb CLI crate; test harness; clippy + rustfmt; local check script; Storage trait skeleton.

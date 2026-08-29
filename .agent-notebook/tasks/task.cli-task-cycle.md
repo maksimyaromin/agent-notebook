@@ -9,7 +9,7 @@ tags: cli
 link: report .tmp/data/l1/report.md
 blocked-by: task.core-record-model-invariants
 blocked-by: task.core-dependency-graph
-created: 2026-08-29
+created: 2026-08-24
 updated: 2026-08-29
 closed: 2026-08-29
 ---
