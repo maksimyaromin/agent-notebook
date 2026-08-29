@@ -8,10 +8,8 @@
 
 use crate::grammar;
 use crate::mention;
-use crate::notebook::CitedProof;
-use crate::notebook::path_stem;
+use crate::notebook::{CitedProof, Resolver, path_stem};
 use crate::record::{Record, RecordType};
-use std::collections::BTreeMap;
 
 /// The Debt clocks, in days, each behind its `debt-*` config key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,31 +127,34 @@ impl DebtSignal {
     }
 }
 
-/// Everything the Debt pass reads: the parsed records and, keyed by id, the
-/// ones a reference can resolve to — existence checks run against the map,
+/// Everything the Debt pass reads: the live records and what a reference
+/// among them may resolve to — existence checks run against the resolver,
 /// never against storage.
 pub(crate) struct DebtSources<'a> {
+    /// The live records. Every clock and every hint is about what a reader
+    /// can act on today, and no verb reaches into the archive, so no signal
+    /// here opens a filed record — the resolver answers for them by name.
     pub records: &'a [Record],
-    pub resolvable: &'a BTreeMap<&'a str, &'a Record>,
+    pub resolvable: &'a Resolver<'a>,
     pub today_day: i64,
     /// The cited proofs the world no longer holds, as the host found them.
     pub lost_proofs: &'a [CitedProof],
 }
 
 /// A record's error findings plus a reference into nothing: the exclusion
-/// rule of the derived queries, answered from the resolvable map.
-pub(crate) fn is_excluded(record: &Record, resolvable: &BTreeMap<&str, &Record>) -> bool {
+/// rule of the derived queries, answered from the resolver.
+pub(crate) fn is_excluded(record: &Record, resolvable: &Resolver<'_>) -> bool {
     excluding_errors(record, resolvable) > 0
 }
 
-fn excluding_errors(record: &Record, resolvable: &BTreeMap<&str, &Record>) -> usize {
+fn excluding_errors(record: &Record, resolvable: &Resolver<'_>) -> usize {
     let own = record
         .findings()
         .iter()
         .filter(|finding| finding.code.severity() == crate::finding::Severity::Error)
         .count();
     let dangling = reference_targets(record)
-        .filter(|target| !resolvable.contains_key(target))
+        .filter(|target| !resolvable.resolves(target))
         .count();
     own + dangling
 }
@@ -170,16 +171,9 @@ fn reference_targets(record: &Record) -> impl Iterator<Item = &str> {
 /// Every Debt signal of the notebook, in the clock table's order, oldest
 /// first within a class.
 pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) -> Vec<DebtSignal> {
-    // History asks nothing of the reader, so no clock and no hint reads the
-    // archive.
-    let live: Vec<&Record> = sources
+    let valid: Vec<&Record> = sources
         .records
         .iter()
-        .filter(|record| !record.path().starts_with("archive/"))
-        .collect();
-    let valid: Vec<&Record> = live
-        .iter()
-        .copied()
         .filter(|record| !is_excluded(record, sources.resolvable))
         .collect();
 
@@ -190,9 +184,8 @@ pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) ->
     }
     classes.pairs = undeclared_pairs(&valid, sources.resolvable);
     classes.lost_proofs = lost_proofs(sources);
-    // A corrupt file is not a hint the reader may decline: no verb can move
-    // a record out of the archive, so an invalid one there is the least
-    // recoverable of all and the last that may go unsaid.
+    // A corrupt live file is a hint the reader can act on today; a corrupt
+    // filed one is `check`'s to name.
     for record in sources.records {
         let errors = excluding_errors(record, sources.resolvable);
         if errors > 0 {
@@ -248,20 +241,20 @@ impl SignalClasses {
 /// that is gone was rebased or dropped, a report file that is gone was
 /// moved or deleted, and either way the record is left pointing at nothing.
 /// Nothing is repaired — the tool cannot know what the proof meant, and
-/// inventing one would be worse than naming the gap. Any record counts, not
-/// only a closed one: a stale proof is stale wherever it sits, and the
-/// archive is read too, since a proof stays a claim after the record it
-/// proves has been filed. A record already excluded by its own errors is
-/// left to `check`, which names it once and better.
+/// inventing one would be worse than naming the gap. Any live record
+/// counts, not only a closed one: a stale proof is stale while the record
+/// carrying it can still be reopened and closed again on a proof that
+/// holds. Once the record is archived nothing can, so the claim is history
+/// like the rest of it. A record already excluded by its own errors is left
+/// to `check`, which names it once and better.
 fn lost_proofs(sources: &DebtSources<'_>) -> Vec<DebtSignal> {
     sources
         .lost_proofs
         .iter()
         .filter(|lost| {
             sources
-                .records
-                .iter()
-                .find(|record| crate::notebook::path_stem(record.path()) == lost.record)
+                .resolvable
+                .read(&lost.record)
                 .is_some_and(|record| !is_excluded(record, sources.resolvable))
         })
         .map(|lost| DebtSignal::LostProof {
@@ -377,10 +370,9 @@ fn collect_question_clocks(
 ) {
     let origin_task = record
         .origin()
-        .filter(|origin| origin.starts_with("task."))
-        .and_then(|origin| sources.resolvable.get(origin).map(|task| (origin, *task)));
-    if let Some((origin, task)) = origin_task
-        && (task.state() == Some("closed") || task.path().starts_with("archive/"))
+        .filter(|origin| origin.starts_with("task.") && sources.resolvable.resolves(origin));
+    if let Some(origin) = origin_task
+        && origin_settled(origin, sources.resolvable)
     {
         classes.origin_closed.push(DebtSignal::OriginClosed {
             id: id.to_owned(),
@@ -401,13 +393,23 @@ fn collect_question_clocks(
     }
 }
 
+/// Whether the Task an origin names has stopped carrying context: it does
+/// at its close, and archiving it is a close by residence — which the
+/// archive's listing says, so no filed record is opened to ask.
+fn origin_settled(origin: &str, resolvable: &Resolver<'_>) -> bool {
+    resolvable.archived(origin)
+        || resolvable
+            .read(origin)
+            .is_some_and(|task| task.state() == Some("closed"))
+}
+
 fn collect_dangling_mentions(
     record: &Record,
-    resolvable: &BTreeMap<&str, &Record>,
+    resolvable: &Resolver<'_>,
     classes: &mut SignalClasses,
 ) {
     for target in mention::mentions(record.file().body()) {
-        if !resolvable.contains_key(target) {
+        if !resolvable.resolves(target) {
             classes.dangling.push(DebtSignal::DanglingMention {
                 id: path_stem(record.path()).to_owned(),
                 target: target.to_owned(),
@@ -421,19 +423,18 @@ fn collect_dangling_mentions(
 /// invalid record is out of every derived query, half a pair included.
 /// Ranked by the older member's `created`, oldest first. High precision by
 /// construction — a typed id in prose is a deliberate reference.
-fn undeclared_pairs(valid: &[&Record], resolvable: &BTreeMap<&str, &Record>) -> Vec<DebtSignal> {
+fn undeclared_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSignal> {
     let mut found: Vec<(String, DebtSignal)> = Vec::new();
     let live_decision =
         |record: &Record| record.record_type() == Some(RecordType::Decision) && record.is_live();
     for record in valid.iter().copied().filter(|record| live_decision(record)) {
         let citer = path_stem(record.path());
         for target in mention::mentions(record.file().body()) {
-            let Some(other) = resolvable.get(target) else {
+            let Some(other) = resolvable.read(target) else {
                 continue;
             };
             if target == citer
                 || !live_decision(other)
-                || other.path().starts_with("archive/")
                 || !valid.iter().any(|member| member.path() == other.path())
             {
                 continue;
@@ -442,9 +443,9 @@ fn undeclared_pairs(valid: &[&Record], resolvable: &BTreeMap<&str, &Record>) -> 
                 continue;
             }
             let (first, second) = if citer <= target {
-                (record, *other)
+                (record, other)
             } else {
-                (*other, record)
+                (other, record)
             };
             let pair = DebtSignal::UndeclaredPair {
                 first: Cited::of(first),

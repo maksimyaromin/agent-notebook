@@ -73,7 +73,10 @@ pub enum Reply {
         rows: Vec<ListedRecord>,
         all: bool,
     },
-    Overviewed(Overview),
+    Overviewed {
+        overview: Overview,
+        all: bool,
+    },
     /// The hook's fail-soft outcome: no context rather than a blocked
     /// session.
     Silence,
@@ -137,35 +140,22 @@ where
     } = host;
     let mut notebook = Notebook::new(storage);
     match command {
-        Command::Add(args) => Ok(Reply::Created {
-            command: "add",
-            created: notebook.create(&task_draft(args, git_by), today)?,
-        }),
-        Command::Decide(args) => Ok(Reply::Created {
-            command: "decide",
-            created: notebook.create(&decision_draft(args, git_by), today)?,
-        }),
-        Command::Note(args) => Ok(Reply::Created {
-            command: "note",
-            created: notebook.create(&note_draft(args, git_by), today)?,
-        }),
-        Command::Ask(args) => Ok(Reply::Created {
-            command: "ask",
-            created: notebook.create(&draft(RecordType::Question, args, git_by), today)?,
-        }),
+        Command::Add(args) => created("add", &mut notebook, &task_draft(args, git_by), today),
+        Command::Decide(args) => created(
+            "decide",
+            &mut notebook,
+            &decision_draft(args, git_by),
+            today,
+        ),
+        Command::Note(args) => created("note", &mut notebook, &note_draft(args, git_by), today),
+        Command::Ask(args) => {
+            let draft = draft(RecordType::Question, args, git_by);
+            created("ask", &mut notebook, &draft, today)
+        }
         Command::Answer { id, to, drop } => answered(&mut notebook, &id, to, drop, today),
-        Command::Retire { id } => Ok(Reply::Moved {
-            command: "retire",
-            transition: notebook.retire(&id, today)?,
-        }),
-        Command::Start { id } => Ok(Reply::Moved {
-            command: "start",
-            transition: notebook.start(&id, today)?,
-        }),
-        Command::Submit { id } => Ok(Reply::Moved {
-            command: "submit",
-            transition: notebook.submit(&id, today)?,
-        }),
+        Command::Retire { id } => Ok(moved("retire", notebook.retire(&id, today)?)),
+        Command::Start { id } => Ok(moved("start", notebook.start(&id, today)?)),
+        Command::Submit { id } => Ok(moved("submit", notebook.submit(&id, today)?)),
         Command::Close(args) => Ok(Reply::Closed(close_reply(
             &mut notebook,
             args,
@@ -173,14 +163,8 @@ where
             git_by,
             today,
         )?)),
-        Command::Return { id } => Ok(Reply::Moved {
-            command: "return",
-            transition: notebook.return_task(&id, today)?,
-        }),
-        Command::Reopen { id } => Ok(Reply::Moved {
-            command: "reopen",
-            transition: notebook.reopen(&id, today)?,
-        }),
+        Command::Return { id } => Ok(moved("return", notebook.return_task(&id, today)?)),
+        Command::Reopen { id } => Ok(moved("reopen", notebook.reopen(&id, today)?)),
         Command::Hold { id, reason, until } => Ok(Reply::Held {
             held: notebook.hold(
                 &id,
@@ -223,10 +207,34 @@ where
             query,
             all,
         }),
-        Command::Overview => Ok(Reply::Overviewed(notebook.overview()?)),
+        Command::Overview { all } => Ok(Reply::Overviewed {
+            overview: notebook.overview()?,
+            all,
+        }),
         Command::Status { budget, hook } => {
             status_reply(&notebook, budget, hook, lost_proofs, today)
         }
+    }
+}
+
+/// A record minted under the verb that asked for it.
+fn created<S: Storage>(
+    command: &'static str,
+    notebook: &mut Notebook<'_, S>,
+    draft: &Draft,
+    today: &str,
+) -> Result<Reply, NotebookError> {
+    Ok(Reply::Created {
+        command,
+        created: notebook.create(draft, today)?,
+    })
+}
+
+/// A state move under the verb that made it.
+fn moved(command: &'static str, transition: Transitioned) -> Reply {
+    Reply::Moved {
+        command,
+        transition,
     }
 }
 
@@ -259,8 +267,7 @@ fn budgeted_status<S: Storage>(
         Some(ceiling) => Budget::from_ceiling(ceiling),
         None => notebook.config()?.budget(),
     };
-    let lost = lost_proofs(&notebook.cited_proofs()?);
-    notebook.status(today, ceiling, &lost)
+    notebook.status(today, ceiling, lost_proofs)
 }
 
 fn edited<S: Storage>(

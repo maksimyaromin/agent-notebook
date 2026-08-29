@@ -3,9 +3,15 @@
 //! changes nothing — answering `already: true`, or refusing a move that was
 //! never valid to repeat.
 
-use anb_core::{MemoryStorage, Notebook, NotebookError, Proof, Storage};
+use anb_core::{CitedProof, MemoryStorage, Notebook, NotebookError, Proof, Storage};
 use proptest::prelude::*;
 const TODAY: &str = "2026-08-27";
+
+/// A Status asked with nothing to settle against the world outside the
+/// notebook: the host finds every cited proof still there.
+fn no_lost_proofs(_cited: &[CitedProof]) -> Vec<CitedProof> {
+    Vec::new()
+}
 const TASK_PATH: &str = "tasks/task.demo.md";
 const BYSTANDER_PATH: &str = "notes/note.bystander.md";
 const BYSTANDER: &str = "---\nid: note.bystander\ntype: note\nstate: active\ntitle: Untouched\ncreated: 2026-08-24\n---\n";
@@ -145,11 +151,12 @@ proptest! {
     }
 }
 
-/// The Budget contract: whatever the notebook holds and however small the
-/// ceiling, the rendered Status fits it — or the ladder has reached its
-/// floor, which ships regardless because the in-flight line is never
-/// dropped. Section content and section count vary freely; the guarantee
-/// must not.
+/// Two promises the Budget makes. However small the ceiling, the rendered
+/// Status fits it — or the ladder has reached its floor, which ships
+/// regardless because the first in-flight line is never dropped. And under
+/// the default ceiling nothing is cut at all: every section is bounded, so
+/// no notebook can grow a dashboard past the budget it was given. Section
+/// content and section count vary freely; neither promise may.
 mod status_fits_its_budget {
     use super::*;
     use anb_core::Budget;
@@ -168,10 +175,10 @@ mod status_fits_its_budget {
     proptest! {
         #[test]
         fn any_notebook_fits_any_ceiling_or_stands_on_the_floor(
-            open_tasks in 0usize..8,
-            active_tasks in 0usize..3,
-            aged_questions in 0usize..4,
-            epics in 0usize..4,
+            open_tasks in 0usize..40,
+            active_tasks in 0usize..20,
+            aged_questions in 0usize..30,
+            epics in 0usize..15,
             ceiling in 1u32..600,
         ) {
             let mut files: Vec<(String, String)> = Vec::new();
@@ -198,15 +205,17 @@ mod status_fits_its_budget {
                 ));
             }
             let mut storage = MemoryStorage::from_files(files);
-            let status = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Tokens(ceiling), &[])
+            let notebook = Notebook::new(&mut storage);
+            let status = notebook
+                .status(TODAY, Budget::Tokens(ceiling), no_lost_proofs)
                 .unwrap();
-            let at_floor = status
-                .text
-                .lines()
-                .all(|line| {
+            // The floor is counts, the first in-flight line, what the rest
+            // of it came to, and the budget line.
+            let at_floor = status.text.lines().count() <= 4
+                && status.text.lines().all(|line| {
                     line.starts_with("ok: notebook")
                         || line.starts_with("in-flight: ")
+                        || line.starts_with("  \u{2026} ")
                         || line.starts_with("budget: ")
                 });
             prop_assert!(
@@ -214,6 +223,14 @@ mod status_fits_its_budget {
                 "over ~{} of {ceiling} tokens without reaching the floor:\n{}",
                 status.spent,
                 status.text
+            );
+            let default = notebook
+                .status(TODAY, Budget::Tokens(Budget::DEFAULT_TOKENS), no_lost_proofs)
+                .unwrap();
+            prop_assert!(
+                !default.text.contains("cut:"),
+                "the default ceiling had to degrade a bounded dashboard:\n{}",
+                default.text
             );
         }
     }

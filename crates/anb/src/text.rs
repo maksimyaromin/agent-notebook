@@ -97,7 +97,7 @@ pub fn render(reply: &Reply, today: &str) -> String {
             "matches",
             &format!("anb search {} --all", shell_quoted(query)),
         ),
-        Reply::Overviewed(overview) => overview_page(overview),
+        Reply::Overviewed { overview, all } => overview_page(overview, *all),
         Reply::Status { status, hook } => {
             if *hook {
                 json::hook_payload(status)
@@ -279,7 +279,7 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
     out
 }
 
-fn overview_page(overview: &Overview) -> String {
+fn overview_page(overview: &Overview, all: bool) -> String {
     let mut out = format!("notebook: {}\n", counts_phrase(&overview.live));
     if !overview.epics.is_empty() {
         let _ = writeln!(out, "epics[{}]:", overview.epics.len());
@@ -291,11 +291,13 @@ fn overview_page(overview: &Overview) -> String {
         if section.rows.is_empty() {
             continue;
         }
+        let shown = shown(section.rows.len(), all);
         out.push_str(&record_rows(
             &section.rows,
-            section.rows.len(),
+            shown,
             section.record_type.directory(),
         ));
+        truncation_hint(&mut out, section.rows.len(), shown, "anb overview --all");
     }
     let archived = &overview.archived;
     if archived.tasks + archived.decisions + archived.notes + archived.questions > 0 {

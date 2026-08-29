@@ -132,7 +132,11 @@ pub enum Command {
         all: bool,
     },
     /// The whole notebook as one page, grouped by type.
-    Overview,
+    Overview {
+        /// Every row; each section is bounded by default.
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 /// The recovery payload for a verb clap does not know — an agent typing an
@@ -207,7 +211,7 @@ pub fn subject(command: &Command) -> Subject {
         Command::Expunge { id } => ("expunge", Some(id)),
         Command::Edit(args) => ("edit", Some(&args.id)),
         Command::Search { .. } => ("search", None),
-        Command::Overview => ("overview", None),
+        Command::Overview { .. } => ("overview", None),
     };
     Subject {
         verb,
