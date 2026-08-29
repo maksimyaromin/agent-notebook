@@ -6,7 +6,7 @@ title: CLI: task cycle
 by: Maksim Yaromin
 via: claude-code
 tags: cli
-link: report .tmp/data/l1/report.md
+link: note note.report-cli-task-cycle
 blocked-by: task.core-record-model-invariants
 blocked-by: task.core-dependency-graph
 created: 2026-08-24

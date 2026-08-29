@@ -6,7 +6,7 @@ title: Spike: agent interaction
 by: Maksim Yaromin
 via: claude-code
 tags: spike
-link: report .tmp/data/s3/report.md
+link: note note.report-spike-agent-interaction
 blocked-by: task.spike-record-model
 created: 2026-08-24
 updated: 2026-08-25

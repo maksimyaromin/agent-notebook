@@ -6,7 +6,7 @@ title: Core: Status + Budget
 by: Maksim Yaromin
 via: claude-code
 tags: core
-link: report .tmp/data/c4/report.md
+link: note note.report-core-status-budget
 blocked-by: task.core-record-model-invariants
 created: 2026-08-24
 updated: 2026-08-28

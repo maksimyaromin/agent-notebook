@@ -6,7 +6,7 @@ title: Core: grammar parser + renderer
 by: Maksim Yaromin
 via: claude-code
 tags: core
-link: report .tmp/data/c1/report.md
+link: note note.report-core-grammar-parser-renderer
 blocked-by: task.spike-storage-format
 blocked-by: task.rust-scaffold
 created: 2026-08-24

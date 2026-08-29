@@ -6,7 +6,7 @@ title: Core: record model + invariants
 by: Maksim Yaromin
 via: claude-code
 tags: core
-link: report .tmp/data/c2/report.md
+link: note note.report-core-record-model-invariants
 blocked-by: task.spike-record-model
 blocked-by: task.core-grammar-parser-renderer
 created: 2026-08-24

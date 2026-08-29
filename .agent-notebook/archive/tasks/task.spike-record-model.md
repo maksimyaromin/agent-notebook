@@ -6,7 +6,7 @@ title: Spike: record model
 by: Maksim Yaromin
 via: claude-code
 tags: spike
-link: report .tmp/data/s2/report.md
+link: note note.report-spike-record-model
 blocked-by: task.spike-storage-format
 created: 2026-08-24
 updated: 2026-08-25
