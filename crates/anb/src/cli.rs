@@ -288,13 +288,18 @@ pub struct EditArgs {
 #[derive(Args)]
 pub struct CloseArgs {
     pub id: String,
+    /// Proof, the default route: the report file, ingested as a Note the
+    /// notebook carries, so a reader reaches it without leaving the repo.
+    #[arg(long)]
+    pub note: Option<String>,
     /// Proof: the pull request that shipped the work.
     #[arg(long)]
     pub pr: Option<String>,
     /// Proof: the commit that shipped the work.
     #[arg(long)]
     pub sha: Option<String>,
-    /// Proof: the report that documents the work.
+    /// Proof: a file left where it lies — right for a living document,
+    /// which a Note would freeze into a second source of truth.
     #[arg(long)]
     pub report: Option<String>,
     /// The explicit waiver: close stating there is no proof.

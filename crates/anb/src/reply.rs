@@ -2,7 +2,7 @@
 //! the Core, with nothing rendered yet — both output formats read the same
 //! reply.
 
-use crate::cli::{AddArgs, Command, DecideArgs, DraftArgs, EditArgs, NoteArgs, Subject};
+use crate::cli::{AddArgs, CloseArgs, Command, DecideArgs, DraftArgs, EditArgs, NoteArgs, Subject};
 use anb_core::notebook::path_stem;
 use anb_core::{
     Archived, Budget, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited, FileFinding,
@@ -92,21 +92,42 @@ impl Reply {
     }
 }
 
-/// Run `command` against the notebook behind `storage`.
+/// Everything the shell knows and the Core cannot compute, in one place so
+/// a new host fact is a field rather than another parameter at every call
+/// site.
 ///
-/// `git_by` supplies the accountable identity from git, read only by the
-/// commands that write one; a command's own flag outranks it. `today` is
-/// the host's date — the Core holds no clock.
+/// `git_by` is the accountable identity as git knows it, read only by the
+/// commands that write one; a command's own flag outranks it. `read_report`
+/// opens a file by a path the caller typed, which Storage cannot serve:
+/// Storage speaks only in paths under the notebook root, and a report is
+/// written wherever the work happened. `today` is the host's date — the
+/// Core holds no clock.
+pub struct Host<'a, G, R> {
+    pub git_by: G,
+    pub read_report: R,
+    pub today: &'a str,
+}
+
+/// Run `command` against the notebook behind `storage`.
 ///
 /// # Errors
 /// The Core's refusal, or the shell's own argument refusal — either
 /// renders as a recovery payload.
-pub fn execute<S: Storage>(
+pub fn execute<S, G, R>(
     command: Command,
     storage: &mut S,
-    git_by: impl FnOnce() -> Option<String>,
-    today: &str,
-) -> Result<Reply, NotebookError> {
+    host: Host<'_, G, R>,
+) -> Result<Reply, NotebookError>
+where
+    S: Storage,
+    G: FnOnce() -> Option<String>,
+    R: FnOnce(&str) -> Result<String, StorageError>,
+{
+    let Host {
+        git_by,
+        read_report,
+        today,
+    } = host;
     let mut notebook = Notebook::new(storage);
     match command {
         Command::Add(args) => Ok(Reply::Created {
@@ -138,10 +159,13 @@ pub fn execute<S: Storage>(
             command: "submit",
             transition: notebook.submit(&id, today)?,
         }),
-        Command::Close(args) => {
-            let proof = chosen_proof(args.pr, args.sha, args.report, args.no_proof)?;
-            Ok(Reply::Closed(notebook.close(&args.id, &proof, today)?))
-        }
+        Command::Close(args) => Ok(Reply::Closed(close_reply(
+            &mut notebook,
+            args,
+            read_report,
+            git_by,
+            today,
+        )?)),
         Command::Return { id } => Ok(Reply::Moved {
             command: "return",
             transition: notebook.return_task(&id, today)?,
@@ -192,15 +216,22 @@ pub fn execute<S: Storage>(
             all,
         }),
         Command::Overview => Ok(Reply::Overviewed(notebook.overview()?)),
-        Command::Status { budget, hook } => {
-            match (budgeted_status(&notebook, budget, today), hook) {
-                (Ok(status), hook) => Ok(Reply::Status { status, hook }),
-                // The session-start hook fails soft: an empty context,
-                // never a blocked session.
-                (Err(_), true) => Ok(Reply::Silence),
-                (Err(error), false) => Err(error),
-            }
-        }
+        Command::Status { budget, hook } => status_reply(&notebook, budget, hook, today),
+    }
+}
+
+/// The Status, or the hook's fail-soft outcome: an empty context, never a
+/// blocked session.
+fn status_reply<S: Storage>(
+    notebook: &Notebook<'_, S>,
+    budget: Option<u32>,
+    hook: bool,
+    today: &str,
+) -> Result<Reply, NotebookError> {
+    match (budgeted_status(notebook, budget, today), hook) {
+        (Ok(status), hook) => Ok(Reply::Status { status, hook }),
+        (Err(_), true) => Ok(Reply::Silence),
+        (Err(error), false) => Err(error),
     }
 }
 
@@ -332,7 +363,7 @@ impl Recovery {
 /// would refuse carry their required flag as a placeholder.
 fn transition_retries(action: &str, id: &str) -> Vec<String> {
     match action {
-        "close" => vec![format!("anb close {id} --report <path>")],
+        "close" => vec![format!("anb close {id} --note <path>")],
         "answer" => vec![
             format!("anb answer {id} --to <id>"),
             format!("anb answer {id} --drop \"<why>\""),
@@ -346,7 +377,7 @@ fn transition_retries(action: &str, id: &str) -> Vec<String> {
 fn argument_retries(subject: &Subject) -> Vec<String> {
     match (subject.verb, &subject.id) {
         ("close", Some(id)) => vec![
-            format!("anb close {id} --pr <url>"),
+            format!("anb close {id} --note <path>"),
             format!("anb close {id} --no-proof"),
         ],
         ("hold", Some(id)) => vec![format!("anb hold {id} --reason \"<why>\"")],
@@ -457,22 +488,73 @@ fn chosen_routing(to: Option<String>, drop: Option<String>) -> Result<Routing, N
     }
 }
 
-fn chosen_proof(
-    pr: Option<String>,
-    sha: Option<String>,
-    report: Option<String>,
-    no_proof: bool,
-) -> Result<Proof, NotebookError> {
-    match (pr, sha, report, no_proof) {
-        (Some(target), None, None, false) => Ok(Proof::Pr(target)),
-        (None, Some(target), None, false) => Ok(Proof::Sha(target)),
-        (None, None, Some(target), false) => Ok(Proof::Report(target)),
-        (None, None, None, true) => Ok(Proof::Waived),
-        (None, None, None, false) => Err(NotebookError::InvalidArgument {
-            reason: "close: a proof is required — pass --pr <url>, --sha <sha>, --report <path>, or --no-proof".to_owned(),
+/// The one proof a close was given. `--note` names a file the shell must
+/// read, since only the host can reach a path outside the notebook; every
+/// other proof is a string the Core stores as given.
+enum ChosenProof {
+    Ingest(String),
+    Stored(Proof),
+}
+
+/// The single proof among the flags, or the refusal that says which way the
+/// caller missed: nothing offered, or more than one.
+fn chosen_proof(args: &mut CloseArgs) -> Result<ChosenProof, NotebookError> {
+    let mut offered: Vec<ChosenProof> = Vec::new();
+    if let Some(path) = args.note.take() {
+        offered.push(ChosenProof::Ingest(path));
+    }
+    for stored in [
+        args.pr.take().map(Proof::Pr),
+        args.sha.take().map(Proof::Sha),
+        args.report.take().map(Proof::Report),
+        args.no_proof.then_some(Proof::Waived),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        offered.push(ChosenProof::Stored(stored));
+    }
+
+    let mut offered = offered.into_iter();
+    match (offered.next(), offered.next()) {
+        (Some(only), None) => Ok(only),
+        (None, _) => Err(NotebookError::InvalidArgument {
+            reason: format!("close: a proof is required — pass {PROOF_FLAGS}"),
         }),
-        _ => Err(NotebookError::InvalidArgument {
-            reason: "close: pass exactly one of --pr, --sha, --report, --no-proof".to_owned(),
+        (Some(_), Some(_)) => Err(NotebookError::InvalidArgument {
+            reason: format!("close: pass exactly one of {PROOF_FLAGS}"),
         }),
     }
+}
+
+fn close_reply<S: Storage>(
+    notebook: &mut Notebook<'_, S>,
+    mut args: CloseArgs,
+    read_report: impl FnOnce(&str) -> Result<String, StorageError>,
+    git_by: impl FnOnce() -> Option<String>,
+    today: &str,
+) -> Result<Closed, NotebookError> {
+    match chosen_proof(&mut args)? {
+        ChosenProof::Ingest(path) => {
+            let report = read_report(&path).map_err(|error| report_refusal(&error))?;
+            notebook.close_with_report(&args.id, &report, git_by().as_deref(), today)
+        }
+        ChosenProof::Stored(proof) => notebook.close(&args.id, &proof, today),
+    }
+}
+
+/// The proof flags as one phrase, so the two refusals name the same set.
+const PROOF_FLAGS: &str = "--note <path>, --pr <url>, --sha <sha>, --report <path>, or --no-proof";
+
+/// A report the caller named and the shell could not read. The path came
+/// off the command line, so every way it can fail is a refused argument the
+/// caller retypes — never the storage failure this error type carries when
+/// it is the notebook itself that could not be read.
+fn report_refusal(error: &StorageError) -> NotebookError {
+    let reason = match error {
+        StorageError::NotFound { path } => format!("note: no file at `{path}`"),
+        StorageError::NotUtf8 { path } => format!("note: `{path}` is not UTF-8"),
+        StorageError::Io { path, detail } => format!("note: cannot read `{path}` — {detail}"),
+    };
+    NotebookError::InvalidArgument { reason }
 }

@@ -51,7 +51,7 @@ Every task moves through these stages:
 2. **Work** — execute against the body's acceptance criteria; append progress notes with `anb comment <id> "<text>"` so any later session can resume mid-task. Deliverables are written under `.tmp/`.
 3. **Code review by Opus 5 (mandatory on coding tasks; owner's call, 2026-08-27)** — NEVER reviewed by the authoring model: spawn a separate agent on Opus 5 that loads the engineering instruction and its skills, re-reads the whole diff, code and tests, holding every line against them (story, naming, comments, test behavior), and returns findings with file:line. Fix what it finds and report the findings honestly. A review that finds nothing was not performed.
 4. **Review pause (mandatory, never skipped)** — when the work is done, `anb submit <id>` and STOP. Leave every produced or changed file in the working tree — **uncommitted and unstaged** (no `git add`). Report what is ready and where, then wait for the owner to review.
-5. **Close** — only after the owner's explicit approval: `anb close <id> --report <path>` (or `--pr`, `--sha`), and commit/push only if the owner asks.
+5. **Close** — only after the owner's explicit approval: `anb close <id> --note <path>`, which ingests the report file as a Note born from the task and links that Note as the proof, so the report travels with the notebook. The other proofs are equals, not fallbacks: `--pr`, `--sha`, `--report <path>` (leaves the file where it lies — right for a living document, wrong for a finished report), `--no-proof`. Commit and push only if the owner asks.
 
 No formal task closure, no commit, and no push ever happens before the review pause in stage 4.
 

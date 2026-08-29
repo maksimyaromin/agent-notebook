@@ -178,6 +178,217 @@ mod task_cycle {
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), after_first);
     }
 
+    const REPORT: &str = "# What shipped\n\nThe parser now accepts fenced envelopes.\n";
+
+    #[test]
+    fn a_close_with_a_report_lands_it_as_a_note_the_task_links() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let closed = Notebook::new(&mut storage)
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap();
+
+        let note = closed.report_note.expect("the close ingested a report");
+        let written = storage.read(&format!("notes/{note}.md")).unwrap();
+        assert!(
+            written.contains("\nfrom: task.demo\n"),
+            "the Note is born from the Task it reports on: {written}"
+        );
+        assert!(
+            written.ends_with(REPORT),
+            "the report's text is the Note's body, verbatim: {written}"
+        );
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .contains(&format!("\nlink: note {note}\n")),
+            "a reader reaches the report through the notebook alone"
+        );
+    }
+
+    #[test]
+    fn a_replayed_report_close_answers_already_and_mints_no_second_note() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let mut notebook = Notebook::new(&mut storage);
+        notebook
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap();
+        let replay = notebook
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap();
+
+        assert!(replay.transition.already);
+        assert_eq!(
+            storage.list("notes").unwrap().len(),
+            1,
+            "a replay creates nothing"
+        );
+    }
+
+    #[test]
+    fn a_report_close_resumed_after_the_note_landed_reuses_it() {
+        // The crash window of the two writes: the Note is on disk, the Task
+        // never reached `closed`.
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let orphan = Notebook::new(&mut storage)
+            .create(
+                &{
+                    let mut draft = Draft::new(RecordType::Note, "Report: A demo record");
+                    draft.from = Some("task.demo".to_owned());
+                    draft.body = REPORT.to_owned();
+                    draft
+                },
+                TODAY,
+            )
+            .unwrap()
+            .id;
+
+        let closed = Notebook::new(&mut storage)
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap();
+        assert_eq!(closed.report_note.as_deref(), Some(orphan.as_str()));
+        assert_eq!(
+            storage.list("notes").unwrap().len(),
+            1,
+            "the interrupted call is resumed, not doubled"
+        );
+    }
+
+    #[test]
+    fn a_second_report_after_a_reopen_lands_whole_beside_the_first() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let mut notebook = Notebook::new(&mut storage);
+        let first = notebook
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap()
+            .report_note
+            .unwrap();
+        notebook.reopen("task.demo", TODAY).unwrap();
+        notebook.start("task.demo", TODAY).unwrap();
+        let second = notebook
+            .close_with_report("task.demo", "# What shipped next\n", None, TODAY)
+            .unwrap()
+            .report_note
+            .unwrap();
+
+        assert_ne!(
+            first, second,
+            "a new report is a new Note, never the old one"
+        );
+        assert!(
+            storage
+                .read(&format!("notes/{second}.md"))
+                .unwrap()
+                .ends_with("# What shipped next\n"),
+            "the report the caller passed is the one the notebook holds"
+        );
+    }
+
+    #[test]
+    fn an_archived_report_is_never_revived_as_a_fresh_proof() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let mut notebook = Notebook::new(&mut storage);
+        let filed = notebook
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap()
+            .report_note
+            .unwrap();
+        notebook.retire(&filed, TODAY).unwrap();
+        notebook.archive(&filed).unwrap();
+        notebook.reopen("task.demo", TODAY).unwrap();
+        notebook.start("task.demo", TODAY).unwrap();
+
+        let again = notebook
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap()
+            .report_note
+            .unwrap();
+        assert_ne!(
+            again, filed,
+            "history stays history; a live close needs a live proof"
+        );
+        assert!(storage.read(&format!("notes/{again}.md")).is_ok());
+    }
+
+    #[test]
+    fn an_empty_report_is_refused_before_anything_is_written() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let before = storage.read("tasks/task.demo.md").unwrap();
+        Notebook::new(&mut storage)
+            .close_with_report("task.demo", "  \n", None, TODAY)
+            .unwrap_err();
+        assert_eq!(storage.list("notes").unwrap(), Vec::<String>::new());
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), before);
+    }
+
+    #[test]
+    fn a_report_citing_an_unwritten_id_carries_the_quotation_nudge() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let closed = Notebook::new(&mut storage)
+            .close_with_report(
+                "task.demo",
+                "follows from task.never-written\n",
+                None,
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(closed.dangling_mentions, vec!["task.never-written"]);
+    }
+
+    #[test]
+    fn a_note_standing_at_the_derived_id_from_elsewhere_is_not_claimed() {
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task_file("active", &[])),
+            (
+                "tasks/task.other.md",
+                &record_file("task.other", "task", "closed", &[], ""),
+            ),
+            (
+                "notes/note.report-a-demo-record.md",
+                &record_file(
+                    "note.report-a-demo-record",
+                    "note",
+                    "active",
+                    &["from: task.other"],
+                    "someone else's report\n",
+                ),
+            ),
+        ]);
+        let closed = Notebook::new(&mut storage)
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap();
+
+        assert_ne!(
+            closed.report_note.as_deref(),
+            Some("note.report-a-demo-record"),
+            "a Note born from another Task is a different record, not this call's"
+        );
+        assert_eq!(
+            storage.read("notes/note.report-a-demo-record.md").unwrap(),
+            record_file(
+                "note.report-a-demo-record",
+                "note",
+                "active",
+                &["from: task.other"],
+                "someone else's report\n"
+            ),
+            "and its bytes are untouched"
+        );
+    }
+
+    #[test]
+    fn a_report_close_on_a_task_that_cannot_close_writes_no_note() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
+        Notebook::new(&mut storage)
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap_err();
+        assert_eq!(
+            storage.list("notes").unwrap(),
+            Vec::<String>::new(),
+            "a refused close leaves no orphan behind"
+        );
+    }
+
     #[test]
     fn close_names_the_still_open_questions_born_from_the_task() {
         let mut storage = storage_with(&[
