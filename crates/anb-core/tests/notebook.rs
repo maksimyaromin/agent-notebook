@@ -992,6 +992,37 @@ mod dependency_graph {
     }
 
     #[test]
+    fn a_cycle_through_a_misnamed_task_file_is_refused_like_any_other() {
+        // The Task directory is the graph: `tasks/note.x.md` says
+        // `type: task` and carries a real edge, whatever its name claims.
+        let mut storage = storage_with(&[
+            ("tasks/task.a.md", &task("task.a", "open", &[])),
+            (
+                "tasks/task.b.md",
+                &task("task.b", "open", &["blocked-by: note.x"]),
+            ),
+            (
+                "tasks/note.x.md",
+                &task("note.x", "open", &["blocked-by: task.a"]),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage)
+                .block("task.a", "task.b", TODAY)
+                .unwrap_err(),
+            NotebookError::WouldCycle {
+                chain: vec![
+                    "task.a".to_owned(),
+                    "task.b".to_owned(),
+                    "note.x".to_owned(),
+                    "task.a".to_owned(),
+                ],
+            },
+            "the write guard and check must agree on what the graph holds"
+        );
+    }
+
+    #[test]
     fn unblock_repairs_a_task_waiting_on_itself() {
         let mut storage = storage_with(&[(
             "tasks/task.a.md",
@@ -1848,6 +1879,51 @@ mod creation {
                 holder: "archive/tasks/task.demo.md".to_owned(),
             },
             "ids are never reused, archive included"
+        );
+    }
+
+    #[test]
+    fn a_read_record_claims_the_name_in_it_as_well_as_the_one_on_it() {
+        let mut storage = storage_with(&[(
+            "notes/note.misnamed.md",
+            &record_file("note.wanted", "note", "active", &[], ""),
+        )]);
+        let mut draft = Draft::new(RecordType::Note, "The wanted name");
+        draft.id = Some("note.wanted".to_owned());
+        assert_eq!(
+            Notebook::new(&mut storage)
+                .create(&draft, TODAY)
+                .unwrap_err(),
+            NotebookError::DuplicateId {
+                id: "note.wanted".to_owned(),
+                holder: "notes/note.misnamed.md".to_owned(),
+            },
+            "write-side uniqueness cannot trust the convention whose violation it guards against"
+        );
+    }
+
+    #[test]
+    fn a_filed_record_claims_only_the_name_on_it_and_check_names_the_clash() {
+        let mut storage = storage_with(&[(
+            "archive/notes/note.misnamed.md",
+            &record_file("note.wanted", "note", "retired", &[], ""),
+        )]);
+        let mut draft = Draft::new(RecordType::Note, "The wanted name");
+        draft.id = Some("note.wanted".to_owned());
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.path, "notes/note.wanted.md");
+
+        let clashing: Vec<String> = Notebook::new(&mut storage)
+            .check()
+            .unwrap()
+            .into_iter()
+            .filter(|located| located.finding.code == FindingCode::DuplicateId)
+            .map(|located| located.path)
+            .collect();
+        assert_eq!(
+            clashing,
+            vec!["archive/notes/note.misnamed.md", "notes/note.wanted.md"],
+            "the id the two files share is named against both of them"
         );
     }
 
@@ -3370,57 +3446,6 @@ mod debt_signals {
     }
 
     #[test]
-    fn a_compound_word_does_not_cite() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "The subtask.gone helper and task.goneBar are prose, not citations.\n",
-            ),
-        )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
-    }
-
-    #[test]
-    fn a_sentence_final_mention_cites_without_its_dot() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "Blocked by task.gone.\n",
-            ),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::DanglingMention {
-                id: "note.demo".into(),
-                target: "task.gone".into()
-            }]
-        );
-    }
-
-    #[test]
-    fn a_repeated_mention_is_one_line() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "task.gone above, task.gone again.\n",
-            ),
-        )]);
-        assert_eq!(debt_of(&mut storage).len(), 1);
-    }
-
-    #[test]
     fn two_live_decisions_citing_without_an_edge_are_one_pair_with_both_authors() {
         let mut storage = storage_with(&[
             (
@@ -3687,229 +3712,6 @@ mod debt_signals {
                 id: "task.demo".into(),
                 days: 2
             }]
-        );
-    }
-
-    #[test]
-    fn a_trailing_hyphen_falls_off_a_mention() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "See task.gone- for why.\n",
-            ),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::DanglingMention {
-                id: "note.demo".into(),
-                target: "task.gone".into()
-            }]
-        );
-    }
-
-    #[test]
-    fn a_dotted_chain_cites_up_to_its_first_stop() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "See task.foo.bar here.\n",
-            ),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::DanglingMention {
-                id: "note.demo".into(),
-                target: "task.foo".into()
-            }]
-        );
-    }
-
-    #[test]
-    fn an_underscore_prefix_blocks_a_mention() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "The _task.gone symbol is code.\n",
-            ),
-        )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
-    }
-
-    #[test]
-    fn an_id_past_sixty_four_bytes_is_not_a_mention() {
-        let long_slug = "a".repeat(70);
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                &format!("See task.{long_slug} maybe.\n"),
-            ),
-        )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
-    }
-
-    #[test]
-    fn a_backticked_id_is_a_quotation_beside_a_citing_bare_id() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "The corpus case `task.quoted` waits on task.gone.\n",
-            ),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::DanglingMention {
-                id: "note.demo".into(),
-                target: "task.gone".into()
-            }],
-            "the quoted id creates no edge; the bare one still cites"
-        );
-    }
-
-    #[test]
-    fn an_id_inside_a_code_fence_is_a_quotation_too() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "```\nanb view task.gone\n```\n",
-            ),
-        )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
-    }
-
-    #[test]
-    fn a_stray_backtick_on_an_earlier_line_cannot_unquote_a_later_entry() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "- 2026-08-26 -: the ` character is special\n- 2026-08-27 -: renamed the `task.ghost` case\n",
-            ),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![],
-            "span backticks pair within one line, never across entries"
-        );
-    }
-
-    #[test]
-    fn a_fence_closes_on_a_longer_run_too() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "```\nanb view task.gone\n````\n",
-            ),
-        )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
-    }
-
-    #[test]
-    fn an_unclosed_fence_quotes_to_the_end() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "```\nanb view task.gone\n",
-            ),
-        )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
-    }
-
-    #[test]
-    fn multi_byte_neighbors_leave_the_scan_intact() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "A café note — task.gone cites, «`task.quoted`» does not.\n",
-            ),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::DanglingMention {
-                id: "note.demo".into(),
-                target: "task.gone".into()
-            }]
-        );
-    }
-
-    #[test]
-    fn an_unpaired_backtick_leaves_what_follows_citing() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "A stray ` backtick, then task.gone.\n",
-            ),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::DanglingMention {
-                id: "note.demo".into(),
-                target: "task.gone".into()
-            }]
-        );
-    }
-
-    #[test]
-    fn a_code_span_closes_only_on_a_run_of_its_own_length() {
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file(
-                "note.demo",
-                "note",
-                "active",
-                &[],
-                "``a `task.inner` chain`` beside task.gone.\n",
-            ),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::DanglingMention {
-                id: "note.demo".into(),
-                target: "task.gone".into()
-            }],
-            "the single-backtick run is content of the double-run span"
         );
     }
 
@@ -5530,6 +5332,82 @@ mod edit_verb {
                 .unwrap_err(),
             NotebookError::InvalidArgument { .. }
         ));
+    }
+
+    #[test]
+    fn an_origin_that_would_close_a_lineage_loop_is_refused_with_the_lineage_named() {
+        // `task.child` was born inside `task.hub`, `task.grandchild` inside
+        // it; making the grandchild the hub's origin would leave the hub
+        // standing inside its own lineage.
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hub.md",
+                &record_file("task.hub", "task", "open", &[], ""),
+            ),
+            (
+                "tasks/task.child.md",
+                &record_file("task.child", "task", "open", &["from: task.hub"], ""),
+            ),
+            (
+                "tasks/task.grandchild.md",
+                &record_file("task.grandchild", "task", "open", &["from: task.child"], ""),
+            ),
+        ]);
+        let before = storage.read("tasks/task.hub.md").unwrap();
+        let error = Notebook::new(&mut storage)
+            .edit(
+                "task.hub",
+                &Edit {
+                    from: Some("task.grandchild".to_owned()),
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap_err();
+        let NotebookError::InvalidArgument { reason } = &error else {
+            panic!("{error:?}");
+        };
+        assert!(
+            reason.contains("task.grandchild \u{2192} task.child \u{2192} task.hub"),
+            "the refusal walks the lineage it refuses: {reason}"
+        );
+        assert_eq!(
+            storage.read("tasks/task.hub.md").unwrap(),
+            before,
+            "a refused edit moves no byte"
+        );
+    }
+
+    #[test]
+    fn a_lineage_that_does_not_loop_is_left_alone() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hub.md",
+                &record_file("task.hub", "task", "open", &[], ""),
+            ),
+            (
+                "tasks/task.child.md",
+                &record_file("task.child", "task", "open", &["from: task.hub"], ""),
+            ),
+            (
+                "tasks/task.other.md",
+                &record_file("task.other", "task", "open", &[], ""),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage)
+                .edit(
+                    "task.child",
+                    &Edit {
+                        from: Some("task.other".to_owned()),
+                        ..edit()
+                    },
+                    TODAY,
+                )
+                .unwrap()
+                .changed,
+            vec!["from"]
+        );
     }
 
     #[test]

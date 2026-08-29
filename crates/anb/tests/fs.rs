@@ -50,6 +50,31 @@ fn list_is_non_recursive_sorted_and_prefixed() {
     );
 }
 
+/// A record kept elsewhere and linked into the notebook is a record; a link
+/// to a directory, or to nothing, is not.
+#[cfg(unix)]
+#[test]
+fn a_symlink_is_listed_by_what_it_points_at() {
+    let dir = TempDir::new().unwrap();
+    let mut storage = storage_in(&dir);
+    storage.write("tasks/task.here.md", "here").unwrap();
+    storage.write("elsewhere/task.there.md", "there").unwrap();
+    let tasks = dir.path().join("tasks");
+    std::os::unix::fs::symlink(
+        dir.path().join("elsewhere/task.there.md"),
+        tasks.join("task.linked.md"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(dir.path().join("elsewhere"), tasks.join("task.dir.md")).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("gone.md"), tasks.join("task.broken.md")).unwrap();
+
+    assert_eq!(
+        storage.list("tasks").unwrap(),
+        vec!["tasks/task.here.md", "tasks/task.linked.md"]
+    );
+    assert_eq!(storage.read("tasks/task.linked.md").unwrap(), "there");
+}
+
 #[test]
 fn a_missing_directory_lists_empty() {
     let dir = TempDir::new().unwrap();

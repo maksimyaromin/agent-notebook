@@ -18,6 +18,17 @@ proptest = "1.11"
 insta = "1.48"
 tempfile = "3.27"
 
+# The CLI is a binary that ships, not one that builds fast. `panic = "abort"`
+# is the one setting with semantics: a panic ends the process on the spot,
+# so nothing here may rely on unwinding or `catch_unwind`, and the shell
+# sees a signal rather than an exit code. The panic message, with the file
+# and line it names, still prints.
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

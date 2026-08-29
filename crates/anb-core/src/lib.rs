@@ -26,6 +26,9 @@ pub use notebook::{
     Proof, ReadyTask, Transitioned, TypeSection, View, carriers_of,
 };
 pub use record::{Record, RecordType, TaskState};
-pub use status::{ActiveTask, Budget, Counts, Status, StatusRule, counts_phrase, epic_line};
+pub use status::{
+    ActiveTask, Budget, Counts, DebtClass, SECTION_ROWS, Status, StatusRule, counts_phrase,
+    debt_classes, epic_line,
+};
 pub use storage::{MemoryStorage, Storage, StorageError};
 pub use tokens::estimate_tokens;

@@ -10,6 +10,7 @@ use crate::grammar;
 use crate::mention;
 use crate::notebook::{CitedProof, Resolver, path_stem};
 use crate::record::{Record, RecordType};
+use std::collections::BTreeSet;
 
 /// The Debt clocks, in days, each behind its `debt-*` config key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,16 +428,14 @@ fn undeclared_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSig
     let mut found: Vec<(String, DebtSignal)> = Vec::new();
     let live_decision =
         |record: &Record| record.record_type() == Some(RecordType::Decision) && record.is_live();
+    let valid_paths: BTreeSet<&str> = valid.iter().map(|record| record.path()).collect();
     for record in valid.iter().copied().filter(|record| live_decision(record)) {
         let citer = path_stem(record.path());
         for target in mention::mentions(record.file().body()) {
             let Some(other) = resolvable.read(target) else {
                 continue;
             };
-            if target == citer
-                || !live_decision(other)
-                || !valid.iter().any(|member| member.path() == other.path())
-            {
+            if target == citer || !live_decision(other) || !valid_paths.contains(other.path()) {
                 continue;
             }
             if declares_edge(record, target) || declares_edge(other, citer) {

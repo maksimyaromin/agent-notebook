@@ -2,7 +2,10 @@
 //! archive is the one part of it that only ever grows — so which paths
 //! cross the Storage seam is behaviour, watched here at the seam itself.
 
-use anb_core::{Budget, CitedProof, MemoryStorage, Notebook, Storage, StorageError};
+use anb_core::{
+    Budget, CitedProof, Draft, MemoryStorage, Notebook, NotebookError, RecordType, Storage,
+    StorageError,
+};
 use std::cell::RefCell;
 
 const TODAY: &str = "2026-08-27";
@@ -199,5 +202,51 @@ fn the_widening_opens_each_filed_record_once_when_the_edges_loop() {
         storage.archived_reads(),
         vec!["archive/tasks/task.a.md", "archive/tasks/task.b.md"],
         "each end of the loop is opened once, and the walk ends"
+    );
+}
+
+#[test]
+fn minting_an_id_opens_nothing_in_the_archive() {
+    let mut storage = watched(3, 200);
+    Notebook::new(&mut storage)
+        .create(&Draft::new(RecordType::Task, "A fresh task"), TODAY)
+        .unwrap();
+
+    assert_eq!(
+        storage.archived_reads(),
+        Vec::<String>::new(),
+        "a filed record claims the name on its file, and the listing carries it"
+    );
+}
+
+#[test]
+fn a_cycle_check_opens_the_chain_it_walks() {
+    // The refused edge closes a two-Task loop; the rest of the live Tasks
+    // and the whole archive have nothing to do with it.
+    let mut storage = watched(20, 200);
+    storage
+        .write(
+            "tasks/task.live-0.md",
+            &task("task.live-0", "open", "blocked-by: task.live-1\n"),
+        )
+        .unwrap();
+
+    let error = Notebook::new(&mut storage)
+        .block("task.live-1", "task.live-0", TODAY)
+        .unwrap_err();
+
+    assert!(
+        matches!(error, NotebookError::WouldCycle { .. }),
+        "{error:?}"
+    );
+    assert_eq!(
+        storage.reads(),
+        vec![
+            "tasks/task.live-0.md",
+            "tasks/task.live-1.md",
+            "tasks/task.live-0.md"
+        ],
+        "the guard on the target, the record being edged, and one step of the \
+         walk out of it \u{2014} the notebook is never opened"
     );
 }

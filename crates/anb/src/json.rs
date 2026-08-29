@@ -6,7 +6,7 @@ use crate::cli::Subject;
 use crate::reply::{Recovery, Reply, shown};
 use anb_core::{
     Cited, Counts, DebtSignal, FileFinding, Held, ListedRecord, NotebookError, Overview, ReadyTask,
-    Status, View,
+    SECTION_ROWS, Status, View, debt_classes,
 };
 use serde_json::{Map, Value, json};
 
@@ -275,11 +275,18 @@ fn epic_value(epic: &anb_core::Epic) -> Value {
 fn overview_value(overview: &Overview, all: bool) -> Value {
     let mut object = Map::new();
     object.insert("live".into(), counts_value(&overview.live));
-    object.insert("epics".into(), section(&overview.epics, all, epic_value));
+    object.insert(
+        "epics".into(),
+        section(
+            &overview.epics,
+            shown(overview.epics.len(), all),
+            epic_value,
+        ),
+    );
     for grouped in &overview.sections {
         object.insert(
             grouped.record_type.directory().into(),
-            section(&grouped.rows, all, listed_row),
+            section(&grouped.rows, shown(grouped.rows.len(), all), listed_row),
         );
     }
     object.insert("archive".into(), counts_value(&overview.archived));
@@ -312,25 +319,46 @@ fn status_value(status: &Status) -> Value {
         "quiet": status.quiet,
         "spent": status.spent,
         "counts": counts_value(&status.counts),
-        "in-flight": section(&status.in_flight, false, in_flight_value),
-        "review": section(&status.review, false, |id| json!(id)),
-        "rules": section(&status.rules, false, |rule| json!({"id": rule.id, "title": rule.title})),
-        "ready": section(&status.ready, false, ready_row),
-        "epics": section(&status.epics, false, epic_value),
-        "debt": section(&status.debt, false, debt_value),
+        "in-flight": section(&status.in_flight, dashboard_rows(&status.in_flight), in_flight_value),
+        "review": section(&status.review, dashboard_rows(&status.review), |id| json!(id)),
+        "rules": section(&status.rules, dashboard_rows(&status.rules), |rule| {
+            json!({"id": rule.id, "title": rule.title})
+        }),
+        "ready": section(&status.ready, dashboard_rows(&status.ready), ready_row),
+        "epics": section(&status.epics, dashboard_rows(&status.epics), epic_value),
+        "debt": debt_section(&status.debt),
         "text": status.text,
     })
 }
 
-/// One section of a grouped reply as data: how many there are, and the head
-/// the reply shows. A reply an agent reads must not grow with the notebook,
-/// whichever format it asks for.
-fn section<T>(rows: &[T], all: bool, row: impl Fn(&T) -> Value) -> Value {
+/// One section of a grouped reply as data: how many there are, and the
+/// first `shown` of them. A reply an agent reads must not grow with the
+/// notebook, whichever format it asks for.
+fn section<T>(rows: &[T], shown: usize, row: impl Fn(&T) -> Value) -> Value {
     json!({
         "count": rows.len(),
-        "rows": rows[..shown(rows.len(), all)]
+        "rows": rows[..shown].iter().map(row).collect::<Vec<Value>>(),
+    })
+}
+
+/// How many rows a Status section shows as data: the dashboard's own
+/// section bound. The text may print fewer — its Budget can shorten a
+/// section or collapse it to a count, and JSON has no Budget — but neither
+/// rendering grows with the notebook, and a caller who wants a section
+/// whole asks the verb that section points at.
+fn dashboard_rows<T>(rows: &[T]) -> usize {
+    rows.len().min(SECTION_ROWS)
+}
+
+/// Debt as data: the same rows the dashboard's text prints, which is the
+/// head of every class rather than the head of the list.
+fn debt_section(debt: &[DebtSignal]) -> Value {
+    json!({
+        "count": debt.len(),
+        "rows": debt_classes(debt)
             .iter()
-            .map(row)
+            .flat_map(|class| class.shown.iter().copied())
+            .map(debt_value)
             .collect::<Vec<Value>>(),
     })
 }

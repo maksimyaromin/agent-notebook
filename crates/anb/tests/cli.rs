@@ -1107,6 +1107,66 @@ mod json_surface {
     }
 
     #[test]
+    fn a_json_dashboard_section_is_bounded_at_the_dashboard_s_own_rows() {
+        let mut storage = many_open_tasks(22);
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
+        assert_eq!(value["ready"]["count"], serde_json::json!(22));
+        assert_eq!(
+            value["ready"]["rows"].as_array().unwrap().len(),
+            5,
+            "the dashboard is a fixed opening in either rendering; `anb ready` is where a \
+             section opens whole"
+        );
+    }
+
+    #[test]
+    fn the_json_debt_rows_are_the_debt_lines_the_text_prints() {
+        // Two classes, one of them past the section bound: Debt is bounded
+        // per class, so a flat cut would drop the second class whole.
+        let mut files: Vec<(String, String)> = (0..3)
+            .map(|n| {
+                (
+                    format!("notes/note.m{n}.md"),
+                    record_file(
+                        &format!("note.m{n}"),
+                        "note",
+                        "active",
+                        "A demo record",
+                        &[],
+                        &format!("cites task.gone-{n} here.\n"),
+                    ),
+                )
+            })
+            .collect();
+        files.extend((0..6).map(|n| {
+            (
+                format!("tasks/task.bad{n}.md"),
+                "not an envelope\n".to_owned(),
+            )
+        }));
+        let mut storage = storage_with(&files);
+
+        let printed: Vec<String> = ok(&mut storage, &["status"])
+            .lines()
+            .filter(|line| line.starts_with("  ") && !line.contains('\u{2026}'))
+            .map(|line| line.trim().to_owned())
+            .collect();
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
+        let carried: Vec<String> = value["debt"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["line"].as_str().unwrap().to_owned())
+            .collect();
+
+        assert_eq!(value["debt"]["count"], serde_json::json!(9));
+        assert_eq!(carried, printed, "one dashboard, two renderings");
+        assert_eq!(carried.len(), 8, "five of one class, three of the other");
+    }
+
+    #[test]
     fn an_absent_priority_is_omitted_from_a_json_row() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         let value: serde_json::Value =

@@ -18,7 +18,7 @@ use crate::config::{CONFIG_PATH, Config};
 use crate::debt::{self, Cited, DebtSources};
 use crate::finding::{Finding, FindingCode, Severity};
 use crate::grammar::{self, RecordFile, Residence};
-use crate::graph::{TaskGraph, TaskNode};
+use crate::graph::{self, TaskGraph, TaskNode};
 use crate::mention;
 use crate::record::{Record, RecordType, TaskAction, TaskState, Transition, not_utf8_finding};
 use crate::status::{self, ActiveTask, Budget, Counts, Status, StatusInputs, StatusRule};
@@ -851,9 +851,9 @@ impl<'a, S: Storage> Notebook<'a, S> {
         }
         let victim = self.guard_supersession(draft)?;
 
-        let corpus = self.whole_corpus()?;
+        let corpus = self.live_corpus()?;
         let records = corpus.records();
-        let id = resolve_draft_id(draft, &id_claims(records))?;
+        let id = resolve_draft_id(draft, &id_claims(records, corpus.archived_ids()))?;
         let may_conflict = conflict_candidates(draft, records, &corpus.resolver());
         let path = record_path(&id, draft.record_type, false);
         self.storage
@@ -1526,6 +1526,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
                 });
             }
             self.guard_ref_exists("from", origin)?;
+            self.guard_lineage_stays_open(id, origin)?;
         }
 
         let loaded = self.resolve_live(id, record_type)?;
@@ -1667,14 +1668,74 @@ impl<'a, S: Storage> Notebook<'a, S> {
         if id == on {
             return Ok(Some(vec![id.to_owned(), on.to_owned()]));
         }
-        let mut tasks = self.records_in(RecordType::Task.directory())?;
-        tasks.extend(self.records_in(&archive_of(RecordType::Task.directory()))?);
-        let Some(chain) = task_graph(&tasks).path(on, id) else {
+        let Some(waited_on) = graph::chain(on, id, |at| self.blockers_of(at))? else {
             return Ok(None);
         };
-        let mut chain_from_dependent = vec![id.to_owned()];
-        chain_from_dependent.extend(chain);
-        Ok(Some(chain_from_dependent))
+        let mut cycle = vec![id.to_owned()];
+        cycle.extend(waited_on);
+        Ok(Some(cycle))
+    }
+
+    /// Refuse an Origin that would close a lineage loop: `origin` was
+    /// already born inside `id`, however many births ago. Origin is the edge
+    /// Debt keys its clocks on and the edge an epic's scope follows, so a
+    /// record standing inside its own lineage is a record with no birth —
+    /// and `edit` is the one verb that can write it, since a record minted
+    /// with `--from` does not exist yet to be anyone's origin.
+    fn guard_lineage_stays_open(&self, id: &str, origin: &str) -> Result<(), NotebookError> {
+        let Some(lineage) = graph::chain(origin, id, |at| self.origin_of(at))? else {
+            return Ok(());
+        };
+        Err(NotebookError::InvalidArgument {
+            reason: format!(
+                "from: `{origin}` is already born inside `{id}` \u{2014} {}",
+                lineage.join(" \u{2192} ")
+            ),
+        })
+    }
+
+    /// The record `at` was born from, read from wherever `at`'s file sits —
+    /// the archive included, since a lineage runs back through history. A
+    /// name no record bears was born of nothing; the walk takes at most one
+    /// step per record, because a record has at most one Origin.
+    fn origin_of(&self, at: &str) -> Result<Vec<String>, NotebookError> {
+        for path in canonical_paths(at) {
+            let text = match self.storage.read(&path) {
+                Ok(text) => text,
+                Err(StorageError::NotFound { .. } | StorageError::NotUtf8 { .. }) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            return Ok(Record::parse(&path, &text)
+                .origin()
+                .filter(|origin| grammar::id_error(origin).is_none())
+                .map(str::to_owned)
+                .into_iter()
+                .collect());
+        }
+        Ok(Vec::new())
+    }
+
+    /// What the Task filed under the name `at` waits on, read from its live
+    /// home before its archived one — a cycle through history is still a
+    /// cycle. The Task directories are the whole graph, whatever a file
+    /// there is named: a record whose name says one type and whose bytes
+    /// say Task carries real edges, and `check` names the mismatch
+    /// separately. A name no Task file there bears waits on nothing.
+    fn blockers_of(&self, at: &str) -> Result<Vec<String>, NotebookError> {
+        for archived in [false, true] {
+            let path = record_path(at, RecordType::Task, archived);
+            let text = match self.storage.read(&path) {
+                Ok(text) => text,
+                Err(StorageError::NotFound { .. } | StorageError::NotUtf8 { .. }) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            let record = Record::parse(&path, &text);
+            if record.record_type() != Some(RecordType::Task) {
+                continue;
+            }
+            return Ok(blocked_by(&record).map(str::to_owned).collect());
+        }
+        Ok(Vec::new())
     }
 
     /// The error findings that exclude a record from mutation: its own,
@@ -1924,6 +1985,10 @@ impl Corpus {
         self.archive
     }
 
+    fn archived_ids(&self) -> &BTreeSet<String> {
+        &self.archived
+    }
+
     fn resolver(&self) -> Resolver<'_> {
         Resolver {
             read: self
@@ -2070,11 +2135,16 @@ fn resolve_draft_id(
     })
 }
 
-/// Every id claimed anywhere, mapped to its claimant: by filename, and
-/// by the `id` field of a misnamed file — write-side uniqueness cannot
-/// trust the convention whose violation is the very finding it guards
-/// against.
-fn id_claims(records: &[Record]) -> BTreeMap<String, String> {
+/// Every id already claimed, mapped to the file claiming it.
+///
+/// A read record claims two names: the one on its file, and the one its
+/// bytes declare — write-side uniqueness cannot trust the convention whose
+/// violation is the very finding it guards against. A filed record claims
+/// the name on its file alone, which its listing carries: opening the
+/// archive on every create would make minting an id cost the whole of
+/// history, and a file whose `id` disagrees with its name is an error
+/// `check` names wherever it sits.
+fn id_claims(records: &[Record], archived: &BTreeSet<String>) -> BTreeMap<String, String> {
     let mut claims = BTreeMap::new();
     for record in records {
         claims
@@ -2086,12 +2156,21 @@ fn id_claims(records: &[Record]) -> BTreeMap<String, String> {
                 .or_insert_with(|| record.path().to_owned());
         }
     }
+    for id in archived {
+        let Ok(record_type) = parsed_type(id) else {
+            continue;
+        };
+        claims
+            .entry(id.clone())
+            .or_insert_with(|| record_path(id, record_type, true));
+    }
     claims
 }
 
-/// The standing Decisions a draft may conflict with. Computed at write
-/// time because the writing agent, holding full context, is the cheapest
-/// judge that will ever see the pair; the tool prints it and stops.
+/// The standing Decisions among `records` that a draft may conflict with.
+/// Computed at write time because the writing agent, holding full context,
+/// is the cheapest judge that will ever see the pair; the tool prints it
+/// and stops.
 fn conflict_candidates(draft: &Draft, records: &[Record], resolvable: &Resolver<'_>) -> Vec<Cited> {
     if draft.record_type != RecordType::Decision || draft.supersedes.is_some() {
         return Vec::new();
@@ -2228,6 +2307,15 @@ fn kin_of(record: &Record) -> impl Iterator<Item = &str> {
         .chain(record.origin())
 }
 
+/// The well-formed ids a Task waits on. A malformed target is a finding
+/// `check` names, never an edge.
+fn blocked_by(record: &Record) -> impl Iterator<Item = &str> {
+    record
+        .file()
+        .field_values("blocked-by")
+        .filter(|target| grammar::id_error(target).is_none())
+}
+
 fn edge_exists(record: &Record, target: &str) -> bool {
     record
         .file()
@@ -2254,12 +2342,7 @@ fn task_graph(records: &[Record]) -> TaskGraph {
         if record.record_type() != Some(RecordType::Task) {
             continue;
         }
-        let blocked_by = record
-            .file()
-            .field_values("blocked-by")
-            .filter(|target| grammar::id_error(target).is_none())
-            .map(str::to_owned)
-            .collect();
+        let blocked_by = blocked_by(record).map(str::to_owned).collect();
         nodes
             .entry(path_stem(record.path()).to_owned())
             .or_insert(TaskNode {

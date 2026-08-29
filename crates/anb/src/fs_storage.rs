@@ -84,7 +84,7 @@ impl Storage for FsStorage {
         let mut paths = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| io_error(dir, &error))?;
-            if !entry.path().is_file() {
+            if !names_a_file(&entry) {
                 continue;
             }
             // A name outside UTF-8 cannot be addressed through the seam's
@@ -139,6 +139,17 @@ impl Storage for FsStorage {
             }),
             Err(error) => Err(io_error(path, &error)),
         }
+    }
+}
+
+/// Whether the entry names a file to read. The kind arrives with the
+/// listing on the platforms that report it, so only a symlink — whose
+/// target the listing cannot know — costs a question to the filesystem.
+fn names_a_file(entry: &fs::DirEntry) -> bool {
+    match entry.file_type() {
+        Ok(kind) if kind.is_symlink() => entry.path().is_file(),
+        Ok(kind) => kind.is_file(),
+        Err(_) => false,
     }
 }
 

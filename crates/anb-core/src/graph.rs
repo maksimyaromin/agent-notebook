@@ -1,4 +1,5 @@
-//! The dependency graph over `blocked-by` edges.
+//! The dependency graph over `blocked-by` edges, and the edge walk both it
+//! and the Origin lineage are asked about.
 //!
 //! Blocked, the ready gate, cycle verdicts, and unblock consequences are
 //! computed from the edges on demand; none of them is ever stored. The graph
@@ -40,38 +41,6 @@ impl TaskGraph {
                 .get(target)
                 .is_some_and(|blocker| !blocker.closed)
         })
-    }
-
-    /// The edge chain from `from` to `to`, both ends included, if the graph
-    /// carries one.
-    pub fn path(&self, from: &str, to: &str) -> Option<Vec<String>> {
-        let mut visited = BTreeSet::new();
-        let mut trail = vec![from.to_owned()];
-        self.extend_trail(from, to, &mut visited, &mut trail)
-            .then_some(trail)
-    }
-
-    fn extend_trail(
-        &self,
-        at: &str,
-        to: &str,
-        visited: &mut BTreeSet<String>,
-        trail: &mut Vec<String>,
-    ) -> bool {
-        if !visited.insert(at.to_owned()) {
-            return false;
-        }
-        let Some(node) = self.nodes.get(at) else {
-            return false;
-        };
-        for target in &node.blocked_by {
-            trail.push(target.clone());
-            if target == to || self.extend_trail(target, to, visited, trail) {
-                return true;
-            }
-            trail.pop();
-        }
-        false
     }
 
     /// Dependency cycles, listed in edge direction, found walking ids in
@@ -144,4 +113,42 @@ impl TaskGraph {
             .map(|(dependent, _)| dependent.clone())
             .collect()
     }
+}
+
+/// The edge chain from `from` to `to`, both ends included, walked over a
+/// graph that answers one record at a time. `edges` names what one record
+/// points at, whichever edge is being walked; a name it does not know
+/// points at nothing.
+///
+/// Read on demand, the walk costs the closure of `from`, where building a
+/// whole graph to answer the same question costs every record the notebook
+/// has ever held.
+pub(crate) fn chain<E>(
+    from: &str,
+    to: &str,
+    mut edges: impl FnMut(&str) -> Result<Vec<String>, E>,
+) -> Result<Option<Vec<String>>, E> {
+    let mut visited = BTreeSet::new();
+    let mut trail = vec![from.to_owned()];
+    Ok(extend_chain(from, to, &mut edges, &mut visited, &mut trail)?.then_some(trail))
+}
+
+fn extend_chain<E>(
+    at: &str,
+    to: &str,
+    edges: &mut impl FnMut(&str) -> Result<Vec<String>, E>,
+    visited: &mut BTreeSet<String>,
+    trail: &mut Vec<String>,
+) -> Result<bool, E> {
+    if !visited.insert(at.to_owned()) {
+        return Ok(false);
+    }
+    for target in edges(at)? {
+        trail.push(target.clone());
+        if target == to || extend_chain(&target, to, edges, visited, trail)? {
+            return Ok(true);
+        }
+        trail.pop();
+    }
+    Ok(false)
 }
