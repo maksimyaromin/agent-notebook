@@ -4,6 +4,8 @@
 //! Core, so their refusals arrive as structured recovery payloads; clap
 //! keeps only the structural surface — positionals and flag spelling.
 
+use crate::reply::Recovery;
+use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -99,6 +101,62 @@ pub enum Command {
         #[arg(long)]
         hook: bool,
     },
+    /// Verify every file: each finding names file, line, and reason.
+    Check {
+        /// Every row; the listing is bounded by default.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Move a settled record into the archive; history moves with it.
+    Archive { id: String },
+    /// Correct a live record's own fields; state stays a command's move.
+    Edit(EditArgs),
+    /// Find records — the archive included — by substring.
+    Search {
+        query: String,
+        /// Every row; the listing is bounded by default.
+        #[arg(long)]
+        all: bool,
+    },
+    /// The whole notebook as one page, grouped by type.
+    Overview,
+}
+
+/// The recovery payload for a verb clap does not know — an agent typing an
+/// unknown or not-yet-built command gets a next step, not raw usage. `None`
+/// for everything else clap refuses (or serves, like `--help`), which keeps
+/// clap's rendering.
+#[must_use]
+pub fn unknown_command_recovery(error: &clap::Error) -> Option<Recovery> {
+    if error.kind() != ErrorKind::InvalidSubcommand {
+        return None;
+    }
+    let verb = context_strings(error, ContextKind::InvalidSubcommand)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    // `--help` keeps every suggestion runnable whatever arguments the
+    // suggested verb requires.
+    let mut tries: Vec<String> = context_strings(error, ContextKind::SuggestedSubcommand)
+        .into_iter()
+        .map(|nearest| format!("anb {nearest} --help"))
+        .collect();
+    tries.push("anb --help".to_owned());
+    Some(Recovery {
+        code: "unknown-command",
+        message: format!("`{verb}` is not an anb command"),
+        details: Vec::new(),
+        tries,
+    })
+}
+
+/// The strings clap recorded under `kind`, however it wrapped them.
+fn context_strings(error: &clap::Error, kind: ContextKind) -> Vec<String> {
+    match error.get(kind) {
+        Some(ContextValue::String(value)) => vec![value.clone()],
+        Some(ContextValue::Strings(values)) => values.clone(),
+        _ => Vec::new(),
+    }
 }
 
 /// What a refusal can point back at: the verb and the record it named.
@@ -131,6 +189,11 @@ pub fn subject(command: &Command) -> Subject {
         Command::Ready { .. } => ("ready", None),
         Command::List { .. } => ("list", None),
         Command::Status { .. } => ("status", None),
+        Command::Check { .. } => ("check", None),
+        Command::Archive { id } => ("archive", Some(id)),
+        Command::Edit(args) => ("edit", Some(&args.id)),
+        Command::Search { .. } => ("search", None),
+        Command::Overview => ("overview", None),
     };
     Subject {
         verb,
@@ -195,6 +258,31 @@ pub struct NoteArgs {
     /// The Note this one replaces; it retires in the same move.
     #[arg(long)]
     pub supersedes: Option<String>,
+}
+
+#[derive(Args)]
+pub struct EditArgs {
+    pub id: String,
+    #[arg(long)]
+    pub title: Option<String>,
+    /// The whole body, replaced; empty clears it.
+    #[arg(long)]
+    pub body: Option<String>,
+    /// Add a tag; repeatable.
+    #[arg(long = "tag")]
+    pub add_tags: Vec<String>,
+    /// Remove a tag; repeatable.
+    #[arg(long = "untag")]
+    pub remove_tags: Vec<String>,
+    /// Origin: the record this record was born from.
+    #[arg(long)]
+    pub from: Option<String>,
+    /// 0–4, 0 the most urgent.
+    #[arg(long)]
+    pub priority: Option<u8>,
+    /// The explicit resurfacing date.
+    #[arg(long)]
+    pub review_by: Option<String>,
 }
 
 #[derive(Args)]

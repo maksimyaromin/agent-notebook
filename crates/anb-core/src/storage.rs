@@ -20,6 +20,12 @@ pub enum StorageError {
     NotFound {
         path: String,
     },
+    /// The file exists but its bytes are not UTF-8, so it cannot cross the
+    /// seam as a string. Only an adapter sees raw bytes, so only an adapter
+    /// can report this.
+    NotUtf8 {
+        path: String,
+    },
     /// `detail` is human-readable and adapter-specific.
     Io {
         path: String,
@@ -31,6 +37,7 @@ impl std::fmt::Display for StorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StorageError::NotFound { path } => write!(f, "not found: {path}"),
+            StorageError::NotUtf8 { path } => write!(f, "not UTF-8: {path}"),
             StorageError::Io { path, detail } => write!(f, "storage error on {path}: {detail}"),
         }
     }

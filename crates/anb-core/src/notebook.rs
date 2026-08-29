@@ -20,7 +20,7 @@ use crate::finding::{Finding, FindingCode, Severity};
 use crate::grammar::{self, RecordFile};
 use crate::graph::{TaskGraph, TaskNode};
 use crate::mention;
-use crate::record::{Record, RecordType, TaskAction, TaskState, Transition};
+use crate::record::{Record, RecordType, TaskAction, TaskState, Transition, not_utf8_finding};
 use crate::status::{self, ActiveTask, Budget, Counts, Status, StatusInputs, StatusRule};
 use crate::storage::{Storage, StorageError};
 use std::collections::{BTreeMap, BTreeSet};
@@ -167,13 +167,73 @@ pub struct Dropped {
     pub dangling_mentions: Vec<String>,
 }
 
-/// One row of the live listing; the id carries the type.
+/// One row of the live listing; the id carries the type. An invalid
+/// record's state shows as `invalid` — visible, never silently dropped.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ListedRecord {
     pub id: String,
     pub state: String,
     pub priority: Option<u8>,
-    pub title: String,
+    pub title: Option<String>,
+}
+
+/// A record moved into the archive; `already` marks the replay.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Archived {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+    pub already: bool,
+}
+
+/// The deliberate corrections `edit` applies to a live record's own fields.
+/// State, id, and the envelope dates stay the commands' territory.
+#[derive(Default)]
+pub struct Edit {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub add_tags: Vec<String>,
+    pub remove_tags: Vec<String>,
+    pub from: Option<String>,
+    pub priority: Option<u8>,
+    pub review_by: Option<String>,
+}
+
+impl Edit {
+    fn changes_nothing(&self) -> bool {
+        self.title.is_none()
+            && self.body.is_none()
+            && self.add_tags.is_empty()
+            && self.remove_tags.is_empty()
+            && self.from.is_none()
+            && self.priority.is_none()
+            && self.review_by.is_none()
+    }
+}
+
+/// An edit applied; `changed` names what moved in the file, so an empty
+/// one is the replay whose write was skipped whole.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Edited {
+    pub id: String,
+    pub changed: Vec<&'static str>,
+    pub dangling_mentions: Vec<String>,
+}
+
+/// One type's slice of the overview page.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TypeSection {
+    pub record_type: RecordType,
+    pub rows: Vec<ListedRecord>,
+}
+
+/// The whole notebook as one page: every live record grouped by type, the
+/// archive as counts — history is recoverable, not re-read.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Overview {
+    pub live: Counts,
+    pub sections: Vec<TypeSection>,
+    pub archived: Counts,
 }
 
 /// One record read whole: the envelope as it stands, the body, and the two
@@ -364,6 +424,13 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let text = match self.storage.read(CONFIG_PATH) {
             Ok(text) => text,
             Err(StorageError::NotFound { .. }) => return Ok(()),
+            Err(StorageError::NotUtf8 { .. }) => {
+                out.push(FileFinding {
+                    path: CONFIG_PATH.to_owned(),
+                    finding: not_utf8_finding(),
+                });
+                return Ok(());
+            }
             Err(error) => return Err(error.into()),
         };
         for finding in Config::parse(&text).findings() {
@@ -421,9 +488,9 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok(status::assemble(inputs, budget))
     }
 
-    /// The live listing: every live, valid record in type-major file order.
-    /// Invalid records are excluded, as from every derived query; `check`
-    /// names them.
+    /// The live listing, in type-major file order. An invalid record is a
+    /// row of state `invalid` — excluded from mutation and derived queries,
+    /// never from sight; `check` names its findings.
     ///
     /// # Errors
     /// A storage failure.
@@ -432,17 +499,59 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let resolvable = resolvable_by_id(&records);
         Ok(records
             .iter()
-            .filter(|record| !is_archived(record.path()) && !debt::is_excluded(record, &resolvable))
-            .map(|record| {
-                let file = record.file();
-                ListedRecord {
-                    id: path_stem(record.path()).to_owned(),
-                    state: record.state().unwrap_or_default().to_owned(),
-                    priority: file.field("priority").and_then(|value| value.parse().ok()),
-                    title: file.field("title").unwrap_or_default().to_owned(),
-                }
-            })
+            .filter(|record| !is_archived(record.path()))
+            .map(|record| listed_row(record, &resolvable))
             .collect())
+    }
+
+    /// Find records by case-insensitive substring over id, title, tags, and
+    /// body — live and archived alike: the archive is history, and history
+    /// is findable. Rows share the listing shape.
+    ///
+    /// # Errors
+    /// [`NotebookError::InvalidArgument`] on an empty query, or a storage
+    /// failure.
+    pub fn search(&self, query: &str) -> Result<Vec<ListedRecord>, NotebookError> {
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() {
+            return Err(NotebookError::InvalidArgument {
+                reason: "search: the query must not be empty".to_owned(),
+            });
+        }
+        let records = self.read_records()?;
+        let resolvable = resolvable_by_id(&records);
+        Ok(records
+            .iter()
+            .filter(|record| matches_query(record, &needle))
+            .map(|record| listed_row(record, &resolvable))
+            .collect())
+    }
+
+    /// The whole notebook as one page: every live record grouped by type,
+    /// deliberately unbounded — this is the read-it-whole surface — with the
+    /// archive reduced to counts.
+    ///
+    /// # Errors
+    /// A storage failure.
+    pub fn overview(&self) -> Result<Overview, NotebookError> {
+        let records = self.read_records()?;
+        let resolvable = resolvable_by_id(&records);
+        let sections = RecordType::ALL
+            .into_iter()
+            .map(|record_type| TypeSection {
+                record_type,
+                rows: records
+                    .iter()
+                    .filter(|record| sits_in(record, record_type, false))
+                    .map(|record| listed_row(record, &resolvable))
+                    .collect(),
+            })
+            .collect();
+        Ok(Overview {
+            live: live_counts(&records),
+            sections,
+            archived: archived_counts(&records),
+        })
     }
 
     /// Read one record whole, live or archived: every envelope field in file
@@ -950,6 +1059,115 @@ impl<'a, S: Storage> Notebook<'a, S> {
         })
     }
 
+    /// Move a settled record into the archive: same filename, same bytes,
+    /// so `git log --follow` keeps its history and the round-trip contract
+    /// holds. The archive copy lands before the live file goes — a failure
+    /// between the two leaves a loud `duplicate-id`, never a lost record.
+    ///
+    /// # Errors
+    /// [`NotebookError::InvalidTransition`] on a record still live, naming
+    /// the commands that settle it, plus the resolution errors of
+    /// [`Notebook::close`].
+    pub fn archive(&mut self, id: &str) -> Result<Archived, NotebookError> {
+        let record_type = parsed_type(id)?;
+        let moved = |already| Archived {
+            id: id.to_owned(),
+            from: record_path(id, record_type, false),
+            to: record_path(id, record_type, true),
+            already,
+        };
+        let loaded = match self.resolve_live(id, record_type) {
+            Ok(loaded) => loaded,
+            Err(NotebookError::Archived { .. }) => return Ok(moved(true)),
+            Err(error) => return Err(error),
+        };
+        if loaded.record.is_live() {
+            return Err(NotebookError::InvalidTransition {
+                id: id.to_owned(),
+                state: loaded.state_word().to_owned(),
+                valid: settling_commands(record_type, loaded.state_word()),
+            });
+        }
+        let moved = moved(false);
+        self.guard_archive_destination_free(id, &moved.to, loaded.record.file())?;
+        self.storage
+            .write(&moved.to, &loaded.record.file().render())?;
+        self.storage.remove(&moved.from)?;
+        Ok(moved)
+    }
+
+    /// Refuse the move when the destination already holds different bytes —
+    /// ids are never reused, and overwriting a divergent archived copy would
+    /// delete history. Identical bytes pass: that is the replay of a move
+    /// that crashed between its write and its remove.
+    fn guard_archive_destination_free(
+        &self,
+        id: &str,
+        destination: &str,
+        file: &RecordFile,
+    ) -> Result<(), NotebookError> {
+        let holds_other = match self.storage.read(destination) {
+            Ok(existing) => existing != file.render(),
+            Err(StorageError::NotFound { .. }) => false,
+            Err(StorageError::NotUtf8 { .. }) => true,
+            Err(error) => return Err(error.into()),
+        };
+        if holds_other {
+            return Err(NotebookError::DuplicateId {
+                id: id.to_owned(),
+                holder: destination.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Apply the deliberate corrections of [`Edit`] to a live record of any
+    /// state — a closed record's title is as correctable as an open one's.
+    /// `changed` names what moved in the file; a requested value equal to
+    /// the standing one moves nothing, though a non-canonical line is a move
+    /// even when its value stands. A new body carries the quotation rule's
+    /// dangling-mention nudge, like every body-writing verb.
+    ///
+    /// # Errors
+    /// [`NotebookError::InvalidArgument`] on a malformed value or an `Edit`
+    /// requesting nothing, [`NotebookError::DanglingRef`] when `from` names
+    /// no record, plus the resolution errors of [`Notebook::close`].
+    pub fn edit(&mut self, id: &str, edit: &Edit, today: &str) -> Result<Edited, NotebookError> {
+        guard_today(today)?;
+        let record_type = parsed_type(id)?;
+        validate_edit(record_type, edit)?;
+        if let Some(origin) = &edit.from {
+            if origin == id {
+                return Err(NotebookError::InvalidArgument {
+                    reason: "from: a record cannot be its own origin".to_owned(),
+                });
+            }
+            self.guard_ref_exists("from", origin)?;
+        }
+
+        let loaded = self.resolve_live(id, record_type)?;
+        let dangling_mentions = match &edit.body {
+            Some(body) => self.dangling_mentions(body)?,
+            None => Vec::new(),
+        };
+        let mut file = loaded.record.into_file();
+        let changed = spliced(&mut file, edit);
+        if changed.is_empty() {
+            return Ok(Edited {
+                id: id.to_owned(),
+                changed,
+                dangling_mentions,
+            });
+        }
+        file.set_field("updated", today);
+        self.storage.write(&loaded.path, &file.render())?;
+        Ok(Edited {
+            id: id.to_owned(),
+            changed,
+            dangling_mentions,
+        })
+    }
+
     /// The shared shape of every Task move: decide first, splice only on a
     /// real move, and let the verb add its own fields before the write.
     fn task_transition(
@@ -1035,6 +1253,12 @@ impl<'a, S: Storage> Notebook<'a, S> {
                 return Err(match self.holder_path(id)? {
                     Some(_) => NotebookError::Archived { id: id.to_owned() },
                     None => NotebookError::UnknownId { id: id.to_owned() },
+                });
+            }
+            Err(StorageError::NotUtf8 { .. }) => {
+                return Err(NotebookError::InvalidRecord {
+                    path,
+                    findings: vec![not_utf8_finding()],
                 });
             }
             Err(error) => return Err(error.into()),
@@ -1188,7 +1412,9 @@ impl<'a, S: Storage> Notebook<'a, S> {
         for archived in [false, true] {
             let path = record_path(id, record_type, archived);
             match self.storage.read(&path) {
-                Ok(_) => return Ok(Some(path)),
+                // A file that is not UTF-8 still claims its id — ids are
+                // never reused, unreadable holders included.
+                Ok(_) | Err(StorageError::NotUtf8 { .. }) => return Ok(Some(path)),
                 Err(StorageError::NotFound { .. }) => {}
                 Err(error) => return Err(error.into()),
             }
@@ -1214,8 +1440,13 @@ impl<'a, S: Storage> Notebook<'a, S> {
                 if !is_record_file(&path) {
                     continue;
                 }
-                let text = self.storage.read(&path)?;
-                records.push(Record::parse(&path, &text));
+                match self.storage.read(&path) {
+                    Ok(text) => records.push(Record::parse(&path, &text)),
+                    // The adapter's duty ends at naming the encoding; the
+                    // file stays a visible invalid record, not an abort.
+                    Err(StorageError::NotUtf8 { .. }) => records.push(Record::unreadable(&path)),
+                    Err(error) => return Err(error.into()),
+                }
             }
         }
         Ok(records)
@@ -1547,6 +1778,72 @@ fn resolvable_by_id(records: &[Record]) -> BTreeMap<&str, &Record> {
         .collect()
 }
 
+fn listed_row(record: &Record, resolvable: &BTreeMap<&str, &Record>) -> ListedRecord {
+    let file = record.file();
+    let state = if debt::is_excluded(record, resolvable) {
+        "invalid".to_owned()
+    } else {
+        record.state().unwrap_or_default().to_owned()
+    };
+    ListedRecord {
+        id: path_stem(record.path()).to_owned(),
+        state,
+        priority: file.field("priority").and_then(|value| value.parse().ok()),
+        title: file.field("title").map(str::to_owned),
+    }
+}
+
+fn matches_query(record: &Record, needle: &str) -> bool {
+    let file = record.file();
+    [
+        Some(path_stem(record.path())),
+        file.field("title"),
+        file.field("tags"),
+        Some(file.body()),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|surface| surface.to_lowercase().contains(needle))
+}
+
+/// Whether the record's file sits in `record_type`'s live or archive
+/// directory — residence, the axis a reader browsing the tree sees.
+fn sits_in(record: &Record, record_type: RecordType, archived: bool) -> bool {
+    let dir = record_type.directory();
+    let prefix = if archived {
+        format!("archive/{dir}/")
+    } else {
+        format!("{dir}/")
+    };
+    record.path().starts_with(&prefix)
+}
+
+fn archived_counts(records: &[Record]) -> Counts {
+    let of = |record_type| {
+        records
+            .iter()
+            .filter(|record| sits_in(record, record_type, true))
+            .count()
+    };
+    Counts {
+        tasks: of(RecordType::Task),
+        decisions: of(RecordType::Decision),
+        notes: of(RecordType::Note),
+        questions: of(RecordType::Question),
+    }
+}
+
+/// The commands that carry a still-live record toward its settled state —
+/// the recovery payload of an archive refused too early.
+fn settling_commands(record_type: RecordType, state: &str) -> Vec<&'static str> {
+    match (record_type, state) {
+        (RecordType::Task, "open") => vec!["start"],
+        (RecordType::Task, _) => vec!["close"],
+        (RecordType::Question, _) => vec!["answer"],
+        (RecordType::Decision | RecordType::Note, _) => vec!["retire"],
+    }
+}
+
 /// The dispatch queue's rows: live, open, valid, unblocked, unheld Tasks
 /// in ready order.
 fn ready_rows(records: &[Record], resolvable: &BTreeMap<&str, &Record>) -> Vec<ReadyTask> {
@@ -1800,6 +2097,124 @@ fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     Ok(())
 }
 
+fn validate_edit(record_type: RecordType, edit: &Edit) -> Result<(), NotebookError> {
+    let invalid = |reason: String| Err(NotebookError::InvalidArgument { reason });
+
+    if edit.changes_nothing() {
+        return invalid(
+            "edit: nothing to change — pass --title, --body, --tag, --untag, --from, --priority, or --review-by"
+                .to_owned(),
+        );
+    }
+    if let Some(title) = &edit.title {
+        let title = title.trim();
+        guard_single_line("title", title)?;
+        if title.is_empty() {
+            return invalid("title: must not be empty".to_owned());
+        }
+    }
+    for tag in edit.add_tags.iter().chain(&edit.remove_tags) {
+        if !grammar::is_token(tag) {
+            return invalid(format!("tags: `{tag}` is not a `[a-z0-9-]+` tag"));
+        }
+    }
+    if let Some(priority) = edit.priority {
+        if record_type != RecordType::Task {
+            return invalid("priority: applies only to a task".to_owned());
+        }
+        if priority > 4 {
+            return invalid(format!("priority: {priority} is not 0–4"));
+        }
+    }
+    if let Some(date) = &edit.review_by
+        && let Some(why) = grammar::date_error(date)
+    {
+        return invalid(format!("review-by: {why}"));
+    }
+    Ok(())
+}
+
+/// Splice every requested correction into the file, answering the keys
+/// that actually moved.
+fn spliced(file: &mut RecordFile, edit: &Edit) -> Vec<&'static str> {
+    let mut changed = Vec::new();
+    let fields = [
+        (
+            "title",
+            edit.title.as_deref().map(str::trim).map(str::to_owned),
+        ),
+        ("from", edit.from.clone()),
+        (
+            "priority",
+            edit.priority.map(|priority| priority.to_string()),
+        ),
+        ("review-by", edit.review_by.clone()),
+    ];
+    for (key, value) in fields {
+        if let Some(value) = value
+            && file.set_field(key, &value)
+        {
+            changed.push(key);
+        }
+    }
+    if retagged(file, edit) {
+        changed.push("tags");
+    }
+    if let Some(body) = &edit.body {
+        let body = edited_body(body);
+        if body != file.body() {
+            file.set_body(&body);
+            changed.push("body");
+        }
+    }
+    changed
+}
+
+/// Splice the edit's tag additions and removals into the `tags` field;
+/// answers whether the set changed. An added tag already present, or a
+/// removed one already absent, changes nothing — the replay contract at
+/// set granularity.
+fn retagged(file: &mut RecordFile, edit: &Edit) -> bool {
+    if edit.add_tags.is_empty() && edit.remove_tags.is_empty() {
+        return false;
+    }
+    let mut tags: Vec<String> = file
+        .field("tags")
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    tags.retain(|tag| !edit.remove_tags.contains(tag));
+    for tag in &edit.add_tags {
+        if !tags.contains(tag) {
+            tags.push(tag.clone());
+        }
+    }
+    if tags.is_empty() {
+        file.remove_field("tags")
+    } else {
+        file.set_field("tags", &tags.join(", "))
+    }
+}
+
+/// The canonical rendered body: a blank line after the fence, the content,
+/// a final newline — and empty content is no body at all. `create` and
+/// `edit` both write through it, so a fresh record and an edited one read
+/// alike.
+fn edited_body(content: &str) -> String {
+    let content = content.strip_suffix('\n').unwrap_or(content);
+    if content.is_empty() {
+        String::new()
+    } else {
+        format!("\n{content}\n")
+    }
+}
+
 /// Render a draft as a canonical record file. The splice machinery places
 /// every field, so the canonical order has one home: the grammar's field
 /// table.
@@ -1831,14 +2246,7 @@ fn render_draft(draft: &Draft, id: &str, today: &str) -> String {
     }
     file.set_field("created", today);
     file.set_field("updated", today);
-
-    let body = draft.body.strip_suffix('\n').unwrap_or(&draft.body);
-    if !body.is_empty() {
-        file.append_body("");
-        for line in body.split('\n') {
-            file.append_body(line);
-        }
-    }
+    file.set_body(&edited_body(&draft.body));
     file.render()
 }
 

@@ -1124,6 +1124,29 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "list"],
         vec!["anb", "view", "task.x"],
         vec!["anb", "status", "--budget", "0", "--hook"],
+        vec!["anb", "check", "--all"],
+        vec!["anb", "archive", "task.x"],
+        vec![
+            "anb",
+            "edit",
+            "task.x",
+            "--title",
+            "New",
+            "--body",
+            "Prose",
+            "--tag",
+            "epic",
+            "--untag",
+            "idea",
+            "--from",
+            "task.hub",
+            "--priority",
+            "1",
+            "--review-by",
+            "2026-09-01",
+        ],
+        vec!["anb", "search", "parser", "--all"],
+        vec!["anb", "overview"],
     ] {
         assert!(Cli::try_parse_from(&line).is_ok(), "must parse: {line:?}");
     }
@@ -1133,4 +1156,436 @@ fn the_command_vocabulary_parses() {
             .command,
         Command::Status { hook: true, .. }
     ));
+}
+
+mod maintenance_replies {
+    use super::*;
+
+    fn closed_task(id: &str) -> (String, String) {
+        (
+            format!("tasks/{id}.md"),
+            record_file(id, "task", "closed", "A demo record", &[], ""),
+        )
+    }
+
+    #[test]
+    fn a_clean_check_answers_count_zero() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(ok(&mut storage, &["check"]), @"count: 0");
+    }
+
+    #[test]
+    fn check_names_file_line_severity_code_and_reason() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "cancelled", "A demo record", &[], ""),
+        )]);
+        assert_snapshot!(
+            ok(&mut storage, &["check"]),
+            @r#"
+        count: 1
+        findings[1]{file,line,severity,code,message}:
+          tasks/task.demo.md,4,error,bad-value,"state: `cancelled` is not one of open, active, review, closed for a task"
+        "#
+        );
+    }
+
+    #[test]
+    fn a_check_with_error_findings_is_a_failing_exit() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "cancelled", "A demo record", &[], ""),
+        )]);
+        let cli = Cli::try_parse_from(["anb", "check"]).unwrap();
+        let reply = execute(cli.command, &mut storage, || None, TODAY).unwrap();
+        assert!(reply.failed(), "error findings must gate a caller like CI");
+    }
+
+    #[test]
+    fn a_warning_only_check_is_a_passing_exit() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file(
+                "task.demo",
+                "task",
+                "open",
+                "A demo record",
+                &["custom: kept"],
+                "",
+            ),
+        )]);
+        let cli = Cli::try_parse_from(["anb", "check"]).unwrap();
+        let reply = execute(cli.command, &mut storage, || None, TODAY).unwrap();
+        assert!(!reply.failed(), "warnings keep the record usable");
+    }
+
+    #[test]
+    fn archive_answers_the_move() {
+        let mut storage = storage_with(&[closed_task("task.demo")]);
+        assert_snapshot!(
+            ok(&mut storage, &["archive", "task.demo"]),
+            @"ok: archive task.demo — tasks/task.demo.md→archive/tasks/task.demo.md"
+        );
+    }
+
+    #[test]
+    fn a_replayed_archive_answers_already() {
+        let mut storage = storage_with(&[closed_task("task.demo")]);
+        ok(&mut storage, &["archive", "task.demo"]);
+        assert_snapshot!(
+            ok(&mut storage, &["archive", "task.demo"]),
+            @"ok: archive task.demo — archived (already)"
+        );
+    }
+
+    #[test]
+    fn archiving_a_live_task_names_the_settling_command() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "active", "A demo record", &[], ""),
+        )]);
+        assert_snapshot!(
+            refused(&mut storage, &["archive", "task.demo"]),
+            @r"
+        error[invalid-transition]: `task.demo` is active; valid: close
+        try: anb close task.demo --report <path>
+        "
+        );
+    }
+
+    #[test]
+    fn edit_answers_what_changed() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            ok(
+                &mut storage,
+                &["edit", "task.demo", "--title", "Sharper", "--tag", "epic"],
+            ),
+            @"ok: edit task.demo — title, tags"
+        );
+    }
+
+    #[test]
+    fn an_edit_changing_nothing_answers_already() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            ok(&mut storage, &["edit", "task.demo", "--title", "A demo record"]),
+            @"ok: edit task.demo — unchanged (already)"
+        );
+    }
+
+    #[test]
+    fn an_edited_body_carries_the_dangling_mention_nudge() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            ok(
+                &mut storage,
+                &["edit", "task.demo", "--body", "Blocked by task.ghost."],
+            ),
+            @r"
+        ok: edit task.demo — body
+        dangling-mention[1]: task.ghost — backtick to quote, or create the record
+        "
+        );
+    }
+
+    #[test]
+    fn an_edit_requesting_nothing_is_a_recovery_payload() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            refused(&mut storage, &["edit", "task.demo"]),
+            @r#"
+        error[invalid-argument]: edit: nothing to change — pass --title, --body, --tag, --untag, --from, --priority, or --review-by
+        try: anb edit task.demo --title "<title>"
+        "#
+        );
+    }
+
+    #[test]
+    fn a_file_the_adapter_cannot_read_renders_the_not_utf8_payload() {
+        use anb_core::{NotebookError, StorageError};
+        let subject = anb::cli::Subject {
+            verb: "view",
+            id: Some("task.demo".to_owned()),
+        };
+        let error = NotebookError::Storage(StorageError::NotUtf8 {
+            path: "tasks/task.demo.md".to_owned(),
+        });
+        assert_snapshot!(
+            text::render_error(&error, &subject),
+            @r"
+        error[not-utf8]: not UTF-8: tasks/task.demo.md
+        try: anb check
+        "
+        );
+    }
+}
+
+mod search_replies {
+    use super::*;
+
+    #[test]
+    fn matches_share_the_listing_shape() {
+        let mut storage = storage_with(&[
+            open_task("task.parser", "Grammar parser work", &[]),
+            (
+                "archive/tasks/task.spike.md".to_owned(),
+                record_file("task.spike", "task", "closed", "Parser spike", &[], ""),
+            ),
+        ]);
+        assert_snapshot!(
+            ok(&mut storage, &["search", "parser"]),
+            @r"
+        count: 2
+        matches[2]{id,state,priority,title}:
+          task.parser,open,-,Grammar parser work
+          task.spike,closed,-,Parser spike
+        "
+        );
+    }
+
+    #[test]
+    fn the_truncation_hint_carries_the_query_as_one_shell_word() {
+        let mut storage = many_open_tasks(22);
+        assert_snapshot!(
+            ok(&mut storage, &["search", "demo record"]).lines().last().unwrap(),
+            @r"  … 2 more: anb search 'demo record' --all"
+        );
+    }
+
+    #[test]
+    fn a_match_of_nothing_answers_count_zero() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(ok(&mut storage, &["search", "zeppelin"]), @"count: 0");
+    }
+}
+
+mod overview_reply {
+    use super::*;
+
+    #[test]
+    fn the_page_groups_types_and_counts_the_archive() {
+        let mut storage = storage_with(&[
+            open_task("task.a", "A demo record", &[]),
+            (
+                "decisions/decision.d.md".to_owned(),
+                record_file("decision.d", "decision", "active", "A ruling", &[], ""),
+            ),
+            (
+                "archive/tasks/task.done.md".to_owned(),
+                record_file("task.done", "task", "closed", "Shipped", &[], ""),
+            ),
+        ]);
+        assert_snapshot!(
+            ok(&mut storage, &["overview"]),
+            @r"
+        notebook: 1 tasks, 1 decisions, 0 notes, 0 questions
+        tasks[1]{id,state,priority,title}:
+          task.a,open,-,A demo record
+        decisions[1]{id,state,priority,title}:
+          decision.d,active,-,A ruling
+        archive: 1 tasks, 0 decisions, 0 notes, 0 questions
+        "
+        );
+    }
+
+    #[test]
+    fn a_notebook_with_no_archive_shows_no_archive_line() {
+        let mut storage = storage_with(&[open_task("task.a", "A demo record", &[])]);
+        assert_snapshot!(
+            ok(&mut storage, &["overview"]),
+            @r"
+        notebook: 1 tasks, 0 decisions, 0 notes, 0 questions
+        tasks[1]{id,state,priority,title}:
+          task.a,open,-,A demo record
+        "
+        );
+    }
+}
+
+mod unknown_verbs {
+    use super::*;
+
+    #[test]
+    fn a_near_miss_verb_answers_the_recovery_payload_with_the_nearest_command() {
+        let Err(error) = Cli::try_parse_from(["anb", "archiv"]) else {
+            panic!("an unknown verb must not parse");
+        };
+        let recovery =
+            anb::cli::unknown_command_recovery(&error).expect("an unknown verb joins the catalog");
+        assert_snapshot!(
+            text::render_recovery(&recovery),
+            @r"
+        error[unknown-command]: `archiv` is not an anb command
+        try: anb search --help
+        try: anb archive --help
+        try: anb --help
+        "
+        );
+    }
+
+    #[test]
+    fn a_verb_near_nothing_still_points_at_help() {
+        let Err(error) = Cli::try_parse_from(["anb", "zzz"]) else {
+            panic!("an unknown verb must not parse");
+        };
+        let recovery = anb::cli::unknown_command_recovery(&error).unwrap();
+        assert_snapshot!(
+            text::render_recovery(&recovery),
+            @r"
+        error[unknown-command]: `zzz` is not an anb command
+        try: anb --help
+        "
+        );
+    }
+
+    #[test]
+    fn help_stays_claps() {
+        let Err(help) = Cli::try_parse_from(["anb", "--help"]) else {
+            panic!("--help renders through clap's error path");
+        };
+        assert!(anb::cli::unknown_command_recovery(&help).is_none());
+    }
+
+    #[test]
+    fn a_missing_argument_stays_claps() {
+        let Err(missing_arg) = Cli::try_parse_from(["anb", "start"]) else {
+            panic!("a missing argument must not parse");
+        };
+        assert!(anb::cli::unknown_command_recovery(&missing_arg).is_none());
+    }
+}
+
+mod check_bounds {
+    use super::*;
+
+    fn many_broken_records(count: usize) -> MemoryStorage {
+        let files: Vec<(String, String)> = (0..count)
+            .map(|n| {
+                let id = format!("task.b{n:02}");
+                (
+                    format!("tasks/{id}.md"),
+                    record_file(&id, "task", "cancelled", "A demo record", &[], ""),
+                )
+            })
+            .collect();
+        storage_with(&files)
+    }
+
+    #[test]
+    fn the_findings_table_is_bounded_with_the_restore_hint() {
+        let mut storage = many_broken_records(22);
+        let out = ok(&mut storage, &["check"]);
+        assert!(out.starts_with("count: 22\nfindings[20]{"), "got: {out}");
+        assert_eq!(out.lines().last().unwrap(), "  … 2 more: anb check --all");
+    }
+
+    #[test]
+    fn all_lifts_the_bound() {
+        let mut storage = many_broken_records(22);
+        let out = ok(&mut storage, &["check", "--all"]);
+        assert!(out.contains("findings[22]{"), "got: {out}");
+        assert!(!out.contains('…'), "nothing was truncated: {out}");
+    }
+}
+
+mod json_maintenance_surface {
+    use super::*;
+
+    #[test]
+    fn check_carries_findings_with_the_line_omitted_when_absent() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "cancelled", "A demo record", &[], ""),
+        )]);
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["check", "--json"])).unwrap();
+        assert_eq!(value["count"], serde_json::json!(1));
+        let finding = &value["findings"][0];
+        assert_eq!(finding["file"], serde_json::json!("tasks/task.demo.md"));
+        assert_eq!(finding["line"], serde_json::json!(4));
+        assert_eq!(finding["severity"], serde_json::json!("error"));
+        assert_eq!(finding["code"], serde_json::json!("bad-value"));
+
+        let mut duplicated = storage_with(&[
+            (
+                "tasks/task.demo.md".to_owned(),
+                record_file("task.demo", "task", "open", "A demo record", &[], ""),
+            ),
+            (
+                "notes/note.twin.md".to_owned(),
+                record_file("task.demo", "note", "active", "A twin claim", &[], ""),
+            ),
+        ]);
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut duplicated, &["check", "--json"])).unwrap();
+        let whole_file = value["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|finding| finding["code"] == serde_json::json!("duplicate-id"))
+            .expect("two files claim one id");
+        assert!(
+            whole_file.get("line").is_none(),
+            "a whole-file finding carries no line: {whole_file}"
+        );
+    }
+
+    #[test]
+    fn archive_confirms_the_move() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "closed", "A demo record", &[], ""),
+        )]);
+        assert_eq!(
+            ok(&mut storage, &["archive", "task.demo", "--json"]),
+            r#"{"ok":"archive","id":"task.demo","from":"tasks/task.demo.md","to":"archive/tasks/task.demo.md","already":false}"#
+        );
+    }
+
+    #[test]
+    fn edit_names_what_changed_and_the_nudge() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &[
+                    "edit",
+                    "task.demo",
+                    "--title",
+                    "Sharper",
+                    "--body",
+                    "Blocked by task.ghost.",
+                    "--json",
+                ],
+            ),
+            r#"{"ok":"edit","id":"task.demo","changed":["title","body"],"already":false,"dangling-mention":["task.ghost"]}"#
+        );
+    }
+
+    #[test]
+    fn search_answers_matches() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_eq!(
+            ok(&mut storage, &["search", "demo", "--json"]),
+            r#"{"count":1,"matches":[{"id":"task.demo","state":"open","title":"A demo record"}]}"#
+        );
+    }
+
+    #[test]
+    fn overview_carries_the_tallies_and_the_sections() {
+        let mut storage = storage_with(&[
+            open_task("task.a", "A demo record", &[]),
+            (
+                "archive/tasks/task.done.md".to_owned(),
+                record_file("task.done", "task", "closed", "Shipped", &[], ""),
+            ),
+        ]);
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["overview", "--json"])).unwrap();
+        assert_eq!(value["live"]["tasks"], serde_json::json!(1));
+        assert_eq!(value["tasks"][0]["id"], serde_json::json!("task.a"));
+        assert_eq!(value["decisions"], serde_json::json!([]));
+        assert_eq!(value["archive"]["tasks"], serde_json::json!(1));
+    }
 }

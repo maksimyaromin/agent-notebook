@@ -11,11 +11,14 @@ use clap::Parser;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => return parse_refused(&error),
+    };
     match run(cli) {
-        Ok(output) => {
+        Ok((output, exit)) => {
             print!("{}", terminated(output));
-            ExitCode::SUCCESS
+            exit
         }
         Err(payload) => {
             eprint!("{}", terminated(payload));
@@ -24,8 +27,26 @@ fn main() -> ExitCode {
     }
 }
 
-/// `Ok` is stdout; `Err` is the rendered recovery payload for stderr.
-fn run(cli: Cli) -> Result<String, String> {
+/// An unknown verb joins the recovery-payload contract; everything else
+/// clap refuses (or serves, like `--help`) keeps clap's rendering.
+fn parse_refused(error: &clap::Error) -> ExitCode {
+    let Some(recovery) = anb::cli::unknown_command_recovery(error) else {
+        error.exit();
+    };
+    // The command line failed to parse, so the `--json` flag is read raw —
+    // over OS strings, since an argument may not be UTF-8 at all.
+    let payload = if std::env::args_os().any(|arg| arg == "--json") {
+        json::render_recovery(&recovery)
+    } else {
+        text::render_recovery(&recovery)
+    };
+    eprint!("{}", terminated(payload));
+    ExitCode::FAILURE
+}
+
+/// `Ok` is stdout with the reply's exit; `Err` is the rendered recovery
+/// payload for stderr.
+fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     let subject = anb::cli::subject(&cli.command);
     let hook = matches!(cli.command, Command::Status { hook: true, .. });
     let render_failure = |error: &NotebookError| {
@@ -40,7 +61,7 @@ fn run(cli: Cli) -> Result<String, String> {
         Ok(cwd) => cwd,
         // The hook's fail-soft covers the whole invocation, this wiring
         // included.
-        Err(_) if hook => return Ok(String::new()),
+        Err(_) if hook => return Ok((String::new(), ExitCode::SUCCESS)),
         Err(error) => {
             return Err(render_failure(&NotebookError::Storage(StorageError::Io {
                 path: ".".to_owned(),
@@ -52,11 +73,19 @@ fn run(cli: Cli) -> Result<String, String> {
     let today = jiff::Zoned::now().date().to_string();
 
     match execute(cli.command, &mut storage, git_user_name, &today) {
-        Ok(reply) => Ok(if cli.json {
-            json::render(&reply)
-        } else {
-            text::render(&reply, &today)
-        }),
+        Ok(reply) => {
+            let exit = if reply.failed() {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            };
+            let output = if cli.json {
+                json::render(&reply)
+            } else {
+                text::render(&reply, &today)
+            };
+            Ok((output, exit))
+        }
         Err(error) => Err(render_failure(&error)),
     }
 }
