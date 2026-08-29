@@ -25,17 +25,21 @@ pub fn render(reply: &Reply) -> String {
                     Value::Array(created.may_conflict.iter().map(cited_value).collect()),
                 );
             }
+            insert_dangling_mentions(&mut object, &created.dangling_mentions);
             Value::Object(object)
         }
         Reply::Moved {
             command,
             transition,
         } => transition_value(command, transition),
-        Reply::Answered { transition, to } => {
+        Reply::Routed { transition, to } => {
             let mut object = transition_map("answer", transition);
-            if let Some(to) = to {
-                object.insert("routed-to".into(), json!(to));
-            }
+            object.insert("routed-to".into(), json!(to));
+            Value::Object(object)
+        }
+        Reply::Dropped(dropped) => {
+            let mut object = transition_map("answer", &dropped.transition);
+            insert_dangling_mentions(&mut object, &dropped.dangling_mentions);
             Value::Object(object)
         }
         Reply::Closed(closed) => {
@@ -58,12 +62,15 @@ pub fn render(reply: &Reply) -> String {
         Reply::Unblocked(edge) => {
             json!({"ok": "unblock", "id": edge.id, "on": edge.on, "already": edge.already})
         }
-        Reply::Commented(commented) => json!({
-            "ok": "comment",
-            "id": commented.id,
-            "entry": commented.entry,
-            "already": commented.already,
-        }),
+        Reply::Commented(commented) => {
+            let mut object = Map::new();
+            object.insert("ok".into(), json!("comment"));
+            object.insert("id".into(), json!(commented.id));
+            object.insert("entry".into(), json!(commented.entry));
+            object.insert("already".into(), json!(commented.already));
+            insert_dangling_mentions(&mut object, &commented.dangling_mentions);
+            Value::Object(object)
+        }
         Reply::Ready { rows, all } => json!({
             "count": rows.len(),
             "ready": rows[..shown(rows.len(), *all)]
@@ -139,6 +146,12 @@ fn held_map(command: &str, held: &Held) -> Map<String, Value> {
     object.insert("id".into(), json!(held.id));
     object.insert("already".into(), json!(held.already));
     object
+}
+
+fn insert_dangling_mentions(object: &mut Map<String, Value>, ids: &[String]) {
+    if !ids.is_empty() {
+        object.insert("dangling-mention".into(), json!(ids));
+    }
 }
 
 fn cited_value(cited: &Cited) -> Value {

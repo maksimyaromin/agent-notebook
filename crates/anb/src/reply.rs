@@ -4,7 +4,7 @@
 
 use crate::cli::{AddArgs, Command, DecideArgs, DraftArgs, NoteArgs};
 use anb_core::{
-    Budget, Closed, Commented, Created, Draft, Edged, Held, Link, ListedRecord, Notebook,
+    Budget, Closed, Commented, Created, Draft, Dropped, Edged, Held, Link, ListedRecord, Notebook,
     NotebookError, Proof, ReadyTask, RecordType, Status, Storage, Transitioned, View,
 };
 
@@ -30,11 +30,13 @@ pub enum Reply {
         command: &'static str,
         transition: Transitioned,
     },
-    /// A Question closed: routed into `to`, or dropped when there is none.
-    Answered {
+    /// A Question routed into what its answer became.
+    Routed {
         transition: Transitioned,
-        to: Option<String>,
+        to: String,
     },
+    /// A Question closed without routing, for its stated reason.
+    Dropped(Dropped),
     Closed(Closed),
     Held {
         held: Held,
@@ -183,14 +185,11 @@ fn answered<S: Storage>(
     today: &str,
 ) -> Result<Reply, NotebookError> {
     match chosen_routing(to, drop)? {
-        Routing::To(target) => Ok(Reply::Answered {
+        Routing::To(target) => Ok(Reply::Routed {
             transition: notebook.route(id, &target, today)?,
-            to: Some(target),
+            to: target,
         }),
-        Routing::Drop(reason) => Ok(Reply::Answered {
-            transition: notebook.drop_question(id, &reason, today)?,
-            to: None,
-        }),
+        Routing::Drop(reason) => Ok(Reply::Dropped(notebook.drop_question(id, &reason, today)?)),
     }
 }
 

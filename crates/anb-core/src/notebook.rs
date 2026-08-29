@@ -147,6 +147,7 @@ pub struct Created {
     pub path: String,
     pub superseded: Option<String>,
     pub may_conflict: Vec<Cited>,
+    pub dangling_mentions: Vec<String>,
 }
 
 /// A log entry appended; `already` marks the replay of the trail's tail.
@@ -155,6 +156,15 @@ pub struct Commented {
     pub id: String,
     pub entry: String,
     pub already: bool,
+    pub dangling_mentions: Vec<String>,
+}
+
+/// A Question dropped; the replay of an already-dropped one carries no
+/// mention nudge, since its reason wrote nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Dropped {
+    pub transition: Transitioned,
+    pub dangling_mentions: Vec<String>,
 }
 
 /// One row of the live listing; the id carries the type.
@@ -516,11 +526,14 @@ impl<'a, S: Storage> Notebook<'a, S> {
             self.flip_victim(victim, &id, today)?;
         }
 
+        // Probed after the write, so a body citing its own record resolves.
+        let dangling_mentions = self.dangling_mentions(&draft.body)?;
         Ok(Created {
             id,
             path,
             superseded: draft.supersedes.clone(),
             may_conflict,
+            dangling_mentions,
         })
     }
 
@@ -714,11 +727,15 @@ impl<'a, S: Storage> Notebook<'a, S> {
 
         let entry = format!("- {today} {}: {text}", author.unwrap_or("-"));
         let loaded = self.load_live(id, &[RecordType::Task])?;
+        // A replay carries the nudge too: the entry is the trail's tail, so
+        // its citations stand in the body either way.
+        let dangling_mentions = self.dangling_mentions(text)?;
         if last_log_line(&loaded.record).as_deref() == Some(entry.as_str()) {
             return Ok(Commented {
                 id: id.to_owned(),
                 entry,
                 already: true,
+                dangling_mentions,
             });
         }
         let mut file = loaded.record.into_file();
@@ -729,6 +746,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
             id: id.to_owned(),
             entry,
             already: false,
+            dangling_mentions,
         })
     }
 
@@ -862,7 +880,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         id: &str,
         reason: &str,
         today: &str,
-    ) -> Result<Transitioned, NotebookError> {
+    ) -> Result<Dropped, NotebookError> {
         guard_today(today)?;
         let reason = reason.trim();
         guard_single_line("drop reason", reason)?;
@@ -875,7 +893,10 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let loaded = self.load_live(id, &[RecordType::Question])?;
         let state = loaded.state_word();
         if state == "dropped" {
-            return Ok(replayed(id, "dropped"));
+            return Ok(Dropped {
+                transition: replayed(id, "dropped"),
+                dangling_mentions: Vec::new(),
+            });
         }
         if state != "open" {
             return Err(settled_question(id, state));
@@ -885,11 +906,14 @@ impl<'a, S: Storage> Notebook<'a, S> {
         file.set_field("updated", today);
         file.append_body(&format!("Dropped {today}: {reason}"));
         self.storage.write(&loaded.path, &file.render())?;
-        Ok(Transitioned {
-            id: id.to_owned(),
-            from: "open",
-            to: "dropped",
-            already: false,
+        Ok(Dropped {
+            transition: Transitioned {
+                id: id.to_owned(),
+                from: "open",
+                to: "dropped",
+                already: false,
+            },
+            dangling_mentions: self.dangling_mentions(reason)?,
         })
     }
 
@@ -1067,6 +1091,20 @@ impl<'a, S: Storage> Notebook<'a, S> {
             }
         }
         Ok(errors)
+    }
+
+    /// The write-time half of the quotation rule: the bare ids `text` cites
+    /// that resolve to no record, live or archived. A nudge for the reply,
+    /// never a gate — a forward reference is legal and the text lands as
+    /// given.
+    fn dangling_mentions(&self, text: &str) -> Result<Vec<String>, NotebookError> {
+        let mut dangling = Vec::new();
+        for target in mention::mentions(text) {
+            if self.holder_path(target)?.is_none() {
+                dangling.push(target.to_owned());
+            }
+        }
+        Ok(dangling)
     }
 
     fn guard_ref_exists(&self, field: &'static str, target: &str) -> Result<(), NotebookError> {

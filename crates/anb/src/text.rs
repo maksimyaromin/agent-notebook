@@ -14,57 +14,22 @@ use std::fmt::Write as _;
 #[must_use]
 pub fn render(reply: &Reply, today: &str) -> String {
     match reply {
-        Reply::Created { command, created } => {
-            let mut out = format!("ok: {command} {} — {}\n", created.id, created.path);
-            if let Some(victim) = &created.superseded {
-                let _ = writeln!(out, "superseded: {victim}");
-            }
-            if !created.may_conflict.is_empty() {
-                let named: Vec<String> = created
-                    .may_conflict
-                    .iter()
-                    .map(|cited| format!("{} ({})", cited.id, cited.author()))
-                    .collect();
-                let _ = writeln!(
-                    out,
-                    "may-conflict[{}]: {}",
-                    created.may_conflict.len(),
-                    named.join(", ")
-                );
-            }
-            out
-        }
+        Reply::Created { command, created } => created_lines(command, created),
         Reply::Moved {
             command,
             transition,
         } => transition_line(command, transition),
-        Reply::Answered { transition, to } => {
+        Reply::Routed { transition, to } => {
             let mut out = transition_line("answer", transition);
-            if let Some(to) = to {
-                let _ = writeln!(out, "routed-to: {to}");
-            }
+            let _ = writeln!(out, "routed-to: {to}");
             out
         }
-        Reply::Closed(closed) => {
-            let mut out = transition_line("close", &closed.transition);
-            if !closed.unblocked.is_empty() {
-                let _ = writeln!(
-                    out,
-                    "unblocked[{}]: {}",
-                    closed.unblocked.len(),
-                    closed.unblocked.join(", ")
-                );
-            }
-            if !closed.open_questions.is_empty() {
-                let _ = writeln!(
-                    out,
-                    "open-questions[{}]: {}",
-                    closed.open_questions.len(),
-                    closed.open_questions.join(", ")
-                );
-            }
+        Reply::Dropped(dropped) => {
+            let mut out = transition_line("answer", &dropped.transition);
+            dangling_mention_line(&mut out, &dropped.dangling_mentions);
             out
         }
+        Reply::Closed(closed) => closed_lines(closed),
         Reply::Held { held, until } => {
             let outcome = match until {
                 Some(until) => format!("held until {until}"),
@@ -93,11 +58,7 @@ pub fn render(reply: &Reply, today: &str) -> String {
             edge.on,
             already_mark(edge.already)
         ),
-        Reply::Commented(commented) => format!(
-            "ok: comment {} — logged{}\n",
-            commented.id,
-            already_mark(commented.already)
-        ),
+        Reply::Commented(commented) => commented_lines(commented),
         Reply::Ready { rows, all } => ready_table(rows, shown(rows.len(), *all), today),
         Reply::Listing { rows, all } => listing_table(rows, shown(rows.len(), *all)),
         Reply::Viewed(view) => single_record(view),
@@ -242,6 +203,72 @@ fn finding_line(finding: &Finding) -> String {
 
 fn already_mark(already: bool) -> &'static str {
     if already { " (already)" } else { "" }
+}
+
+fn created_lines(command: &str, created: &anb_core::Created) -> String {
+    let mut out = format!("ok: {command} {} — {}\n", created.id, created.path);
+    if let Some(victim) = &created.superseded {
+        let _ = writeln!(out, "superseded: {victim}");
+    }
+    if !created.may_conflict.is_empty() {
+        let named: Vec<String> = created
+            .may_conflict
+            .iter()
+            .map(|cited| format!("{} ({})", cited.id, cited.author()))
+            .collect();
+        let _ = writeln!(
+            out,
+            "may-conflict[{}]: {}",
+            created.may_conflict.len(),
+            named.join(", ")
+        );
+    }
+    dangling_mention_line(&mut out, &created.dangling_mentions);
+    out
+}
+
+fn commented_lines(commented: &anb_core::Commented) -> String {
+    let mut out = format!(
+        "ok: comment {} — logged{}\n",
+        commented.id,
+        already_mark(commented.already)
+    );
+    dangling_mention_line(&mut out, &commented.dangling_mentions);
+    out
+}
+
+fn closed_lines(closed: &anb_core::Closed) -> String {
+    let mut out = transition_line("close", &closed.transition);
+    if !closed.unblocked.is_empty() {
+        let _ = writeln!(
+            out,
+            "unblocked[{}]: {}",
+            closed.unblocked.len(),
+            closed.unblocked.join(", ")
+        );
+    }
+    if !closed.open_questions.is_empty() {
+        let _ = writeln!(
+            out,
+            "open-questions[{}]: {}",
+            closed.open_questions.len(),
+            closed.open_questions.join(", ")
+        );
+    }
+    out
+}
+
+/// The quotation rule's write-time nudge.
+fn dangling_mention_line(out: &mut String, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "dangling-mention[{}]: {} — backtick to quote, or create the record",
+        ids.len(),
+        ids.join(", ")
+    );
 }
 
 /// A move as `from→to`; a replay names the standing state instead of a
