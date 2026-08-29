@@ -15,7 +15,7 @@
 //! corrupted edge never freezes its own repair.
 
 use crate::config::{CONFIG_PATH, Config};
-use crate::debt::{self, DebtSources};
+use crate::debt::{self, Cited, DebtSources};
 use crate::finding::{Finding, FindingCode, Severity};
 use crate::grammar::{self, RecordFile};
 use crate::graph::{TaskGraph, TaskNode};
@@ -23,7 +23,7 @@ use crate::mention;
 use crate::record::{Record, RecordType, TaskAction, TaskState, Transition};
 use crate::status::{self, ActiveTask, Budget, Counts, Status, StatusInputs, StatusRule};
 use crate::storage::{Storage, StorageError};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The envelope keys whose values point at other records.
 pub(crate) const REF_KEYS: [&str; 5] = [
@@ -139,12 +139,14 @@ pub struct ReadyTask {
     pub title: String,
 }
 
-/// A record created, with the victim its supersession flipped, if any.
+/// A record created, with the computed consequences its reply must not
+/// bury.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Created {
     pub id: String,
     pub path: String,
     pub superseded: Option<String>,
+    pub may_conflict: Vec<Cited>,
 }
 
 /// A log entry appended; `already` marks the replay of the trail's tail.
@@ -485,7 +487,9 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// A draft declaring `supersedes` performs the whole supersession: the
     /// new record is written first, then the victim gains the back-pointer
     /// and flips to its superseded state — a rule recorded as replaced can
-    /// never be read as live.
+    /// never be read as live. A Decision declaring none is answered with
+    /// the standing Decisions it may conflict with — a nudge in the reply,
+    /// never a block.
     ///
     /// # Errors
     /// [`NotebookError::InvalidArgument`] on a malformed draft,
@@ -501,24 +505,39 @@ impl<'a, S: Storage> Notebook<'a, S> {
         }
         let victim = self.guard_supersession(draft)?;
 
-        let id = self.resolve_draft_id(draft)?;
+        let records = self.read_records()?;
+        let id = resolve_draft_id(draft, &id_claims(&records))?;
+        let may_conflict = conflict_candidates(draft, &records);
         let path = record_path(&id, draft.record_type, false);
         self.storage
             .write(&path, &render_draft(draft, &id, today))?;
 
         if let Some(victim) = victim {
-            let mut file = victim.record.into_file();
-            file.set_field("superseded-by", &id);
-            file.set_field("state", victim.dead_state);
-            file.set_field("updated", today);
-            self.storage.write(&victim.path, &file.render())?;
+            self.flip_victim(victim, &id, today)?;
         }
 
         Ok(Created {
             id,
             path,
             superseded: draft.supersedes.clone(),
+            may_conflict,
         })
+    }
+
+    /// The victim's half of a supersession: the back-pointer and the flip
+    /// to its dead state.
+    fn flip_victim(
+        &mut self,
+        victim: Victim,
+        superseder: &str,
+        today: &str,
+    ) -> Result<(), NotebookError> {
+        let mut file = victim.record.into_file();
+        file.set_field("superseded-by", superseder);
+        file.set_field("state", victim.dead_state);
+        file.set_field("updated", today);
+        self.storage.write(&victim.path, &file.render())?;
+        Ok(())
     }
 
     /// `open → active`.
@@ -1120,79 +1139,6 @@ impl<'a, S: Storage> Notebook<'a, S> {
         }))
     }
 
-    /// The draft's id: the caller's, validated and free, or one minted from
-    /// the title — retried with a two-character suffix on collision, since
-    /// ids are never reused.
-    fn resolve_draft_id(&self, draft: &Draft) -> Result<String, NotebookError> {
-        let claims = self.id_claims()?;
-        if let Some(id) = &draft.id {
-            if let Some(why) = grammar::id_error(id) {
-                return Err(NotebookError::InvalidArgument {
-                    reason: format!("id: {why}"),
-                });
-            }
-            let id_type = parsed_type(id)?;
-            if id_type != draft.record_type {
-                return Err(NotebookError::InvalidArgument {
-                    reason: format!(
-                        "id: `{id}` names a {}, the draft is a {}",
-                        id_type.word(),
-                        draft.record_type.word()
-                    ),
-                });
-            }
-            if let Some(holder) = claims.get(id.as_str()) {
-                return Err(NotebookError::DuplicateId {
-                    id: id.clone(),
-                    holder: holder.clone(),
-                });
-            }
-            return Ok(id.clone());
-        }
-
-        let slug = slugify(&draft.title);
-        if slug.is_empty() {
-            return Err(NotebookError::InvalidArgument {
-                reason: "title: yields an empty id — pass an explicit id".to_owned(),
-            });
-        }
-        let base = format!("{}.{slug}", draft.record_type.word());
-        if !claims.contains_key(&base) {
-            return Ok(base);
-        }
-        for attempt in 0..1296 {
-            let candidate = format!(
-                "{base}-{}",
-                base36_pair(fnv1a(&draft.title).wrapping_add(attempt))
-            );
-            if !claims.contains_key(&candidate) {
-                return Ok(candidate);
-            }
-        }
-        Err(NotebookError::InvalidArgument {
-            reason: format!("id: no free id near `{base}`"),
-        })
-    }
-
-    /// Every id claimed anywhere, mapped to its claimant: by filename, and
-    /// by the `id` field of a misnamed file — write-side uniqueness cannot
-    /// trust the convention whose violation is the very finding it guards
-    /// against.
-    fn id_claims(&self) -> Result<BTreeMap<String, String>, NotebookError> {
-        let mut claims = BTreeMap::new();
-        for record in self.read_records()? {
-            claims
-                .entry(path_stem(record.path()).to_owned())
-                .or_insert_with(|| record.path().to_owned());
-            if let Some(id) = record.id() {
-                claims
-                    .entry(id.to_owned())
-                    .or_insert_with(|| record.path().to_owned());
-            }
-        }
-        Ok(claims)
-    }
-
     /// Where `id` lives, if anywhere: its live path, else its archive path.
     fn holder_path(&self, id: &str) -> Result<Option<String>, NotebookError> {
         let Some(record_type) = id
@@ -1270,6 +1216,124 @@ fn settled_question(id: &str, state: &str) -> NotebookError {
         state: state.to_owned(),
         valid: Vec::new(),
     }
+}
+
+/// The draft's id: the caller's, validated and free, or one minted from
+/// the title — retried with a two-character suffix on collision, since
+/// ids are never reused.
+fn resolve_draft_id(
+    draft: &Draft,
+    claims: &BTreeMap<String, String>,
+) -> Result<String, NotebookError> {
+    if let Some(id) = &draft.id {
+        if let Some(why) = grammar::id_error(id) {
+            return Err(NotebookError::InvalidArgument {
+                reason: format!("id: {why}"),
+            });
+        }
+        let id_type = parsed_type(id)?;
+        if id_type != draft.record_type {
+            return Err(NotebookError::InvalidArgument {
+                reason: format!(
+                    "id: `{id}` names a {}, the draft is a {}",
+                    id_type.word(),
+                    draft.record_type.word()
+                ),
+            });
+        }
+        if let Some(holder) = claims.get(id.as_str()) {
+            return Err(NotebookError::DuplicateId {
+                id: id.clone(),
+                holder: holder.clone(),
+            });
+        }
+        return Ok(id.clone());
+    }
+
+    let slug = slugify(&draft.title);
+    if slug.is_empty() {
+        return Err(NotebookError::InvalidArgument {
+            reason: "title: yields an empty id — pass an explicit id".to_owned(),
+        });
+    }
+    let base = format!("{}.{slug}", draft.record_type.word());
+    if !claims.contains_key(&base) {
+        return Ok(base);
+    }
+    for attempt in 0..1296 {
+        let candidate = format!(
+            "{base}-{}",
+            base36_pair(fnv1a(&draft.title).wrapping_add(attempt))
+        );
+        if !claims.contains_key(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(NotebookError::InvalidArgument {
+        reason: format!("id: no free id near `{base}`"),
+    })
+}
+
+/// Every id claimed anywhere, mapped to its claimant: by filename, and
+/// by the `id` field of a misnamed file — write-side uniqueness cannot
+/// trust the convention whose violation is the very finding it guards
+/// against.
+fn id_claims(records: &[Record]) -> BTreeMap<String, String> {
+    let mut claims = BTreeMap::new();
+    for record in records {
+        claims
+            .entry(path_stem(record.path()).to_owned())
+            .or_insert_with(|| record.path().to_owned());
+        if let Some(id) = record.id() {
+            claims
+                .entry(id.to_owned())
+                .or_insert_with(|| record.path().to_owned());
+        }
+    }
+    claims
+}
+
+/// The standing Decisions a draft may conflict with. Computed at write
+/// time because the writing agent, holding full context, is the cheapest
+/// judge that will ever see the pair; the tool prints it and stops.
+fn conflict_candidates(draft: &Draft, records: &[Record]) -> Vec<Cited> {
+    if draft.record_type != RecordType::Decision || draft.supersedes.is_some() {
+        return Vec::new();
+    }
+    let resolvable = resolvable_by_id(records);
+    let draft_tags: BTreeSet<&str> = draft.tags.iter().map(String::as_str).collect();
+    let cited_ids = mention::mentions(&draft.body);
+    let mut hits: Vec<&Record> = records
+        .iter()
+        .filter(|record| {
+            is_standing_decision(record, &resolvable)
+                && looks_related(record, &draft_tags, &cited_ids)
+        })
+        .collect();
+    hits.sort_by(|left, right| oldest_first(left, right));
+    hits.into_iter().map(Cited::of).collect()
+}
+
+fn is_standing_decision(record: &Record, resolvable: &BTreeMap<&str, &Record>) -> bool {
+    record.record_type() == Some(RecordType::Decision)
+        && !is_archived(record.path())
+        && record.is_live()
+        && !debt::is_excluded(record, resolvable)
+}
+
+fn looks_related(record: &Record, draft_tags: &BTreeSet<&str>, cited_ids: &[&str]) -> bool {
+    shared_tag_count(record, draft_tags) >= 2 || cited_ids.contains(&path_stem(record.path()))
+}
+
+fn shared_tag_count(record: &Record, draft_tags: &BTreeSet<&str>) -> usize {
+    let Some(tags) = record.file().field("tags") else {
+        return 0;
+    };
+    tags.split(',')
+        .map(str::trim)
+        .collect::<BTreeSet<&str>>()
+        .intersection(draft_tags)
+        .count()
 }
 
 /// A proof is a link value: one non-empty line, or an explicit waiver.
@@ -1593,26 +1657,30 @@ fn touched(record: &Record) -> &str {
         .unwrap_or_default()
 }
 
+fn created(record: &Record) -> &str {
+    record.file().field("created").unwrap_or_default()
+}
+
+/// The order records were laid down: `created`, then id.
+fn oldest_first(left: &Record, right: &Record) -> std::cmp::Ordering {
+    created(left)
+        .cmp(created(right))
+        .then_with(|| path_stem(left.path()).cmp(path_stem(right.path())))
+}
+
 /// The standing rules: live Decisions of kind `rule`, oldest first —
 /// the order they were laid down.
 fn standing_rules(live_valid: &[&Record]) -> Vec<StatusRule> {
-    fn created(record: &Record) -> &str {
-        record.file().field("created").unwrap_or_default()
-    }
     let mut rules: Vec<&Record> = live_valid
         .iter()
         .copied()
         .filter(|record| {
             record.record_type() == Some(RecordType::Decision)
-                && record.state() == Some("active")
+                && record.is_live()
                 && record.file().field("kind") == Some("rule")
         })
         .collect();
-    rules.sort_by(|left, right| {
-        created(left)
-            .cmp(created(right))
-            .then_with(|| path_stem(left.path()).cmp(path_stem(right.path())))
-    });
+    rules.sort_by(|left, right| oldest_first(left, right));
     rules
         .iter()
         .map(|record| StatusRule {

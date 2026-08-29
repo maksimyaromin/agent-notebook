@@ -1828,6 +1828,244 @@ mod creation {
     }
 }
 
+mod conflict_nudge {
+    use super::*;
+    use anb_core::Cited;
+
+    fn decision_draft(tags: &[&str]) -> Draft {
+        let mut draft = Draft::new(RecordType::Decision, "A second ruling");
+        draft.tags = tags.iter().map(|tag| (*tag).to_owned()).collect();
+        draft
+    }
+
+    fn standing_decision(extra_lines: &[&str]) -> (&'static str, String) {
+        (
+            "decisions/decision.first.md",
+            record_file("decision.first", "decision", "active", extra_lines, ""),
+        )
+    }
+
+    #[test]
+    fn a_decision_sharing_two_tags_with_the_draft_is_named_with_its_authors() {
+        let (path, text) =
+            standing_decision(&["by: supolka", "via: claude-code", "tags: parser, grammar"]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let created = Notebook::new(&mut storage)
+            .create(&decision_draft(&["grammar", "cli", "parser"]), TODAY)
+            .unwrap();
+        assert_eq!(
+            created.may_conflict,
+            vec![Cited {
+                id: "decision.first".to_owned(),
+                by: Some("supolka".to_owned()),
+                via: Some("claude-code".to_owned()),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_decision_cited_in_the_draft_body_is_named() {
+        let (path, text) = standing_decision(&[]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let mut draft = decision_draft(&[]);
+        draft.body = "Refines decision.first for fenced blocks.".to_owned();
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.may_conflict.len(), 1);
+        assert_eq!(created.may_conflict[0].id, "decision.first");
+    }
+
+    #[test]
+    fn one_shared_tag_is_not_a_conflict_hint() {
+        let (path, text) = standing_decision(&["tags: parser, grammar"]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let created = Notebook::new(&mut storage)
+            .create(&decision_draft(&["parser", "cli"]), TODAY)
+            .unwrap();
+        assert_eq!(created.may_conflict, vec![]);
+    }
+
+    #[test]
+    fn two_copies_of_one_tag_are_one_shared_tag() {
+        let (path, text) = standing_decision(&["tags: parser, grammar"]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let created = Notebook::new(&mut storage)
+            .create(&decision_draft(&["parser", "parser"]), TODAY)
+            .unwrap();
+        assert_eq!(created.may_conflict, vec![]);
+    }
+
+    #[test]
+    fn a_tag_repeated_in_the_standing_list_counts_once() {
+        let (path, text) = standing_decision(&["tags: parser, parser"]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let created = Notebook::new(&mut storage)
+            .create(&decision_draft(&["parser"]), TODAY)
+            .unwrap();
+        assert_eq!(created.may_conflict, vec![]);
+    }
+
+    #[test]
+    fn a_declared_supersession_carries_no_nudge() {
+        let (path, text) = standing_decision(&["tags: parser, grammar"]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let mut draft = decision_draft(&["parser", "grammar"]);
+        draft.supersedes = Some("decision.first".to_owned());
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.superseded, Some("decision.first".to_owned()));
+        assert_eq!(created.may_conflict, vec![]);
+    }
+
+    #[test]
+    fn only_a_live_decision_is_named() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.retired.md",
+                &record_file(
+                    "decision.retired",
+                    "decision",
+                    "retired",
+                    &["tags: parser, grammar"],
+                    "",
+                ),
+            ),
+            (
+                "archive/decisions/decision.archived.md",
+                &record_file(
+                    "decision.archived",
+                    "decision",
+                    "active",
+                    &["tags: parser, grammar"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.live.md",
+                &record_file(
+                    "decision.live",
+                    "decision",
+                    "active",
+                    &["tags: parser, grammar"],
+                    "",
+                ),
+            ),
+        ]);
+        let created = Notebook::new(&mut storage)
+            .create(&decision_draft(&["parser", "grammar"]), TODAY)
+            .unwrap();
+        assert_eq!(created.may_conflict.len(), 1);
+        assert_eq!(created.may_conflict[0].id, "decision.live");
+    }
+
+    #[test]
+    fn a_decision_excluded_from_derived_queries_is_not_named() {
+        let (path, text) =
+            standing_decision(&["from: task.never-written", "tags: parser, grammar"]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let created = Notebook::new(&mut storage)
+            .create(&decision_draft(&["parser", "grammar"]), TODAY)
+            .unwrap();
+        assert_eq!(created.may_conflict, vec![]);
+    }
+
+    #[test]
+    fn a_note_draft_is_never_nudged() {
+        let (path, text) = standing_decision(&["tags: parser, grammar"]);
+        let mut storage = storage_with(&[(path, &text)]);
+        let mut draft = Draft::new(RecordType::Note, "A fact beside the rulings");
+        draft.kind = Some("fact".to_owned());
+        draft.tags = vec!["parser".to_owned(), "grammar".to_owned()];
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.may_conflict, vec![]);
+    }
+
+    #[test]
+    fn only_decisions_are_candidates() {
+        let mut storage = storage_with(&[(
+            "notes/note.first.md",
+            &record_file(
+                "note.first",
+                "note",
+                "active",
+                &["tags: parser, grammar"],
+                "",
+            ),
+        )]);
+        let mut draft = decision_draft(&["parser", "grammar"]);
+        draft.body = "See note.first.".to_owned();
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        assert_eq!(created.may_conflict, vec![]);
+    }
+
+    #[test]
+    fn candidates_arrive_oldest_first() {
+        let older = record_file(
+            "decision.z-old",
+            "decision",
+            "active",
+            &["tags: parser, grammar"],
+            "",
+        )
+        .replace("created: 2026-08-24", "created: 2026-08-20");
+        let mut storage = storage_with(&[
+            ("decisions/decision.z-old.md", &older),
+            (
+                "decisions/decision.a-new.md",
+                &record_file(
+                    "decision.a-new",
+                    "decision",
+                    "active",
+                    &["tags: parser, grammar"],
+                    "",
+                ),
+            ),
+        ]);
+        let created = Notebook::new(&mut storage)
+            .create(&decision_draft(&["parser", "grammar"]), TODAY)
+            .unwrap();
+        let named: Vec<&str> = created
+            .may_conflict
+            .iter()
+            .map(|cited| cited.id.as_str())
+            .collect();
+        assert_eq!(named, vec!["decision.z-old", "decision.a-new"]);
+    }
+
+    #[test]
+    fn candidates_laid_down_the_same_day_order_by_id() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.second.md",
+                &record_file(
+                    "decision.second",
+                    "decision",
+                    "active",
+                    &["tags: parser, grammar"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.first.md",
+                &record_file(
+                    "decision.first",
+                    "decision",
+                    "active",
+                    &["tags: parser, grammar"],
+                    "",
+                ),
+            ),
+        ]);
+        let created = Notebook::new(&mut storage)
+            .create(&decision_draft(&["parser", "grammar"]), TODAY)
+            .unwrap();
+        let named: Vec<&str> = created
+            .may_conflict
+            .iter()
+            .map(|cited| cited.id.as_str())
+            .collect();
+        assert_eq!(named, vec!["decision.first", "decision.second"]);
+    }
+}
+
 mod check {
     use super::*;
 

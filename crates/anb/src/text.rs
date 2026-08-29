@@ -14,10 +14,23 @@ use std::fmt::Write as _;
 #[must_use]
 pub fn render(reply: &Reply, today: &str) -> String {
     match reply {
-        Reply::Created(created) => {
-            let mut out = format!("ok: add {} — {}\n", created.id, created.path);
+        Reply::Created { command, created } => {
+            let mut out = format!("ok: {command} {} — {}\n", created.id, created.path);
             if let Some(victim) = &created.superseded {
                 let _ = writeln!(out, "superseded: {victim}");
+            }
+            if !created.may_conflict.is_empty() {
+                let named: Vec<String> = created
+                    .may_conflict
+                    .iter()
+                    .map(|cited| format!("{} ({})", cited.id, cited.author()))
+                    .collect();
+                let _ = writeln!(
+                    out,
+                    "may-conflict[{}]: {}",
+                    created.may_conflict.len(),
+                    named.join(", ")
+                );
             }
             out
         }
@@ -25,6 +38,13 @@ pub fn render(reply: &Reply, today: &str) -> String {
             command,
             transition,
         } => transition_line(command, transition),
+        Reply::Answered { transition, to } => {
+            let mut out = transition_line("answer", transition);
+            if let Some(to) = to {
+                let _ = writeln!(out, "routed-to: {to}");
+            }
+            out
+        }
         Reply::Closed(closed) => {
             let mut out = transition_line("close", &closed.transition);
             if !closed.unblocked.is_empty() {
@@ -175,18 +195,24 @@ impl Recovery {
     }
 }
 
-/// The retry a refused argument points at, keyed by the verb it refused.
+/// The retry a refused argument points at, keyed by the verb it refused;
+/// the create verbs carry no id and retry as a command shape.
 fn argument_retries(subject: &Subject) -> Vec<String> {
-    let Some(id) = &subject.id else {
-        return Vec::new();
-    };
-    match subject.verb {
-        "close" => vec![
+    match (subject.verb, &subject.id) {
+        ("close", Some(id)) => vec![
             format!("anb close {id} --pr <url>"),
             format!("anb close {id} --no-proof"),
         ],
-        "hold" => vec![format!("anb hold {id} --reason \"<why>\"")],
-        "comment" => vec![format!("anb comment {id} \"<one line>\"")],
+        ("hold", Some(id)) => vec![format!("anb hold {id} --reason \"<why>\"")],
+        ("comment", Some(id)) => vec![format!("anb comment {id} \"<one line>\"")],
+        ("answer", Some(id)) => vec![
+            format!("anb answer {id} --to <id>"),
+            format!("anb answer {id} --drop \"<why>\""),
+        ],
+        ("add", _) => vec!["anb add \"<title>\"".to_owned()],
+        ("decide", _) => vec!["anb decide \"<title>\" --kind rule".to_owned()],
+        ("note", _) => vec!["anb note \"<title>\" --kind fact".to_owned()],
+        ("ask", _) => vec!["anb ask \"<title>\"".to_owned()],
         _ => Vec::new(),
     }
 }

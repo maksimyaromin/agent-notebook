@@ -32,6 +32,14 @@ pub struct Cited {
 }
 
 impl Cited {
+    pub(crate) fn of(record: &Record) -> Cited {
+        Cited {
+            id: path_stem(record.path()).to_owned(),
+            by: record.file().field("by").map(str::to_owned),
+            via: record.file().field("via").map(str::to_owned),
+        }
+    }
+
     /// `by`, plus `/via` when an agent hand wrote it; no identity at all
     /// prints as `-` — the reader judges the pair, so a side is never blank.
     #[must_use]
@@ -248,10 +256,7 @@ fn collect_clock_signals(
     let Some(record_type) = record.record_type() else {
         return;
     };
-    if !record
-        .state()
-        .is_some_and(|state| record_type.live_states().contains(&state))
-    {
+    if !record.is_live() {
         return;
     }
     let id = path_stem(record.path()).to_owned();
@@ -372,9 +377,8 @@ fn collect_dangling_mentions(
 /// construction — a typed id in prose is a deliberate reference.
 fn undeclared_pairs(valid: &[&Record], resolvable: &BTreeMap<&str, &Record>) -> Vec<DebtSignal> {
     let mut found: Vec<(String, DebtSignal)> = Vec::new();
-    let live_decision = |record: &Record| {
-        record.record_type() == Some(RecordType::Decision) && record.state() == Some("active")
-    };
+    let live_decision =
+        |record: &Record| record.record_type() == Some(RecordType::Decision) && record.is_live();
     for record in valid.iter().copied().filter(|record| live_decision(record)) {
         let citer = path_stem(record.path());
         for target in mention::mentions(record.file().body()) {
@@ -397,8 +401,8 @@ fn undeclared_pairs(valid: &[&Record], resolvable: &BTreeMap<&str, &Record>) -> 
                 (*other, record)
             };
             let pair = DebtSignal::UndeclaredPair {
-                first: cited_from(first),
-                second: cited_from(second),
+                first: Cited::of(first),
+                second: Cited::of(second),
             };
             if !found.iter().any(|(_, existing)| *existing == pair) {
                 let older_created = [first, second]
@@ -435,14 +439,6 @@ fn declares_edge(record: &Record, target: &str) -> bool {
             .file()
             .field_values("link")
             .any(|link| link.split_whitespace().any(|word| word == target))
-}
-
-fn cited_from(record: &Record) -> Cited {
-    Cited {
-        id: path_stem(record.path()).to_owned(),
-        by: record.file().field("by").map(str::to_owned),
-        via: record.file().field("via").map(str::to_owned),
-    }
 }
 
 /// Days since the record was last touched: `updated`, else `created` — the

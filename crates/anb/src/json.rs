@@ -5,19 +5,25 @@
 use crate::cli::Subject;
 use crate::reply::{Reply, shown};
 use crate::text::Recovery;
-use anb_core::{DebtSignal, Held, ListedRecord, NotebookError, ReadyTask, Status, View};
+use anb_core::{Cited, DebtSignal, Held, ListedRecord, NotebookError, ReadyTask, Status, View};
 use serde_json::{Map, Value, json};
 
 #[must_use]
 pub fn render(reply: &Reply) -> String {
     let value = match reply {
-        Reply::Created(created) => {
+        Reply::Created { command, created } => {
             let mut object = Map::new();
-            object.insert("ok".into(), json!("add"));
+            object.insert("ok".into(), json!(command));
             object.insert("id".into(), json!(created.id));
             object.insert("path".into(), json!(created.path));
             if let Some(victim) = &created.superseded {
                 object.insert("superseded".into(), json!(victim));
+            }
+            if !created.may_conflict.is_empty() {
+                object.insert(
+                    "may-conflict".into(),
+                    Value::Array(created.may_conflict.iter().map(cited_value).collect()),
+                );
             }
             Value::Object(object)
         }
@@ -25,6 +31,13 @@ pub fn render(reply: &Reply) -> String {
             command,
             transition,
         } => transition_value(command, transition),
+        Reply::Answered { transition, to } => {
+            let mut object = transition_map("answer", transition);
+            if let Some(to) = to {
+                object.insert("routed-to".into(), json!(to));
+            }
+            Value::Object(object)
+        }
         Reply::Closed(closed) => {
             let mut object = transition_map("close", &closed.transition);
             object.insert("unblocked".into(), json!(closed.unblocked));
@@ -126,6 +139,18 @@ fn held_map(command: &str, held: &Held) -> Map<String, Value> {
     object.insert("id".into(), json!(held.id));
     object.insert("already".into(), json!(held.already));
     object
+}
+
+fn cited_value(cited: &Cited) -> Value {
+    let mut object = Map::new();
+    object.insert("id".into(), json!(cited.id));
+    if let Some(by) = &cited.by {
+        object.insert("by".into(), json!(by));
+    }
+    if let Some(via) = &cited.via {
+        object.insert("via".into(), json!(via));
+    }
+    Value::Object(object)
 }
 
 /// An absent field is omitted, in every row shape.
