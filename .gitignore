@@ -1,5 +1,4 @@
 .tmp/
 .claude/
-.tasks.toml
 /target/
 *.pending-snap
