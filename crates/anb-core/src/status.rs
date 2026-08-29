@@ -15,7 +15,7 @@
 //! it names the cut and carries the command that restores it.
 
 use crate::debt::DebtSignal;
-use crate::encode::json_quoted;
+use crate::encode::{self, json_quoted};
 use crate::notebook::{Epic, ReadyTask};
 use crate::tokens::estimate_tokens;
 use std::fmt::Write as _;
@@ -390,17 +390,11 @@ fn render_review(out: &mut String, review: &[String], ladder: Ladder) {
         let _ = writeln!(out, "review: {}", review.len());
         return;
     }
-    let shown = review.len().min(SECTION_ROWS);
-    let rest = if review.len() > shown {
-        format!(", \u{2026} {} more", review.len() - shown)
-    } else {
-        String::new()
-    };
     let _ = writeln!(
         out,
-        "review[{}]: {}{rest} — waiting on a human",
+        "review[{}]: {} — waiting on a human",
         review.len(),
-        review[..shown].join(", ")
+        encode::id_list(review, SECTION_ROWS)
     );
 }
 

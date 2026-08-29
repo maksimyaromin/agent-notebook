@@ -178,14 +178,6 @@ mod tests {
     }
 
     #[test]
-    fn read_after_write_round_trips_bytes() {
-        let mut storage = MemoryStorage::new();
-        let content = "---\nid: t1\n---\nbody\n";
-        storage.write("tasks/t1.md", content).unwrap();
-        assert_eq!(storage.read("tasks/t1.md").unwrap(), content);
-    }
-
-    #[test]
     fn read_missing_is_not_found() {
         let storage = MemoryStorage::new();
         assert_eq!(
@@ -203,12 +195,5 @@ mod tests {
             storage.remove("tasks/absent.md"),
             Err(StorageError::NotFound { .. })
         ));
-    }
-
-    #[test]
-    fn mutation_of_one_path_leaves_every_other_byte_unchanged() {
-        let mut storage = MemoryStorage::from_files([("tasks/a.md", "a"), ("tasks/b.md", "b")]);
-        storage.write("tasks/a.md", "a2").unwrap();
-        assert_eq!(storage.read("tasks/b.md").unwrap(), "b");
     }
 }

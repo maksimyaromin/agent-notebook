@@ -46,6 +46,7 @@ pub enum FindingCode {
     BrokenRouting,
     DanglingRef,
     DepCycle,
+    OriginCycle,
     DuplicateId,
     BrokenSupersession,
     NotUtf8,
@@ -72,6 +73,7 @@ impl FindingCode {
             | FindingCode::BrokenRouting
             | FindingCode::DanglingRef
             | FindingCode::DepCycle
+            | FindingCode::OriginCycle
             | FindingCode::DuplicateId
             | FindingCode::BrokenSupersession
             | FindingCode::NotUtf8 => Severity::Error,
@@ -104,6 +106,7 @@ impl FindingCode {
             FindingCode::BrokenRouting => "broken-routing",
             FindingCode::DanglingRef => "dangling-ref",
             FindingCode::DepCycle => "dep-cycle",
+            FindingCode::OriginCycle => "origin-cycle",
             FindingCode::DuplicateId => "duplicate-id",
             FindingCode::BrokenSupersession => "broken-supersession",
             FindingCode::NotUtf8 => "not-utf8",

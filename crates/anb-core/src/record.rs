@@ -489,8 +489,10 @@ fn check_hold_pairing(record_type: RecordType, file: &RecordFile, findings: &mut
 
 /// A dependency edge names what must close first, so it can only point at a
 /// Task — the self-describing id prefix lets one record judge that alone.
-/// A record waiting on itself is the one cycle a single file can carry;
-/// longer cycles are the notebook's to find.
+/// A Task waiting on itself is named here rather than with the longer
+/// cycles, so the mutation gate holds it: `unblock` runs over a finding on
+/// a `blocked-by` line, so the edge that freezes the record is also the
+/// one the record can still have erased.
 fn check_dependencies(record_type: RecordType, file: &RecordFile, findings: &mut Vec<Finding>) {
     if record_type != RecordType::Task {
         return;

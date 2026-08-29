@@ -6,6 +6,7 @@
 use crate::cli::Subject;
 use crate::json;
 use crate::reply::{Recovery, Reply, shown};
+use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
 use anb_core::{
     FileFinding, ListedRecord, NotebookError, Overview, ReadyTask, View, counts_phrase, encode,
@@ -137,19 +138,12 @@ fn created_lines(command: &str, created: &anb_core::Created) -> String {
     if let Some(victim) = &created.superseded {
         let _ = writeln!(out, "superseded: {victim}");
     }
-    if !created.may_conflict.is_empty() {
-        let named: Vec<String> = created
-            .may_conflict
-            .iter()
-            .map(|cited| format!("{} ({})", cited.id, cited.author()))
-            .collect();
-        let _ = writeln!(
-            out,
-            "may-conflict[{}]: {}",
-            created.may_conflict.len(),
-            named.join(", ")
-        );
-    }
+    let named: Vec<String> = created
+        .may_conflict
+        .iter()
+        .map(|cited| format!("{} ({})", cited.id, cited.author()))
+        .collect();
+    named_line(&mut out, "may-conflict", &named);
     dangling_mention_line(&mut out, &created.dangling_mentions);
     out
 }
@@ -170,23 +164,22 @@ fn closed_lines(closed: &anb_core::Closed) -> String {
         let _ = writeln!(out, "report: {note}");
     }
     dangling_mention_line(&mut out, &closed.dangling_mentions);
-    if !closed.unblocked.is_empty() {
-        let _ = writeln!(
-            out,
-            "unblocked[{}]: {}",
-            closed.unblocked.len(),
-            closed.unblocked.join(", ")
-        );
-    }
-    if !closed.open_questions.is_empty() {
-        let _ = writeln!(
-            out,
-            "open-questions[{}]: {}",
-            closed.open_questions.len(),
-            closed.open_questions.join(", ")
-        );
-    }
+    named_line(&mut out, "unblocked", &closed.unblocked);
+    named_line(&mut out, "open-questions", &closed.open_questions);
     out
+}
+
+/// A reply's inline list: how many there are, then the bounded naming.
+fn named_line(out: &mut String, label: &str, items: &[String]) {
+    if items.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "{label}[{}]: {}",
+        items.len(),
+        encode::id_list(items, ROW_BOUND)
+    );
 }
 
 /// The quotation rule's write-time nudge.
@@ -198,7 +191,7 @@ fn dangling_mention_line(out: &mut String, ids: &[String]) {
         out,
         "dangling-mention[{}]: {} — backtick to quote, or create the record",
         ids.len(),
-        ids.join(", ")
+        encode::id_list(ids, ROW_BOUND)
     );
 }
 
@@ -351,9 +344,7 @@ fn single_record(view: &View) -> String {
         ("mentions", &view.mentions),
         ("mentioned-by", &view.mentioned_by),
     ] {
-        if !ids.is_empty() {
-            let _ = writeln!(out, "{label}[{}]: {}", ids.len(), ids.join(", "));
-        }
+        named_line(&mut out, label, ids);
     }
     out
 }

@@ -3,6 +3,7 @@
 //! reply.
 
 use crate::cli::{AddArgs, CloseArgs, Command, DecideArgs, DraftArgs, EditArgs, NoteArgs, Subject};
+use anb_core::encode::ROW_BOUND;
 use anb_core::notebook::path_stem;
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited,
@@ -10,12 +11,8 @@ use anb_core::{
     Proof, ReadyTask, RecordType, Status, Storage, StorageError, Transitioned, View,
 };
 
-/// How many rows a flat list shows before the truncation hint; one
-/// unbounded listing costs more tokens than any encoding saves.
-pub const ROW_BOUND: usize = 20;
-
 /// The first bounded prefix of a flat list; both renderers show the same
-/// rows.
+/// rows. `--all` is the one lift, and only a listing offers it.
 #[must_use]
 pub fn shown(total: usize, all: bool) -> usize {
     if all { total } else { total.min(ROW_BOUND) }
@@ -316,6 +313,11 @@ fn answered<S: Storage>(
 /// A refusal decomposed for either output format: the stable kebab-case
 /// code, the one-line message, detail lines, and the next commands computed
 /// from the refusal's own state.
+///
+/// A refusal reads like a reply and is bounded like one: its details and
+/// its retries stop at [`ROW_BOUND`]. The retries need no marker — they
+/// are alternatives, not an enumeration — but the details are the
+/// notebook speaking, so a cut one says how much it cut.
 pub struct Recovery {
     pub code: &'static str,
     pub message: String,
@@ -348,7 +350,7 @@ impl Recovery {
                 recovery.tries.push(format!("anb view {id}"));
             }
             NotebookError::InvalidRecord { path, findings } => {
-                recovery.details = findings.iter().map(finding_line).collect();
+                recovery.details = bounded(findings.iter().map(finding_line).collect());
                 recovery.tries.push(format!("anb view {}", path_stem(path)));
             }
             NotebookError::InvalidTransition { id, valid, .. } => {
@@ -357,9 +359,11 @@ impl Recovery {
                 }
             }
             NotebookError::StillReferenced { blockers, .. } => {
-                recovery.details = blockers.iter().map(ToString::to_string).collect();
+                recovery.details = bounded(blockers.iter().map(ToString::to_string).collect());
                 recovery.tries.extend(
-                    anb_core::carriers_of(blockers).map(|carrier| format!("anb view {carrier}")),
+                    anb_core::carriers_of(blockers)
+                        .take(ROW_BOUND)
+                        .map(|carrier| format!("anb view {carrier}")),
                 );
             }
             NotebookError::DuplicateId { id, .. } => {
@@ -387,6 +391,18 @@ impl Recovery {
         }
         recovery
     }
+}
+
+/// A detail list cut to [`ROW_BOUND`], the cut named as a final line. The
+/// message above cannot say it: it counts the records at fault, and one
+/// record can hold a reference through several lines at once.
+fn bounded(details: Vec<String>) -> Vec<String> {
+    let total = details.len();
+    let mut lines: Vec<String> = details.into_iter().take(ROW_BOUND).collect();
+    if total > ROW_BOUND {
+        lines.push(format!("\u{2026} {} more", total - ROW_BOUND));
+    }
+    lines
 }
 
 /// A valid command as its runnable shape: the verbs whose bare form clap
