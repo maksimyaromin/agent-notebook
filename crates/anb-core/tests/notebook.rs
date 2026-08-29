@@ -1845,6 +1845,52 @@ mod creation {
         );
     }
 
+    /// The id `create` mints for `title`, with nothing else in the way.
+    fn minted_from(title: &str) -> String {
+        let mut storage = MemoryStorage::new();
+        Notebook::new(&mut storage)
+            .create(&Draft::new(RecordType::Task, title), TODAY)
+            .unwrap()
+            .id
+    }
+
+    #[test]
+    fn a_long_title_is_cut_at_a_word_boundary_so_every_kept_word_survives() {
+        assert_eq!(
+            minted_from("GitHub dev flow: Actions CI, fmt + clippy + tests"),
+            "task.github-dev-flow-actions-ci-fmt-clippy"
+        );
+        assert_eq!(
+            minted_from("Epic pattern: scoped queries + Status hub grouping"),
+            "task.epic-pattern-scoped-queries-status-hub"
+        );
+    }
+
+    #[test]
+    fn a_title_that_fits_keeps_every_word_it_has() {
+        assert_eq!(
+            minted_from("Grammar parser accepts fenced envelopes"),
+            "task.grammar-parser-accepts-fenced-envelopes"
+        );
+    }
+
+    #[test]
+    fn a_boundary_landing_on_the_cap_keeps_the_word_before_it() {
+        // Forty characters of whole words, then one more word: the cut has
+        // a boundary to take at the cap itself.
+        let title = "aaaa bbbb cccc dddd eeee ffff gggg hhhhi jjjj";
+        assert_eq!(
+            minted_from(title),
+            "task.aaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhhi"
+        );
+    }
+
+    #[test]
+    fn a_first_word_longer_than_the_cap_is_cut_short_for_want_of_a_boundary() {
+        let id = minted_from(&"z".repeat(60));
+        assert_eq!(id, format!("task.{}", "z".repeat(40)));
+    }
+
     #[test]
     fn a_mint_collision_retries_with_a_two_character_suffix() {
         let mut storage = MemoryStorage::new();
