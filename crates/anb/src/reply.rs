@@ -2,13 +2,12 @@
 //! the Core, with nothing rendered yet — both output formats read the same
 //! reply.
 
-use crate::cli::{AddArgs, CloseArgs, Command, DecideArgs, DraftArgs, EditArgs, NoteArgs, Subject};
+use crate::cli::{AddArgs, CloseArgs, Command, DecideArgs, DraftArgs, EditArgs, NoteArgs};
 use anb_core::encode::ROW_BOUND;
-use anb_core::notebook::path_stem;
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited,
-    Expunged, FileFinding, Finding, Held, Link, ListedRecord, Notebook, NotebookError, Overview,
-    Proof, ReadyTask, RecordType, Status, Storage, StorageError, Transitioned, View,
+    Expunged, FileFinding, Held, Link, ListedRecord, Notebook, NotebookError, Overview, Proof,
+    ReadyTask, RecordType, Status, Storage, StorageError, Transitioned, View,
 };
 
 /// The first bounded prefix of a flat list; both renderers show the same
@@ -307,145 +306,6 @@ fn answered<S: Storage>(
             to: target,
         }),
         Routing::Drop(reason) => Ok(Reply::Dropped(notebook.drop_question(id, &reason, today)?)),
-    }
-}
-
-/// A refusal decomposed for either output format: the stable kebab-case
-/// code, the one-line message, detail lines, and the next commands computed
-/// from the refusal's own state.
-///
-/// A refusal reads like a reply and is bounded like one: its details and
-/// its retries stop at [`ROW_BOUND`]. The retries need no marker — they
-/// are alternatives, not an enumeration — but the details are the
-/// notebook speaking, so a cut one says how much it cut.
-pub struct Recovery {
-    pub code: &'static str,
-    pub message: String,
-    pub details: Vec<String>,
-    pub tries: Vec<String>,
-}
-
-impl Recovery {
-    #[must_use]
-    pub fn new(error: &NotebookError, subject: &Subject) -> Self {
-        let mut recovery = Recovery {
-            code: error.code(),
-            message: error.to_string(),
-            details: Vec::new(),
-            tries: Vec::new(),
-        };
-        match error {
-            NotebookError::UnknownId { .. } => {
-                recovery.tries.push("anb list".to_owned());
-            }
-            NotebookError::DanglingRef { target, .. } => {
-                if target.starts_with("task.") {
-                    recovery
-                        .tries
-                        .push(format!("anb add \"<title>\" --id {target}"));
-                }
-                recovery.tries.push("anb list".to_owned());
-            }
-            NotebookError::Archived { id } | NotebookError::WrongType { id, .. } => {
-                recovery.tries.push(format!("anb view {id}"));
-            }
-            NotebookError::InvalidRecord { path, findings } => {
-                recovery.details = bounded(findings.iter().map(finding_line).collect());
-                recovery.tries.push(format!("anb view {}", path_stem(path)));
-            }
-            NotebookError::InvalidTransition { id, valid, .. } => {
-                for action in valid {
-                    recovery.tries.extend(transition_retries(action, id));
-                }
-            }
-            NotebookError::StillReferenced { blockers, .. } => {
-                recovery.details = bounded(blockers.iter().map(ToString::to_string).collect());
-                recovery.tries.extend(
-                    anb_core::carriers_of(blockers)
-                        .take(ROW_BOUND)
-                        .map(|carrier| format!("anb view {carrier}")),
-                );
-            }
-            NotebookError::DuplicateId { id, .. } => {
-                recovery.tries.push(format!("anb view {id}"));
-                recovery.tries.push("anb add \"<title>\"".to_owned());
-            }
-            NotebookError::InvalidArgument { .. } => {
-                recovery.tries = argument_retries(subject);
-            }
-            NotebookError::WouldCycle { chain } => {
-                // The chain's first pair is the refused edge; the rest
-                // already stand, and erasing any one of them opens it — so
-                // a long cycle needs no more retries than a short one.
-                recovery.tries = chain
-                    .windows(2)
-                    .skip(1)
-                    .take(ROW_BOUND)
-                    .map(|edge| format!("anb unblock {} {}", edge[0], edge[1]))
-                    .collect();
-            }
-            NotebookError::Storage(StorageError::NotUtf8 { .. }) => {
-                recovery.tries.push("anb check".to_owned());
-            }
-            NotebookError::CannotSupersede { .. } | NotebookError::Storage(_) => {}
-        }
-        recovery
-    }
-}
-
-/// A detail list cut to [`ROW_BOUND`], the cut named as a final line. The
-/// message above cannot say it: it counts the records at fault, and one
-/// record can hold a reference through several lines at once.
-fn bounded(details: Vec<String>) -> Vec<String> {
-    let total = details.len();
-    let mut lines: Vec<String> = details.into_iter().take(ROW_BOUND).collect();
-    if total > ROW_BOUND {
-        lines.push(format!("\u{2026} {} more", total - ROW_BOUND));
-    }
-    lines
-}
-
-/// A valid command as its runnable shape: the verbs whose bare form clap
-/// would refuse carry their required flag as a placeholder.
-fn transition_retries(action: &str, id: &str) -> Vec<String> {
-    match action {
-        "close" => vec![format!("anb close {id} --note <path>")],
-        "answer" => vec![
-            format!("anb answer {id} --to <id>"),
-            format!("anb answer {id} --drop \"<why>\""),
-        ],
-        action => vec![format!("anb {action} {id}")],
-    }
-}
-
-/// The retry a refused argument points at, keyed by the verb it refused;
-/// the create verbs carry no id and retry as a command shape.
-fn argument_retries(subject: &Subject) -> Vec<String> {
-    match (subject.verb, &subject.id) {
-        ("close", Some(id)) => vec![
-            format!("anb close {id} --note <path>"),
-            format!("anb close {id} --no-proof"),
-        ],
-        ("hold", Some(id)) => vec![format!("anb hold {id} --reason \"<why>\"")],
-        ("comment", Some(id)) => vec![format!("anb comment {id} \"<one line>\"")],
-        ("answer", Some(id)) => vec![
-            format!("anb answer {id} --to <id>"),
-            format!("anb answer {id} --drop \"<why>\""),
-        ],
-        ("edit", Some(id)) => vec![format!("anb edit {id} --title \"<title>\"")],
-        ("add", _) => vec!["anb add \"<title>\"".to_owned()],
-        ("decide", _) => vec!["anb decide \"<title>\" --kind rule".to_owned()],
-        ("note", _) => vec!["anb note \"<title>\" --kind fact".to_owned()],
-        ("ask", _) => vec!["anb ask \"<title>\"".to_owned()],
-        ("search", _) => vec!["anb search \"<text>\"".to_owned()],
-        _ => Vec::new(),
-    }
-}
-
-fn finding_line(finding: &Finding) -> String {
-    match finding.line {
-        Some(line) => format!("line {line}: {} {}", finding.code.as_str(), finding.message),
-        None => format!("{} {}", finding.code.as_str(), finding.message),
     }
 }
 

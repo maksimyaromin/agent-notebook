@@ -29,7 +29,7 @@ fn run_reading(
     let mut args = vec!["anb"];
     args.extend_from_slice(line);
     let cli = Cli::try_parse_from(args).expect("the test drives a well-formed command line");
-    let subject = anb::cli::subject(&cli.command);
+    let subject = anb::recovery::subject(&cli.command);
     let wants_json = cli.json;
     let read_report = |path: &str| {
         reports
@@ -1819,7 +1819,7 @@ mod maintenance_replies {
     #[test]
     fn a_file_the_adapter_cannot_read_renders_the_not_utf8_payload() {
         use anb_core::{NotebookError, StorageError};
-        let subject = anb::cli::Subject {
+        let subject = anb::recovery::Subject {
             verb: "view",
             id: Some("task.demo".to_owned()),
         };
@@ -1925,8 +1925,8 @@ mod unknown_verbs {
         let Err(error) = Cli::try_parse_from(["anb", "archiv"]) else {
             panic!("an unknown verb must not parse");
         };
-        let recovery =
-            anb::cli::unknown_command_recovery(&error).expect("an unknown verb joins the catalog");
+        let recovery = anb::recovery::unknown_command_recovery(&error)
+            .expect("an unknown verb joins the catalog");
         assert_snapshot!(
             text::render_recovery(&recovery),
             @r"
@@ -1943,7 +1943,7 @@ mod unknown_verbs {
         let Err(error) = Cli::try_parse_from(["anb", "zzz"]) else {
             panic!("an unknown verb must not parse");
         };
-        let recovery = anb::cli::unknown_command_recovery(&error).unwrap();
+        let recovery = anb::recovery::unknown_command_recovery(&error).unwrap();
         assert_snapshot!(
             text::render_recovery(&recovery),
             @r"
@@ -1958,7 +1958,7 @@ mod unknown_verbs {
         let Err(help) = Cli::try_parse_from(["anb", "--help"]) else {
             panic!("--help renders through clap's error path");
         };
-        assert!(anb::cli::unknown_command_recovery(&help).is_none());
+        assert!(anb::recovery::unknown_command_recovery(&help).is_none());
     }
 
     #[test]
@@ -1966,7 +1966,7 @@ mod unknown_verbs {
         let Err(missing_arg) = Cli::try_parse_from(["anb", "start"]) else {
             panic!("a missing argument must not parse");
         };
-        assert!(anb::cli::unknown_command_recovery(&missing_arg).is_none());
+        assert!(anb::recovery::unknown_command_recovery(&missing_arg).is_none());
     }
 }
 

@@ -8,8 +8,9 @@
 
 use crate::grammar;
 use crate::mention;
-use crate::notebook::{CitedProof, Resolver, path_stem};
-use crate::record::{Record, RecordType};
+use crate::record::{REF_KEYS, Record, RecordType};
+use crate::reply::{Cited, CitedProof};
+use crate::resolve::{Resolver, path_stem};
 use std::collections::BTreeSet;
 
 /// The Debt clocks, in days, each behind its `debt-*` config key.
@@ -20,37 +21,6 @@ pub struct DebtThresholds {
     pub question_age_task_born: u32,
     pub hold_quiet: u32,
     pub review_wait: u32,
-}
-
-/// One record cited on a Debt surface, with the attribution the undeclared
-/// conflict posture requires: the tool prints both sides and stops.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Cited {
-    pub id: String,
-    pub by: Option<String>,
-    pub via: Option<String>,
-}
-
-impl Cited {
-    pub(crate) fn of(record: &Record) -> Cited {
-        Cited {
-            id: path_stem(record.path()).to_owned(),
-            by: record.file().field("by").map(str::to_owned),
-            via: record.file().field("via").map(str::to_owned),
-        }
-    }
-
-    /// `by`, plus `/via` when an agent hand wrote it; no identity at all
-    /// prints as `-` — the reader judges the pair, so a side is never blank.
-    #[must_use]
-    pub fn author(&self) -> String {
-        match (&self.by, &self.via) {
-            (Some(by), Some(via)) => format!("{by}/{via}"),
-            (Some(by), None) => by.clone(),
-            (None, Some(via)) => format!("-/{via}"),
-            (None, None) => "-".to_owned(),
-        }
-    }
 }
 
 /// One sign of decay: a clock past its threshold, a mention-borne hint, or
@@ -161,7 +131,7 @@ fn excluding_errors(record: &Record, resolvable: &Resolver<'_>) -> usize {
 }
 
 fn reference_targets(record: &Record) -> impl Iterator<Item = &str> {
-    crate::notebook::REF_KEYS.into_iter().flat_map(|key| {
+    REF_KEYS.into_iter().flat_map(|key| {
         record
             .file()
             .field_values(key)

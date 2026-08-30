@@ -280,6 +280,23 @@ impl Record {
         &self.findings
     }
 
+    /// The well-formed ids a Task waits on. A malformed target is a
+    /// finding `check` names, never an edge.
+    pub(crate) fn blocked_by(&self) -> impl Iterator<Item = &str> {
+        self.file
+            .field_values("blocked-by")
+            .filter(|target| grammar::id_error(target).is_none())
+    }
+
+    #[must_use]
+    pub fn error_findings(&self) -> Vec<Finding> {
+        self.findings
+            .iter()
+            .filter(|finding| finding.code.severity() == Severity::Error)
+            .cloned()
+            .collect()
+    }
+
     #[must_use]
     pub fn has_errors(&self) -> bool {
         self.findings
@@ -536,6 +553,52 @@ fn check_routing(record_type: RecordType, file: &RecordFile, findings: &mut Vec<
     if state == "routed" && file.field_entry("routed-to").is_none() {
         let message = "state: `routed` without `routed-to`".to_owned();
         findings.push(Finding::located(line, FindingCode::BrokenRouting, message));
+    }
+}
+
+/// The envelope keys whose values point at other records.
+pub(crate) const REF_KEYS: [&str; 5] = [
+    "from",
+    "supersedes",
+    "superseded-by",
+    "routed-to",
+    "blocked-by",
+];
+
+/// The record a `link` line points at, if it points at one at all.
+///
+/// A link is `<kind> <target>`, and its target is a pull request, a commit,
+/// a path, or — since a close may carry its report as a Note — a record id.
+/// Only the id-shaped target names a record; nothing else can be resolved,
+/// and nothing else may be mistaken for a reference.
+pub(crate) fn linked_record(link: &str) -> Option<&str> {
+    let (_, target) = grammar::split_link(link)?;
+    grammar::id_error(target).is_none().then_some(target)
+}
+
+/// The finding a reference into nothing deserves — every surface names one
+/// condition with one code: a routed Question pointing at nothing has lost
+/// what closed it, any other dangling reference is a `dangling-ref`.
+pub(crate) fn dangling_finding(
+    record: &Record,
+    key: &str,
+    target: &str,
+    line: Option<usize>,
+) -> Finding {
+    let routed =
+        record.record_type() == Some(RecordType::Question) && record.state() == Some("routed");
+    if key == "routed-to" && routed {
+        Finding::located(
+            line,
+            FindingCode::BrokenRouting,
+            format!("routed-to: `{target}` does not exist — the routing thread is lost"),
+        )
+    } else {
+        Finding::located(
+            line,
+            FindingCode::DanglingRef,
+            format!("{key}: `{target}` names no record"),
+        )
     }
 }
 

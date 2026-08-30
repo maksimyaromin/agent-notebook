@@ -30,8 +30,9 @@ blocked-by: task.milestone-self-host-switch
 blocked-by: task.milestone-cli-complete
 blocked-by: task.global-notebook
 blocked-by: task.task-graph-visualization-for-fun
+blocked-by: task.serialize-concurrent-mutations-on-a
 created: 2026-08-29
-updated: 2026-08-29
+updated: 2026-08-30
 ---
 
 The founding idea: ship anb v1 — a project's working memory as typed records with lifecycles, self-hosted, agent-operated through the CLI, released through the v1 Definition of Done gate. Every task of the plan is a child of this hub: the hub is blocked-by each of them and closes when the last one does. Children born from now on also carry from:<this hub>; the migrated ones predate the origin edge and only the future edit surface can add it retroactively.

@@ -7,5 +7,6 @@ pub mod cli;
 pub mod fs_storage;
 pub mod json;
 pub mod reconcile;
+pub mod recovery;
 pub mod reply;
 pub mod text;

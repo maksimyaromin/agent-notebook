@@ -3,9 +3,9 @@
 //! header+rows tables for flat lists, labeled `key: value` for one record,
 //! and every refusal as a recovery payload with literal next commands.
 
-use crate::cli::Subject;
 use crate::json;
-use crate::reply::{Recovery, Reply, shown};
+use crate::recovery::{Recovery, Subject};
+use crate::reply::{Reply, shown};
 use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
 use anb_core::{
