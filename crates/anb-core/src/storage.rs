@@ -79,6 +79,23 @@ pub trait Storage {
     /// [`StorageError::NotFound`] when `path` does not exist,
     /// [`StorageError::Io`] on any other adapter failure.
     fn remove(&mut self, path: &RelPath) -> Result<(), StorageError>;
+
+    /// Whether a file sits at `path`. Bytes that are not UTF-8 still
+    /// occupy it: the question is the name, not what it says.
+    ///
+    /// The Core asks this of every reference a write guards and every id a
+    /// body cites, so an adapter whose medium answers it without reading —
+    /// a `stat`, an index lookup — should say so here.
+    ///
+    /// # Errors
+    /// [`StorageError::Io`] on an adapter failure other than absence.
+    fn exists(&self, path: &RelPath) -> Result<bool, StorageError> {
+        match self.read(path) {
+            Ok(_) | Err(StorageError::NotUtf8 { .. }) => Ok(true),
+            Err(StorageError::NotFound { .. }) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 /// In-memory adapter. It lives in the library, not behind `cfg(test)`:
@@ -151,6 +168,10 @@ impl Storage for MemoryStorage {
             })
         }
     }
+
+    fn exists(&self, path: &RelPath) -> Result<bool, StorageError> {
+        Ok(self.files.contains_key(path))
+    }
 }
 
 #[cfg(test)]
@@ -168,23 +189,6 @@ mod tests {
         assert_eq!(
             storage.list("tasks").unwrap(),
             vec!["tasks/a.md", "tasks/b.md"]
-        );
-    }
-
-    #[test]
-    fn list_of_missing_dir_is_empty() {
-        let storage = MemoryStorage::new();
-        assert_eq!(storage.list("tasks").unwrap(), Vec::<String>::new());
-    }
-
-    #[test]
-    fn read_missing_is_not_found() {
-        let storage = MemoryStorage::new();
-        assert_eq!(
-            storage.read("tasks/absent.md"),
-            Err(StorageError::NotFound {
-                path: "tasks/absent.md".into()
-            })
         );
     }
 

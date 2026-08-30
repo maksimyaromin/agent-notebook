@@ -14,11 +14,16 @@ const TODAY: &str = "2026-08-27";
 struct Watched {
     files: MemoryStorage,
     reads: RefCell<Vec<String>>,
+    probes: RefCell<Vec<String>>,
 }
 
 impl Watched {
     fn reads(&self) -> Vec<String> {
         self.reads.borrow().clone()
+    }
+
+    fn probes(&self) -> Vec<String> {
+        self.probes.borrow().clone()
     }
 
     fn archived_reads(&self) -> Vec<String> {
@@ -34,6 +39,11 @@ impl Watched {
 impl Storage for Watched {
     fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
         self.files.list(dir)
+    }
+
+    fn exists(&self, path: &str) -> Result<bool, StorageError> {
+        self.probes.borrow_mut().push(path.to_owned());
+        self.files.exists(path)
     }
 
     fn read(&self, path: &str) -> Result<String, StorageError> {
@@ -71,6 +81,7 @@ fn watched(live: usize, archived: usize) -> Watched {
     Watched {
         files: MemoryStorage::from_files(written),
         reads: RefCell::new(Vec::new()),
+        probes: RefCell::new(Vec::new()),
     }
 }
 
@@ -219,6 +230,38 @@ fn minting_an_id_opens_nothing_in_the_archive() {
     );
 }
 
+/// An id a body cites is a name, and a name is answered by its place.
+#[test]
+fn an_id_a_body_cites_is_probed_not_opened() {
+    let mut storage = watched(3, 200);
+
+    Notebook::new(&mut storage)
+        .comment(
+            "task.live-0",
+            None,
+            "Waiting on task.live-1, filed under task.filed-0, unlike task.ghost.",
+            TODAY,
+        )
+        .unwrap();
+
+    assert_eq!(
+        storage.reads(),
+        vec!["tasks/task.live-0.md"],
+        "the record being written is the only one whose bytes matter"
+    );
+    assert_eq!(
+        storage.probes(),
+        vec![
+            "tasks/task.live-1.md",
+            "tasks/task.filed-0.md",
+            "archive/tasks/task.filed-0.md",
+            "tasks/task.ghost.md",
+            "archive/tasks/task.ghost.md",
+        ],
+        "each cited id is probed where it could sit, the live home first"
+    );
+}
+
 #[test]
 fn a_cycle_check_opens_the_chain_it_walks() {
     // The refused edge closes a two-Task loop; the rest of the live Tasks
@@ -241,12 +284,8 @@ fn a_cycle_check_opens_the_chain_it_walks() {
     );
     assert_eq!(
         storage.reads(),
-        vec![
-            "tasks/task.live-0.md",
-            "tasks/task.live-1.md",
-            "tasks/task.live-0.md"
-        ],
-        "the guard on the target, the record being edged, and one step of the \
-         walk out of it \u{2014} the notebook is never opened"
+        vec!["tasks/task.live-1.md", "tasks/task.live-0.md"],
+        "the record being edged and one step of the walk out of it \u{2014} the \
+         notebook is never opened"
     );
 }

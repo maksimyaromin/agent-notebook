@@ -251,7 +251,7 @@ pub struct AddArgs {
     pub draft: DraftArgs,
     /// 0–4, 0 the most urgent.
     #[arg(long)]
-    pub priority: Option<u8>,
+    pub priority: Option<u32>,
 }
 
 #[derive(Args)]
@@ -297,7 +297,7 @@ pub struct EditArgs {
     pub from: Option<String>,
     /// 0–4, 0 the most urgent.
     #[arg(long)]
-    pub priority: Option<u8>,
+    pub priority: Option<u32>,
     /// The explicit resurfacing date.
     #[arg(long)]
     pub review_by: Option<String>,

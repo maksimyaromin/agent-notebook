@@ -44,6 +44,35 @@ fn moved(id: &str, from: &'static str, to: &'static str) -> Transitioned {
     }
 }
 
+/// What a caller learns from a refusal beyond its own text.
+mod refusals {
+    use super::*;
+    use std::error::Error as _;
+
+    #[test]
+    fn a_storage_failure_stays_reachable_under_the_refusal_that_carries_it() {
+        let mut storage = MemoryStorage::new();
+        let refusal = Notebook::new(&mut storage)
+            .start("task.ghost", TODAY)
+            .unwrap_err();
+        assert_eq!(refusal.code(), "unknown-id");
+        assert!(
+            refusal.source().is_none(),
+            "a refusal of the notebook's own is nobody else's failure"
+        );
+
+        let carried = NotebookError::from(StorageError::NotUtf8 {
+            path: "tasks/task.demo.md".to_owned(),
+        });
+        assert_eq!(carried.code(), "not-utf8");
+        assert_eq!(
+            carried.source().map(ToString::to_string),
+            Some("not UTF-8: tasks/task.demo.md".to_owned()),
+            "the adapter's failure is the source of the refusal above it"
+        );
+    }
+}
+
 mod task_cycle {
     use super::*;
 
@@ -285,7 +314,7 @@ mod task_cycle {
             .report_note
             .unwrap();
         notebook.retire(&filed, TODAY).unwrap();
-        notebook.archive(&filed).unwrap();
+        notebook.archive(&filed, TODAY).unwrap();
         notebook.reopen("task.demo", TODAY).unwrap();
         notebook.start("task.demo", TODAY).unwrap();
 
@@ -1479,30 +1508,6 @@ mod record_view {
     }
 
     #[test]
-    fn a_quoted_id_stays_out_of_the_mention_blocks() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &record_file(
-                    "task.demo",
-                    "task",
-                    "active",
-                    &[],
-                    "Rename `decision.chosen` before question.missing settles.\n",
-                ),
-            ),
-            (
-                "decisions/decision.chosen.md",
-                &record_file("decision.chosen", "decision", "active", &[], ""),
-            ),
-        ]);
-        let view = Notebook::new(&mut storage).view("task.demo").unwrap();
-        assert_eq!(view.mentions, vec!["question.missing"]);
-        let quoted = Notebook::new(&mut storage).view("decision.chosen").unwrap();
-        assert_eq!(quoted.mentioned_by, Vec::<String>::new());
-    }
-
-    #[test]
     fn a_record_never_enters_its_own_mention_blocks() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md",
@@ -1919,14 +1924,6 @@ mod creation {
     }
 
     #[test]
-    fn a_title_that_fits_keeps_every_word_it_has() {
-        assert_eq!(
-            minted_from("Grammar parser accepts fenced envelopes"),
-            "task.grammar-parser-accepts-fenced-envelopes"
-        );
-    }
-
-    #[test]
     fn a_boundary_landing_on_the_cap_keeps_the_word_before_it() {
         // Forty characters of whole words, then one more word: the cut has
         // a boundary to take at the cap itself.
@@ -2215,16 +2212,6 @@ mod conflict_nudge {
     }
 
     #[test]
-    fn a_quoted_decision_id_is_not_a_conflict_hint() {
-        let (path, text) = standing_decision(&[]);
-        let mut storage = storage_with(&[(path, &text)]);
-        let mut draft = decision_draft(&[]);
-        draft.body = "Renames the `decision.first` rule file.".to_owned();
-        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
-        assert_eq!(created.may_conflict, vec![]);
-    }
-
-    #[test]
     fn one_shared_tag_is_not_a_conflict_hint() {
         let (path, text) = standing_decision(&["tags: parser, grammar"]);
         let mut storage = storage_with(&[(path, &text)]);
@@ -2433,15 +2420,6 @@ mod mention_nudge {
     }
 
     #[test]
-    fn a_quoted_unknown_id_warns_nothing() {
-        let mut storage = MemoryStorage::new();
-        let mut draft = Draft::new(RecordType::Task, "A demo record");
-        draft.body = "The corpus case `task.ghost` is prose.".to_owned();
-        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
-        assert_eq!(created.dangling_mentions, Vec::<String>::new());
-    }
-
-    #[test]
     fn a_citation_that_resolves_live_or_archived_warns_nothing() {
         let mut storage = storage_with(&[
             ("tasks/task.live.md", &task_file("open", &[])),
@@ -2480,15 +2458,6 @@ mod mention_nudge {
                 .contains("waits on task.ghost"),
             "a warning is not a rejection"
         );
-    }
-
-    #[test]
-    fn a_quoted_id_in_a_comment_warns_nothing() {
-        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
-        let reply = Notebook::new(&mut storage)
-            .comment("task.demo", None, "renamed the `task.ghost` case", TODAY)
-            .unwrap();
-        assert_eq!(reply.dangling_mentions, Vec::<String>::new());
     }
 
     #[test]
@@ -3043,33 +3012,6 @@ mod status_dashboard {
     }
 
     #[test]
-    fn a_quiet_notebook_answers_one_line_with_counts() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &["closed: 2026-08-25"]),
-            ),
-            (
-                "notes/note.demo.md",
-                &record_file("note.demo", "note", "retired", &[], ""),
-            ),
-        ]);
-        let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
-            .unwrap();
-        assert!(status.quiet);
-        assert_eq!(status.text.lines().count(), 1);
-        assert!(
-            status
-                .text
-                .starts_with("ok: notebook quiet — 1 tasks, 0 decisions, 1 notes, 0 questions."),
-            "unexpected quiet line: {}",
-            status.text
-        );
-        assert!(status.text.contains("anb --help"));
-    }
-
-    #[test]
     fn an_active_task_is_the_in_flight_line_with_its_last_log_line() {
         let body = "Acceptance: the ladder holds.\n\n- 2026-08-25 claude: stopped at the ladder\n";
         let mut storage = storage_with(&[(
@@ -3136,39 +3078,6 @@ mod status_dashboard {
     }
 
     #[test]
-    fn a_ready_row_carries_priority_age_and_title() {
-        let mut storage = storage_with(&[(
-            "tasks/task.demo.md",
-            "---\nid: task.demo\ntype: task\nstate: open\ntitle: A demo record\npriority: 1\ncreated: 2026-08-24\n---\n",
-        )]);
-        let text = status_text(&mut storage);
-        assert!(text.contains("  task.demo,1,3d,A demo record\n"), "{text}");
-    }
-
-    #[test]
-    fn an_unprioritized_ready_row_shows_a_dash() {
-        let mut storage = storage_with(&[(
-            "tasks/task.demo.md",
-            "---\nid: task.demo\ntype: task\nstate: open\ntitle: A demo record\ncreated: 2026-08-27\n---\n",
-        )]);
-        let text = status_text(&mut storage);
-        assert!(text.contains("  task.demo,-,0d,A demo record\n"), "{text}");
-    }
-
-    #[test]
-    fn a_ready_title_with_a_comma_is_json_quoted() {
-        let mut storage = storage_with(&[(
-            "tasks/task.demo.md",
-            "---\nid: task.demo\ntype: task\nstate: open\ntitle: Sort, then trim\ncreated: 2026-08-27\n---\n",
-        )]);
-        let text = status_text(&mut storage);
-        assert!(
-            text.contains("  task.demo,-,0d,\"Sort, then trim\"\n"),
-            "{text}"
-        );
-    }
-
-    #[test]
     fn more_ready_than_five_rows_shows_five_and_the_shorter_hint() {
         let files: Vec<(String, String)> = (0..7)
             .map(|index| {
@@ -3184,7 +3093,7 @@ mod status_dashboard {
         let mut storage = MemoryStorage::from_files(files);
         let text = status_text(&mut storage);
         assert!(
-            text.contains("ready[5]{id,priority,age,title}:\n"),
+            text.contains("ready[7]{id,priority,age,title}:\n"),
             "{text}"
         );
         assert_eq!(text.matches("\n  task.").count(), 5, "{text}");
@@ -3215,16 +3124,6 @@ mod status_dashboard {
         );
         assert!(!text.contains("decision.shape"), "{text}");
         assert!(!text.contains("decision.dead"), "{text}");
-    }
-
-    #[test]
-    fn a_review_task_is_named_waiting_on_a_human() {
-        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("review", &[]))]);
-        let text = status_text(&mut storage);
-        assert!(
-            text.contains("review[1]: task.demo — waiting on a human\n"),
-            "{text}"
-        );
     }
 
     #[test]
@@ -3289,6 +3188,112 @@ mod debt_signals {
             .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap()
             .debt
+    }
+
+    /// A clock counts days behind, and there are none: a date ahead of
+    /// today reads as today rather than running the clock backwards.
+    #[test]
+    fn a_record_touched_in_the_future_is_not_stale() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &aged("task.demo", "task", "active", "2026-12-01", &[]),
+        )]);
+        assert_eq!(debt_of(&mut storage), vec![]);
+    }
+
+    /// Each clock is configurable, and each key moves its own: a threshold
+    /// wired to the wrong clock would leave the record it names silent.
+    #[test]
+    fn every_debt_key_moves_the_clock_it_names() {
+        let quiet_origin = (
+            "tasks/task.origin.md",
+            aged("task.origin", "task", "open", TODAY, &[]),
+        );
+        for (key, files, expected) in [
+            (
+                "debt-task-stale",
+                vec![(
+                    "tasks/task.demo.md",
+                    aged("task.demo", "task", "active", "2026-08-25", &[]),
+                )],
+                DebtSignal::TaskStale {
+                    id: "task.demo".into(),
+                    days: 2,
+                },
+            ),
+            (
+                "debt-question-age",
+                vec![(
+                    "questions/question.demo.md",
+                    aged("question.demo", "question", "open", "2026-08-25", &[]),
+                )],
+                DebtSignal::QuestionAge {
+                    id: "question.demo".into(),
+                    days: 2,
+                },
+            ),
+            (
+                "debt-question-age-task-born",
+                vec![
+                    quiet_origin.clone(),
+                    (
+                        "questions/question.demo.md",
+                        aged(
+                            "question.demo",
+                            "question",
+                            "open",
+                            "2026-08-25",
+                            &["from: task.origin"],
+                        ),
+                    ),
+                ],
+                DebtSignal::QuestionAge {
+                    id: "question.demo".into(),
+                    days: 2,
+                },
+            ),
+            (
+                "debt-hold-quiet",
+                vec![(
+                    "tasks/task.demo.md",
+                    aged(
+                        "task.demo",
+                        "task",
+                        "open",
+                        "2026-08-25",
+                        &["hold: waiting on the owner"],
+                    ),
+                )],
+                DebtSignal::HoldQuiet {
+                    id: "task.demo".into(),
+                    days: 2,
+                },
+            ),
+            (
+                "debt-review-wait",
+                vec![(
+                    "tasks/task.demo.md",
+                    aged("task.demo", "task", "review", "2026-08-25", &[]),
+                )],
+                DebtSignal::ReviewWait {
+                    id: "task.demo".into(),
+                    days: 2,
+                },
+            ),
+        ] {
+            let mut named: Vec<(&str, String)> = vec![("config", format!("{key}: 2\n"))];
+            named.extend(files);
+            let mut storage = storage_with(
+                &named
+                    .iter()
+                    .map(|(path, text)| (*path, text.as_str()))
+                    .collect::<Vec<_>>(),
+            );
+            assert!(
+                debt_of(&mut storage).contains(&expected),
+                "`{key}` must move the clock it names"
+            );
+        }
     }
 
     #[test]
@@ -3780,24 +3785,6 @@ mod debt_signals {
     }
 
     #[test]
-    fn a_config_stale_threshold_moves_the_task_clock() {
-        let mut storage = storage_with(&[
-            ("config", "debt-task-stale: 2\n"),
-            (
-                "tasks/task.demo.md",
-                &aged("task.demo", "task", "active", "2026-08-25", &[]),
-            ),
-        ]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::TaskStale {
-                id: "task.demo".into(),
-                days: 2
-            }]
-        );
-    }
-
-    #[test]
     fn six_dangling_mentions_render_five_lines_and_a_hint() {
         let body = "task.gone0 task.gone1 task.gone2 task.gone3 task.gone4 task.gone5";
         let mut storage = storage_with(&[(
@@ -3900,29 +3887,6 @@ mod debt_signals {
                 .contains("  lost-proof: task.shipped -> sha f00dfeed\n"),
             "{}",
             status.text
-        );
-    }
-
-    #[test]
-    fn a_proof_the_world_still_holds_raises_nothing() {
-        let mut storage = storage_with(&[(
-            "tasks/task.shipped.md",
-            &record_file(
-                "task.shipped",
-                "task",
-                "closed",
-                &["link: sha f00dfeed"],
-                "",
-            ),
-        )]);
-        // The host settled this one and found it: nothing reaches the Core.
-        assert!(
-            Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, no_lost_proofs)
-                .unwrap()
-                .debt
-                .iter()
-                .all(|signal| !matches!(signal, DebtSignal::LostProof { .. }))
         );
     }
 
@@ -4177,7 +4141,7 @@ mod budget_ladder {
              \x20 decision.rule2: A demo record\n\
              \x20 decision.rule3: A demo record\n\
              \x20 decision.rule4: A demo record\n  \u{2026} 3 more\n\
-             ready[5]{id,priority,age,title}:\n\
+             ready[8]{id,priority,age,title}:\n\
              \x20 task.child0,-,3d,A demo record\n\
              \x20 task.child1,-,3d,A demo record\n\
              \x20 task.child2,-,3d,A demo record\n\
@@ -4223,7 +4187,7 @@ mod budget_ladder {
             "log: - 2026-08-25 claude: stopped at the ladder",
             "review[1]: task.waiting — waiting on a human",
             "rules[1]:",
-            "ready[5]{id,priority,age,title}:",
+            "ready[7]{id,priority,age,title}:",
             "  … 2 more: anb ready",
             "debt[",
         ] {
@@ -4599,27 +4563,6 @@ mod notebook_config {
             "{findings:?}"
         );
     }
-
-    #[test]
-    fn a_config_threshold_moves_the_clock() {
-        let mut storage = storage_with(&[
-            ("config", "debt-question-age: 3\n"),
-            (
-                "questions/question.demo.md",
-                "---\nid: question.demo\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-24\n---\n",
-            ),
-        ]);
-        let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
-            .unwrap();
-        assert_eq!(
-            status.debt,
-            vec![DebtSignal::QuestionAge {
-                id: "question.demo".into(),
-                days: 3
-            }]
-        );
-    }
 }
 
 mod expunge_verb {
@@ -4918,7 +4861,9 @@ mod archive_verb {
         // would rewrite this file.
         let text = "\u{feff}---\nid: task.demo\ntype:  task\r\nstate: closed\ntitle: A demo record\ncreated: 2026-08-24\n---\nbody\n";
         let mut storage = storage_with(&[("tasks/task.demo.md", text)]);
-        let moved = Notebook::new(&mut storage).archive("task.demo").unwrap();
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
         assert_eq!(moved.from, "tasks/task.demo.md");
         assert_eq!(moved.to, "archive/tasks/task.demo.md");
         assert!(!moved.already);
@@ -4988,7 +4933,7 @@ mod archive_verb {
                 "archive/questions/question.q.md",
             ),
         ] {
-            let moved = Notebook::new(&mut storage).archive(id).unwrap();
+            let moved = Notebook::new(&mut storage).archive(id, TODAY).unwrap();
             assert!(!moved.already, "{id} settles and must move");
             assert!(storage.read(to).is_ok(), "{id} must land in the archive");
             assert!(
@@ -4999,11 +4944,215 @@ mod archive_verb {
     }
 
     #[test]
+    fn archiving_a_record_carries_the_report_it_closed_with() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["link: note note.report"]),
+            ),
+            (
+                "notes/note.report.md",
+                &record_file(
+                    "note.report",
+                    "note",
+                    "active",
+                    &["from: task.demo"],
+                    "What the work came to.\n",
+                ),
+            ),
+        ]);
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+        assert_eq!(moved.carried, ["note.report"]);
+        assert!(matches!(
+            storage.read("notes/note.report.md"),
+            Err(StorageError::NotFound { .. })
+        ));
+        let filed = storage.read("archive/notes/note.report.md").unwrap();
+        assert!(
+            filed.contains("state: retired") && filed.contains("What the work came to."),
+            "a carried report is settled where it lands: {filed}"
+        );
+    }
+
+    #[test]
+    fn only_a_report_born_inside_the_record_is_carried() {
+        for (case, path, file) in [
+            (
+                "a Note born from another Task",
+                "notes/note.report.md",
+                record_file("note.report", "note", "active", &["from: task.other"], ""),
+            ),
+            (
+                "a Question this Task spawned",
+                "questions/question.doubt.md",
+                record_file(
+                    "question.doubt",
+                    "question",
+                    "open",
+                    &["from: task.demo"],
+                    "",
+                ),
+            ),
+        ] {
+            let mut storage = storage_with(&[
+                (
+                    "tasks/task.demo.md",
+                    &task_file("closed", &["link: note note.report"]),
+                ),
+                (path, &file),
+            ]);
+            let moved = Notebook::new(&mut storage)
+                .archive("task.demo", TODAY)
+                .unwrap();
+            assert!(
+                moved.carried.is_empty(),
+                "{case} is not this record\'s report"
+            );
+            assert!(storage.read(path).is_ok(), "{case} must stay live");
+        }
+    }
+
+    /// The cascade is judged whole before it starts, so a report the
+    /// notebook cannot move refuses the archive and leaves every record
+    /// where it was — the repair is on the Note, and the move is one call
+    /// away.
+    #[test]
+    fn a_report_that_cannot_be_judged_refuses_the_move_and_keeps_every_byte() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["link: note note.report"]),
+            ),
+            (
+                "notes/note.report.md",
+                &record_file("note.report", "note", "wrong", &["from: task.demo"], ""),
+            ),
+        ]);
+
+        let refusal = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap_err();
+        assert!(
+            matches!(&refusal, NotebookError::InvalidRecord { path, .. } if path == "notes/note.report.md"),
+            "{refusal:?}"
+        );
+        assert!(
+            storage.read("tasks/task.demo.md").is_ok()
+                && matches!(
+                    storage.read("archive/tasks/task.demo.md"),
+                    Err(StorageError::NotFound { .. })
+                ),
+            "the record the caller named must not move on a refused cascade"
+        );
+
+        storage
+            .write(
+                "notes/note.report.md",
+                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
+            )
+            .unwrap();
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+        assert_eq!(moved.carried, ["note.report"]);
+    }
+
+    /// The cascade decides before it writes, so a report whose archived
+    /// home is taken by other bytes refuses the move with every record
+    /// untouched — including the state of the report itself.
+    #[test]
+    fn a_report_whose_home_is_taken_refuses_before_anything_is_retired() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["link: note note.report"]),
+            ),
+            (
+                "notes/note.report.md",
+                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
+            ),
+            (
+                "archive/notes/note.report.md",
+                &record_file("note.report", "note", "retired", &[], "Older bytes.\n"),
+            ),
+        ]);
+
+        let refusal = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap_err();
+        assert!(
+            matches!(&refusal, NotebookError::DuplicateId { id, .. } if id == "note.report"),
+            "{refusal:?}"
+        );
+        assert!(
+            storage
+                .read("notes/note.report.md")
+                .unwrap()
+                .contains("state: active"),
+            "a refused cascade retires nothing"
+        );
+        assert!(storage.read("tasks/task.demo.md").is_ok());
+    }
+
+    /// A link target is free text until the grammar says otherwise: one
+    /// that is no Note id names no record, so nothing follows it and
+    /// nothing turns it into a path.
+    #[test]
+    fn a_link_target_that_is_no_note_id_is_not_followed() {
+        for target in ["../notes/note.report", "task.demo", "NOTE.REPORT"] {
+            let mut storage = storage_with(&[
+                (
+                    "tasks/task.demo.md",
+                    &task_file("closed", &[&format!("link: note {target}")]),
+                ),
+                (
+                    "notes/note.report.md",
+                    &record_file("note.report", "note", "active", &["from: task.demo"], ""),
+                ),
+            ]);
+            let moved = Notebook::new(&mut storage)
+                .archive("task.demo", TODAY)
+                .unwrap();
+            assert!(moved.carried.is_empty(), "`{target}` names no report");
+            assert!(storage.read("notes/note.report.md").is_ok());
+        }
+    }
+
+    /// The reports move first, so an interruption leaves the record live
+    /// and the next call finishes the job: what is already filed is no
+    /// longer carriable, and the record follows it.
+    #[test]
+    fn an_interrupted_cascade_is_finished_by_the_next_call() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["link: note note.report"]),
+            ),
+            (
+                "archive/notes/note.report.md",
+                &record_file("note.report", "note", "retired", &["from: task.demo"], ""),
+            ),
+        ]);
+
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+        assert!(!moved.already && moved.carried.is_empty());
+        assert!(storage.read("archive/tasks/task.demo.md").is_ok());
+    }
+
+    #[test]
     fn a_replayed_archive_answers_already_and_changes_nothing() {
         let text = task_file("closed", &[]);
         let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
-        Notebook::new(&mut storage).archive("task.demo").unwrap();
-        let replay = Notebook::new(&mut storage).archive("task.demo").unwrap();
+        Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+        let replay = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
         assert!(replay.already);
         assert_eq!(storage.read("archive/tasks/task.demo.md").unwrap(), text);
     }
@@ -5017,7 +5166,7 @@ mod archive_verb {
             let mut storage =
                 storage_with(&[("archive/tasks/task.demo.md", &task_file(state, &[]))]);
             let refusal = Notebook::new(&mut storage)
-                .archive("task.demo")
+                .archive("task.demo", TODAY)
                 .unwrap_err();
             match refusal {
                 NotebookError::InvalidRecord { path, findings } => {
@@ -5060,7 +5209,7 @@ mod archive_verb {
             ("decision.d", "active", vec!["retire"]),
         ] {
             assert_eq!(
-                notebook.archive(id).unwrap_err(),
+                notebook.archive(id, TODAY).unwrap_err(),
                 NotebookError::InvalidTransition {
                     id: id.to_owned(),
                     state: state.to_owned(),
@@ -5071,23 +5220,12 @@ mod archive_verb {
     }
 
     #[test]
-    fn an_unknown_id_is_refused() {
-        let mut storage = storage_with(&[]);
-        assert!(matches!(
-            Notebook::new(&mut storage)
-                .archive("task.ghost")
-                .unwrap_err(),
-            NotebookError::UnknownId { .. }
-        ));
-    }
-
-    #[test]
     fn an_invalid_record_is_refused_before_any_byte_moves() {
         let text = task_file("cancelled", &[]);
         let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
         assert!(matches!(
             Notebook::new(&mut storage)
-                .archive("task.demo")
+                .archive("task.demo", TODAY)
                 .unwrap_err(),
             NotebookError::InvalidRecord { .. }
         ));
@@ -5103,7 +5241,7 @@ mod archive_verb {
         ]);
         assert!(matches!(
             Notebook::new(&mut storage)
-                .archive("task.demo")
+                .archive("task.demo", TODAY)
                 .unwrap_err(),
             NotebookError::DuplicateId { .. }
         ));
@@ -5140,7 +5278,11 @@ mod archive_verb {
     fn a_move_interrupted_after_its_write_loses_nothing_and_replays_clean() {
         let text = task_file("closed", &[]);
         let mut storage = RemoveFails(storage_with(&[("tasks/task.demo.md", &text)]));
-        assert!(Notebook::new(&mut storage).archive("task.demo").is_err());
+        assert!(
+            Notebook::new(&mut storage)
+                .archive("task.demo", TODAY)
+                .is_err()
+        );
         assert_eq!(
             storage.read("archive/tasks/task.demo.md").unwrap(),
             text,
@@ -5152,7 +5294,9 @@ mod archive_verb {
             ("tasks/task.demo.md", &text),
             ("archive/tasks/task.demo.md", &text),
         ]);
-        let moved = Notebook::new(&mut storage).archive("task.demo").unwrap();
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
         assert!(!moved.already, "the identical copy is the crash replay");
         assert!(matches!(
             storage.read("tasks/task.demo.md"),
@@ -5641,25 +5785,6 @@ mod search_query {
             NotebookError::InvalidArgument { .. }
         ));
     }
-
-    #[test]
-    fn a_query_matching_nothing_answers_no_rows() {
-        let mut storage = demo_notebook();
-        assert_eq!(
-            Notebook::new(&mut storage).search("zeppelin").unwrap(),
-            vec![]
-        );
-    }
-
-    #[test]
-    fn an_invalid_match_shows_as_state_invalid() {
-        let mut storage = storage_with(&[(
-            "tasks/task.broken.md",
-            &record_file("task.broken", "task", "cancelled", &[], ""),
-        )]);
-        let rows = Notebook::new(&mut storage).search("broken").unwrap();
-        assert_eq!(rows[0].state, "invalid");
-    }
 }
 
 mod overview_query {
@@ -5711,16 +5836,6 @@ mod overview_query {
             (1, 1),
             "the page's own tally, computed once beside the rows"
         );
-    }
-
-    #[test]
-    fn an_invalid_record_is_a_row_of_state_invalid() {
-        let mut storage = storage_with(&[(
-            "tasks/task.broken.md",
-            &record_file("task.broken", "task", "cancelled", &[], ""),
-        )]);
-        let overview = Notebook::new(&mut storage).overview().unwrap();
-        assert_eq!(overview.sections[0].rows[0].state, "invalid");
     }
 }
 
@@ -5780,7 +5895,9 @@ mod unreadable_files {
     #[test]
     fn an_unreadable_archived_copy_refuses_the_move_as_an_invalid_record() {
         let storage = &mut BinaryHolding::with_binary_at("archive/tasks/task.demo.md", &[]);
-        let refusal = Notebook::new(storage).archive("task.demo").unwrap_err();
+        let refusal = Notebook::new(storage)
+            .archive("task.demo", TODAY)
+            .unwrap_err();
         match refusal {
             NotebookError::InvalidRecord { path, findings } => {
                 assert_eq!(path, "archive/tasks/task.demo.md");

@@ -474,3 +474,37 @@ pub fn debt_classes(debt: &[DebtSignal]) -> Vec<DebtClass<'_>> {
     }
     classes
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a hub's line says about where it stands: the next thing to pick
+    /// up, an acceptance close to give, or work that is there but blocked.
+    #[test]
+    fn an_epic_line_names_what_the_hub_is_waiting_for() {
+        for (closed, total, next, expected) in [
+            (
+                1,
+                3,
+                Some("task.child"),
+                "task.hub: 1/3 closed, next: task.child",
+            ),
+            (
+                3,
+                3,
+                None,
+                "task.hub: 3/3 closed \u{2014} awaiting its acceptance close",
+            ),
+            (1, 3, None, "task.hub: 1/3 closed \u{2014} nothing ready"),
+        ] {
+            let epic = Epic {
+                id: "task.hub".to_owned(),
+                closed,
+                total,
+                next: next.map(str::to_owned),
+            };
+            assert_eq!(epic_line(&epic), expected);
+        }
+    }
+}
