@@ -6,7 +6,7 @@ use super::error::NotebookError;
 use crate::date;
 use crate::grammar::{self, RecordFile};
 use crate::record::{Record, RecordType};
-use crate::request::{CLEARABLE, Draft, Edit, PRIORITY, Proof};
+use crate::request::{CLEARABLE, Draft, Edit, FROM, PRIORITY, Proof, REVIEW_BY};
 use crate::resolve::{path_stem, record_path, type_of};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -148,7 +148,7 @@ pub(super) fn validate_edit(
 fn writes(edit: &Edit, key: &str) -> bool {
     edited_fields(edit, &[])
         .iter()
-        .any(|(written, value)| *written == key && value.is_some())
+        .any(|(written, _)| *written == key)
 }
 
 /// A proof is a link value: one non-empty line, or an explicit waiver.
@@ -333,9 +333,9 @@ fn edited_fields(edit: &Edit, cleared: &[&'static str]) -> Vec<(&'static str, Op
             "title",
             edit.title.as_deref().map(str::trim).map(str::to_owned),
         ),
-        ("from", edit.from.clone()),
+        (FROM, edit.from.clone()),
         (PRIORITY, edit.priority.map(|priority| priority.to_string())),
-        ("review-by", edit.review_by.clone()),
+        (REVIEW_BY, edit.review_by.clone()),
     ]
     .into_iter()
     .filter_map(|(key, value)| value.map(|value| (key, Some(value))))

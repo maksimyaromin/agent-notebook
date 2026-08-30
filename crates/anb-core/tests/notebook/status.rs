@@ -118,7 +118,7 @@ mod status_dashboard {
             "{text}"
         );
         assert!(
-            text.contains("log: - 2026-08-25 claude: stopped at the ladder\n"),
+            text.contains("log: \"- 2026-08-25 claude: stopped at the ladder\"\n"),
             "{text}"
         );
     }
@@ -157,7 +157,7 @@ mod status_dashboard {
             .collect();
         assert_eq!(
             logs,
-            ["log: - 2026-08-27 claude: resumed here"],
+            ["log: \"- 2026-08-27 claude: resumed here\""],
             "one log line, and it belongs to the Task the session is on: {text}"
         );
     }
@@ -245,11 +245,55 @@ mod status_dashboard {
         ]);
         let text = status_text(&mut storage);
         assert!(
-            text.contains("rules[1]:\n  decision.rule: A demo record\n"),
+            text.contains("rules[1]:\n  decision.rule: \"A demo record\"\n"),
             "{text}"
         );
         assert!(!text.contains("decision.shape"), "{text}");
         assert!(!text.contains("decision.dead"), "{text}");
+    }
+
+    /// A dashboard line built from a record's own text is quoted, so a hand
+    /// that writes `ESC[2K\r` into a title or a log entry cannot erase the
+    /// line above it and put its own words there.
+    #[test]
+    fn a_terminal_escape_in_a_rule_or_a_log_cannot_forge_the_line_above() {
+        let forged = "Harmless\u{1b}[2K\rclosed: every task";
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.rule.md",
+                &record_file(
+                    "decision.rule",
+                    "decision",
+                    "active",
+                    &["kind: rule", &format!("title: {forged}")],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.demo.md",
+                &record_file(
+                    "task.demo",
+                    "task",
+                    "active",
+                    &[],
+                    &format!("\n- 2026-08-25 claude: {forged}\n"),
+                ),
+            ),
+        ]);
+        let text = status_text(&mut storage);
+
+        assert!(
+            !text.contains('\r'),
+            "no line may carry a raw return: {text:?}"
+        );
+        assert!(
+            !text.contains('\u{1b}'),
+            "no line may carry a raw escape: {text:?}"
+        );
+        assert!(
+            text.contains("\\u001b[2K\\rclosed: every task\""),
+            "the text is still shown, spelled so a terminal reads it as text: {text:?}"
+        );
     }
 
     #[test]

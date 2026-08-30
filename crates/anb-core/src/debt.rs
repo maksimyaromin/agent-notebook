@@ -7,6 +7,7 @@
 //! citation in it is a hint, not an invalidity.
 
 use crate::date;
+use crate::encode::quoted_if_delimited;
 use crate::grammar;
 use crate::mention;
 use crate::record::{REF_KEYS, Record, RecordType};
@@ -82,7 +83,9 @@ impl DebtSignal {
             | DebtSignal::ReviewWait { id, days } => format!("{code}: {id} ({days}d)"),
             DebtSignal::OriginClosed { id, origin } => format!("{code}: {id} ({origin} closed)"),
             DebtSignal::ReviewDue { id, date } => format!("{code}: {id} ({date})"),
-            DebtSignal::DanglingMention { id, target } => format!("{code}: {id} -> {target}"),
+            DebtSignal::DanglingMention { id, target } => {
+                format!("{code}: {id} -> {}", quoted_if_delimited(target))
+            }
             DebtSignal::UndeclaredPair { first, second } => format!(
                 "{code}: {} ({}) <-> {} ({})",
                 first.id,
@@ -92,9 +95,11 @@ impl DebtSignal {
             ),
             DebtSignal::Invalid { path, errors } => {
                 let unit = if *errors == 1 { "error" } else { "errors" };
-                format!("{code}: {path} ({errors} {unit})")
+                format!("{code}: {} ({errors} {unit})", quoted_if_delimited(path))
             }
-            DebtSignal::LostProof { id, proof } => format!("{code}: {id} -> {proof}"),
+            DebtSignal::LostProof { id, proof } => {
+                format!("{code}: {id} -> {}", quoted_if_delimited(proof))
+            }
         }
     }
 }
@@ -468,13 +473,11 @@ impl RankedPair {
     }
 }
 
-/// Any envelope edge counts as declared: the pair heuristic hunts only
-/// relationships that exist nowhere but in prose.
+/// Any reference the envelope draws counts as declared: the pair heuristic
+/// hunts only relationships that exist nowhere but in prose.
 fn declares_edge(record: &Record, target: &str) -> bool {
     let names_target = |key| record.file().field_values(key).any(|value| value == target);
-    ["supersedes", "superseded-by", "from"]
-        .into_iter()
-        .any(names_target)
+    REF_KEYS.into_iter().any(names_target)
         || record
             .file()
             .field_values("link")

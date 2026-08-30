@@ -137,11 +137,11 @@ mod budget_ladder {
              review[8]: task.waiting0, task.waiting1, task.waiting2, task.waiting3, \
              task.waiting4, \u{2026} 3 more — waiting on a human\n\
              rules[8]:\n\
-             \x20 decision.rule0: A demo record\n\
-             \x20 decision.rule1: A demo record\n\
-             \x20 decision.rule2: A demo record\n\
-             \x20 decision.rule3: A demo record\n\
-             \x20 decision.rule4: A demo record\n  \u{2026} 3 more\n\
+             \x20 decision.rule0: \"A demo record\"\n\
+             \x20 decision.rule1: \"A demo record\"\n\
+             \x20 decision.rule2: \"A demo record\"\n\
+             \x20 decision.rule3: \"A demo record\"\n\
+             \x20 decision.rule4: \"A demo record\"\n  \u{2026} 3 more\n\
              ready[8]{id,priority,age,title}:\n\
              \x20 task.child0,-,3d,A demo record\n\
              \x20 task.child1,-,3d,A demo record\n\
@@ -193,7 +193,7 @@ mod budget_ladder {
         let full = rendered(Budget::Unbounded);
         for section in [
             "in-flight: task.flight",
-            "log: - 2026-08-25 claude: stopped at the ladder",
+            "log: \"- 2026-08-25 claude: stopped at the ladder\"",
             "review[1]: task.waiting — waiting on a human",
             "rules[1]:",
             "ready[7]{id,priority,age,title}:",
