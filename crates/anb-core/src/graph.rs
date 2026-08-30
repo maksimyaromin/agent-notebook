@@ -98,7 +98,7 @@ fn collect_cycles_from<'a>(
     enter(&mut frames, visits, from);
     while let Some(&mut (at, ref mut taken)) = frames.last_mut() {
         let step = *taken;
-        let Some(&target) = edges.get(at).map_or(&[][..], Vec::as_slice).get(step) else {
+        let Some(&target) = edges.get(at).and_then(|targets| targets.get(step)) else {
             visits.insert(at, Visit::Done);
             frames.pop();
             continue;

@@ -9,6 +9,32 @@ fn findings_for(storage: &mut MemoryStorage) -> Vec<(String, FindingCode)> {
         .collect()
 }
 
+/// A finding quotes the value it condemns, and a hand can write a field
+/// as long as it likes; the row that names it still answers at a fixed
+/// size, with both ends of the value kept so the reason survives the cut.
+#[test]
+fn a_finding_quoting_a_long_value_keeps_both_ends_of_it() {
+    let long = "x".repeat(2000);
+    let mut storage = storage_with(&[(
+        "tasks/task.demo.md",
+        &format!(
+            "---\nid: task.demo\ntype: task\nstate: {long}\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-25\n---\n"
+        ),
+    )]);
+
+    let located = Notebook::new(&mut storage).check().unwrap();
+    let message = &located.first().unwrap().finding.message;
+    assert!(
+        message.chars().count() <= anb_core::encode::TEXT_BOUND,
+        "unbounded message: {message}"
+    );
+    assert!(message.starts_with("state: `x"), "lost the key: {message}");
+    assert!(
+        message.ends_with("` is not one of open, active, review, closed for a task"),
+        "lost the reason: {message}"
+    );
+}
+
 #[test]
 fn a_clean_notebook_checks_empty() {
     let mut storage = storage_with(&[

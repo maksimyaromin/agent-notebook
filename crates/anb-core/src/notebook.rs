@@ -4,8 +4,11 @@
 //! Write-time invariants live here, and they bind every author equally: a
 //! declared supersession writes the back-pointer and flips the victim, a
 //! Question closes only by routing or an explicit reasoned drop, a close
-//! carries its proof. Every mutation is idempotent — a replayed call answers
-//! `already: true` and leaves every byte of every file unchanged.
+//! carries its proof. A verb that moves a record already in the notebook is
+//! idempotent — a replayed call answers `already: true` and leaves every
+//! byte of every file unchanged. Creating and expunging are not replays of
+//! anything: a second `add` of the same title mints a second record, and a
+//! second `expunge` names an id the notebook no longer holds.
 //!
 //! The mutation gate holds a record's own error findings and its dangling
 //! references against it; findings that need a second record — a broken
@@ -767,7 +770,6 @@ impl<'a, S: Storage> Notebook<'a, S> {
         if query::last_log_line(&loaded.record).as_deref() == Some(entry.as_str()) {
             return Ok(Commented {
                 id: id.to_owned(),
-                entry,
                 already: true,
                 dangling_mentions,
             });
@@ -778,7 +780,6 @@ impl<'a, S: Storage> Notebook<'a, S> {
         self.storage.write(&loaded.path, &file.render())?;
         Ok(Commented {
             id: id.to_owned(),
-            entry,
             already: false,
             dangling_mentions,
         })
@@ -1045,9 +1046,8 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let reports = self.carriable_reports(&loaded.record)?;
         self.guard_archive_destination_free(id, &moved.to, loaded.record.file())?;
         // The reports move first, so a run interrupted inside the cascade
-        // leaves the record live and the next call finishes it: what was
-        // filed already is no longer live, so it is no longer carriable.
-        for report in &reports {
+        // leaves the record live and the next call finishes it.
+        for report in reports {
             moved.carried.push(self.file_report(report, today)?);
         }
         self.storage
@@ -1067,7 +1067,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// else — a Note born elsewhere, one already filed, a target that is no
     /// record id at all — is left alone, because a link is evidence and
     /// evidence is not a licence to move another record.
-    fn carriable_reports(&self, filed: &Record) -> Result<Vec<LoadedLive>, NotebookError> {
+    fn carriable_reports(&self, filed: &Record) -> Result<Vec<Report>, NotebookError> {
         let origin = path_stem(filed.path());
         let mut reports = Vec::new();
         for id in query::note_links(filed) {
@@ -1085,18 +1085,51 @@ impl<'a, S: Storage> Notebook<'a, S> {
                     findings: record.error_findings(),
                 });
             }
-            self.guard_archive_destination_free(
-                &id,
-                &record_path(&id, RecordType::Note, true),
-                record.file(),
-            )?;
-            reports.push(LoadedLive {
+            let destination = record_path(&id, RecordType::Note, true);
+            self.guard_report_destination(&destination, origin)?;
+            reports.push(Report {
                 path,
                 record,
-                carried_errors: false,
+                destination,
             });
         }
         Ok(reports)
+    }
+
+    /// Refuse the report's place in the archive when another record holds
+    /// it. Free is a place this move may take, and so is one holding this
+    /// origin's own report from a run that crashed mid-cascade.
+    ///
+    /// A report is retired as it is filed and stamped with the day it
+    /// moved, so it can never equal the live bytes the way an unchanged
+    /// record does: the interrupted move is recognised by what stands
+    /// there — this origin's report, retired, sound — and never by what it
+    /// says. What it says is the live copy's to decide, which is why the
+    /// move writes it again instead of trusting what it found.
+    fn guard_report_destination(
+        &self,
+        destination: &str,
+        origin: &str,
+    ) -> Result<(), NotebookError> {
+        let text = match self.storage.read(destination) {
+            Ok(text) => text,
+            Err(StorageError::NotFound { .. }) => return Ok(()),
+            // Bytes no parse can read stand for a record that is not this
+            // report, which is the refusal below.
+            Err(StorageError::NotUtf8 { .. }) => String::new(),
+            Err(error) => return Err(error.into()),
+        };
+        let standing = Record::parse(destination, &text);
+        if standing.origin() == Some(origin)
+            && standing.state() == Some("retired")
+            && !standing.has_errors()
+        {
+            return Ok(());
+        }
+        Err(NotebookError::DuplicateId {
+            id: path_stem(destination).to_owned(),
+            holder: destination.to_owned(),
+        })
     }
 
     /// Retire a report and file it in one move: a Note is current knowledge
@@ -1104,13 +1137,12 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// reports on becoming history. Only the Note this call already judged
     /// moves — a report of its own is not followed, so the cascade is one
     /// record deep.
-    fn file_report(&mut self, report: &LoadedLive, today: &str) -> Result<String, NotebookError> {
+    fn file_report(&mut self, report: Report, today: &str) -> Result<String, NotebookError> {
         let id = path_stem(&report.path).to_owned();
-        let mut file = RecordFile::parse(&report.record.file().render());
+        let mut file = report.record.into_file();
         file.set_field("state", "retired");
         file.set_field("updated", today);
-        self.storage
-            .write(&record_path(&id, RecordType::Note, true), &file.render())?;
+        self.storage.write(&report.destination, &file.render())?;
         self.storage.remove(&report.path)?;
         Ok(id)
     }
@@ -1649,11 +1681,24 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// search it, or refuse an id it already claims.
     fn whole_corpus(&self) -> Result<Corpus, NotebookError> {
         let mut records = Vec::new();
-        for record_type in RecordType::ALL {
+        let mut held = [0; RecordType::ALL.len()];
+        for (record_type, tally) in RecordType::ALL.into_iter().zip(&mut held) {
             records.extend(self.records_in(record_type.directory())?);
-            records.extend(self.records_in(&archive_of(record_type.directory()))?);
+            let filed = self.records_in(&archive_of(record_type.directory()))?;
+            *tally = filed.len();
+            records.extend(filed);
         }
-        self.corpus(records)
+        let archived = records
+            .iter()
+            .filter(|record| is_archived(record.path()))
+            .filter_map(|record| resolvable_id(record.path()))
+            .map(str::to_owned)
+            .collect();
+        Ok(Corpus {
+            records,
+            archived,
+            archive: Counts::per_type(held),
+        })
     }
 
     /// The live records, with the archive present by name alone: a query
@@ -1682,12 +1727,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok(Corpus {
             records,
             archived,
-            archive: Counts {
-                tasks: held[0],
-                decisions: held[1],
-                notes: held[2],
-                questions: held[3],
-            },
+            archive: Counts::per_type(held),
         })
     }
 
@@ -1747,6 +1787,13 @@ impl LoadedLive {
     fn state_word(&self) -> &str {
         self.record.state().expect("a clean record carries a state")
     }
+}
+
+/// A report an archive move carries, judged before the first byte moves.
+struct Report {
+    path: String,
+    record: Record,
+    destination: String,
 }
 
 struct Victim {

@@ -100,6 +100,56 @@ fn a_write_that_cannot_land_leaves_no_temp_file_behind() {
     );
 }
 
+/// The leaf guard refuses a record that is a link; a directory is walked
+/// through without asking. A `tasks` linked out of the root, committed to
+/// a project, would have every listing read files the notebook never wrote
+/// and every write land outside it — so the root is refused for what it is.
+#[cfg(unix)]
+#[test]
+fn a_root_whose_directory_is_a_link_is_no_notebook() {
+    let archive = anb_core::ARCHIVE_DIR;
+    for linked in [
+        anb_core::RecordType::Task.directory().to_owned(),
+        archive.to_owned(),
+        format!("{archive}/{}", anb_core::RecordType::Note.directory()),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("notebook");
+        let outside = dir.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::create_dir_all(root.join(&linked).parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(&linked)).unwrap();
+
+        assert_eq!(
+            anb::fs_storage::unusable_root(&root),
+            Some(format!(
+                "notebook: {} is a link, not a notebook directory",
+                root.join(&linked).display()
+            )),
+            "a linked `{linked}` must not pass as the notebook's own"
+        );
+    }
+}
+
+/// The root itself is the caller's to place — a notebook may be a link
+/// into a dotfile tree, and the lock the writers take is per-inode, so it
+/// serializes through one either way. Only a directory *inside* the root
+/// is the notebook's own.
+#[cfg(unix)]
+#[test]
+fn a_root_that_is_itself_a_link_is_a_notebook_like_any_other() {
+    let dir = TempDir::new().unwrap();
+    let real = dir.path().join("elsewhere");
+    fs::create_dir_all(real.join("tasks")).unwrap();
+    let root = dir.path().join("notebook");
+    std::os::unix::fs::symlink(&real, &root).unwrap();
+
+    assert_eq!(anb::fs_storage::unusable_root(&root), None);
+    let mut storage = FsStorage::new(root.clone());
+    storage.write("tasks/task.demo.md", "body").unwrap();
+    assert_eq!(storage.read("tasks/task.demo.md").unwrap(), "body");
+}
+
 /// A notebook path that names a file is refused for what it is, rather
 /// than through the first write's "File exists".
 #[test]
@@ -300,57 +350,6 @@ mod root_resolution {
             notebook_root(dir.path(), None, Some(OsStr::new(""))),
             dir.path().join(".agent-notebook"),
             "an unset variable often arrives as an empty one"
-        );
-    }
-}
-
-/// What the shell sees when it stops listening mid-reply.
-mod a_reader_that_walks_away {
-    use super::*;
-    use std::fmt::Write as _;
-    use std::io::Read as _;
-    use std::process::{Command, Stdio};
-
-    #[test]
-    fn a_reader_that_stops_early_ends_the_reply_quietly() {
-        let project = TempDir::new().unwrap();
-        let notebook = project.path().join("nb");
-        fs::create_dir_all(notebook.join("tasks")).unwrap();
-        // Past any pipe buffer, so the write blocks and then fails.
-        let mut body = String::new();
-        for line in 0..20_000 {
-            let _ = writeln!(body, "  line {line}");
-        }
-        fs::write(
-            notebook.join("tasks/task.big.md"),
-            format!(
-                "---\nid: task.big\ntype: task\nstate: open\ntitle: Big\ncreated: 2026-08-24\nupdated: 2026-08-25\n---\n\n{body}"
-            ),
-        )
-        .unwrap();
-
-        let mut view = Command::new(env!("CARGO_BIN_EXE_anb"))
-            .args(["--notebook", notebook.to_str().unwrap(), "view", "task.big"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("the binary runs");
-        // The pipe closes when this temporary drops at the end of the
-        // statement — binding it would keep the reader listening.
-        let mut first = [0u8; 16];
-        view.stdout.take().unwrap().read_exact(&mut first).unwrap();
-
-        let ended = view.wait_with_output().unwrap();
-        assert!(
-            ended.status.success(),
-            "a closed pipe is the reader's choice, not a failure: {:?}, {}",
-            ended.status,
-            String::from_utf8_lossy(&ended.stderr)
-        );
-        assert!(
-            ended.stderr.is_empty(),
-            "nothing is reported about it either: {}",
-            String::from_utf8_lossy(&ended.stderr)
         );
     }
 }

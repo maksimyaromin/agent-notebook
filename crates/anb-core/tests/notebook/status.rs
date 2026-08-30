@@ -8,6 +8,41 @@ mod status_dashboard {
             .text
     }
 
+    /// A dashboard is derived, so its size is the dashboard's shape and
+    /// not the notebook's: a title and a log line are a record's own text,
+    /// and a hand writes them as long as it likes. Every line that carries
+    /// one is cut; the whole line is one `view` away.
+    #[test]
+    fn no_dashboard_line_carries_a_record_s_text_whole() {
+        let wall_of_words = "word ".repeat(400);
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &format!(
+                    "---\nid: task.demo\ntype: task\nstate: active\ntitle: {wall_of_words}\ncreated: 2026-08-24\nupdated: 2026-08-25\n---\n- 2026-08-26 -: {wall_of_words}\n"
+                ),
+            ),
+            (
+                "decisions/decision.rule.md",
+                &record_file("decision.rule", "decision", "active", &["kind: rule"], "")
+                    .replace("title: A demo record", &format!("title: {wall_of_words}")),
+            ),
+        ]);
+        let text = status_text(&mut storage);
+
+        for prefix in ["in-flight:", "log:", "  decision.rule:"] {
+            let line = text
+                .lines()
+                .find(|line| line.starts_with(prefix))
+                .unwrap_or_else(|| panic!("no `{prefix}` line in: {text}"));
+            assert!(
+                line.chars().count() < wall_of_words.chars().count(),
+                "the wall reached the dashboard: {line}"
+            );
+            assert!(line.contains("more characters"), "no elision: {line}");
+        }
+    }
+
     /// The dashboard is a derived query like every other: a record whose
     /// findings put it outside `ready` and `list` cannot lead a session
     /// from the in-flight, review or rules line either. Each of the three
@@ -189,29 +224,6 @@ mod status_dashboard {
             "a standing rule is not work in motion: {}",
             status.text
         );
-    }
-
-    #[test]
-    fn more_ready_than_five_rows_shows_five_and_the_shorter_hint() {
-        let files: Vec<(String, String)> = (0..7)
-            .map(|index| {
-                (
-                    format!("tasks/task.t{index}.md"),
-                    format!(
-                        "---\nid: task.t{index}\ntype: task\nstate: open\ntitle: A demo record\ncreated: 2026-08-2{}\n---\n",
-                        index % 8
-                    ),
-                )
-            })
-            .collect();
-        let mut storage = MemoryStorage::from_files(files);
-        let text = status_text(&mut storage);
-        assert!(
-            text.contains("ready[7]{id,priority,age,title}:\n"),
-            "{text}"
-        );
-        assert_eq!(text.matches("\n  task.").count(), 5, "{text}");
-        assert!(text.contains("  … 2 more: anb ready\n"), "{text}");
     }
 
     #[test]

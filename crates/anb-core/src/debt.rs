@@ -143,10 +143,19 @@ fn reference_targets(record: &Record) -> impl Iterator<Item = &str> {
 /// Every Debt signal of the notebook, in the clock table's order, oldest
 /// first within a class.
 pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) -> Vec<DebtSignal> {
+    // Answering this walks every reference through the resolver, and both
+    // the exclusion below and the invalid signal further down ask it.
+    let error_counts: Vec<usize> = sources
+        .records
+        .iter()
+        .map(|record| excluding_errors(record, sources.resolvable))
+        .collect();
     let valid: Vec<&Record> = sources
         .records
         .iter()
-        .filter(|record| !is_excluded(record, sources.resolvable))
+        .zip(&error_counts)
+        .filter(|(_, errors)| **errors == 0)
+        .map(|(record, _)| record)
         .collect();
 
     let mut classes = SignalClasses::default();
@@ -158,8 +167,7 @@ pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) ->
     classes.lost_proofs = lost_proofs(sources);
     // A corrupt live file is a hint the reader can act on today; a corrupt
     // filed one is `check`'s to name.
-    for record in sources.records {
-        let errors = excluding_errors(record, sources.resolvable);
+    for (record, errors) in sources.records.iter().zip(error_counts) {
         if errors > 0 {
             classes.invalid.push(DebtSignal::Invalid {
                 path: record.path().to_owned(),
@@ -200,7 +208,7 @@ impl SignalClasses {
             self.lost_proofs,
             self.invalid,
         ] {
-            class.sort_by_key(signal_rank);
+            class.sort_by_cached_key(signal_rank);
             ordered.extend(class);
         }
         ordered
@@ -396,7 +404,7 @@ fn collect_dangling_mentions(
 /// Ranked by the older member's `created`, oldest first. High precision by
 /// construction — a typed id in prose is a deliberate reference.
 fn undeclared_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSignal> {
-    let mut found: Vec<(String, DebtSignal)> = Vec::new();
+    let mut found: Vec<RankedPair> = Vec::new();
     let live_decision =
         |record: &Record| record.record_type() == Some(RecordType::Decision) && record.is_live();
     let valid_paths: BTreeSet<&str> = valid.iter().map(|record| record.path()).collect();
@@ -417,31 +425,46 @@ fn undeclared_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSig
             } else {
                 (other, record)
             };
-            let pair = DebtSignal::UndeclaredPair {
-                first: Cited::of(first),
-                second: Cited::of(second),
-            };
-            if !found.iter().any(|(_, existing)| *existing == pair) {
-                let older_created = [first, second]
+            let (one, other) = (Cited::of(first), Cited::of(second));
+            if found
+                .iter()
+                .any(|pair| pair.first == one && pair.second == other)
+            {
+                continue;
+            }
+            found.push(RankedPair {
+                older_created: [first, second]
                     .into_iter()
                     .filter_map(|member| member.file().field("created"))
                     .min()
                     .unwrap_or_default()
-                    .to_owned();
-                found.push((older_created, pair));
-            }
+                    .to_owned(),
+                first: one,
+                second: other,
+            });
         }
     }
-    found.sort_by(|(left_key, left), (right_key, right)| {
-        (left_key, pair_ids(left)).cmp(&(right_key, pair_ids(right)))
-    });
-    found.into_iter().map(|(_, pair)| pair).collect()
+    found.sort_by(|left, right| left.rank().cmp(&right.rank()));
+    found
+        .into_iter()
+        .map(|pair| DebtSignal::UndeclaredPair {
+            first: pair.first,
+            second: pair.second,
+        })
+        .collect()
 }
 
-fn pair_ids(pair: &DebtSignal) -> (String, String) {
-    match pair {
-        DebtSignal::UndeclaredPair { first, second } => (first.id.clone(), second.id.clone()),
-        _ => (String::new(), String::new()),
+/// An undeclared pair with what ranks it: the older member's `created`,
+/// read where both members are still at hand.
+struct RankedPair {
+    older_created: String,
+    first: Cited,
+    second: Cited,
+}
+
+impl RankedPair {
+    fn rank(&self) -> (&str, &str, &str) {
+        (&self.older_created, &self.first.id, &self.second.id)
     }
 }
 

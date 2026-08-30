@@ -1,5 +1,30 @@
 mod listing {
     use crate::*;
+
+    /// A listing row is derived, and a title is a record's own text: the
+    /// row carries as much of it as a reply affords, whatever a hand wrote.
+    #[test]
+    fn a_long_title_is_cut_in_a_listing_row_and_in_the_ready_queue() {
+        let wall_of_words = "word ".repeat(400);
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &format!(
+                "---\nid: task.demo\ntype: task\nstate: open\ntitle: {wall_of_words}\ncreated: 2026-08-24\nupdated: 2026-08-25\n---\n"
+            ),
+        )]);
+        let notebook = Notebook::new(&mut storage);
+
+        let listed = notebook.list().unwrap().pop().unwrap().title.unwrap();
+        let queued = notebook.ready().unwrap().pop().unwrap().title;
+        for title in [listed, queued] {
+            assert!(
+                title.chars().count() <= anb_core::encode::TEXT_BOUND,
+                "unbounded title: {title}"
+            );
+            assert!(title.contains("more characters"), "no hint: {title}");
+        }
+    }
+
     use anb_core::ListedRecord;
 
     #[test]

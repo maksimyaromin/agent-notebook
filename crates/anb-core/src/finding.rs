@@ -145,31 +145,26 @@ impl Finding {
 
     #[must_use]
     pub fn at(line: usize, code: FindingCode, message: String) -> Self {
-        Self {
-            code,
-            line: Some(line),
-            message,
-        }
+        Self::located(Some(line), code, message)
     }
 
     /// A finding about the file as a whole, with no line to point at.
     #[must_use]
     pub fn for_file(code: FindingCode, message: String) -> Self {
-        Self {
-            code,
-            line: None,
-            message,
-        }
+        Self::located(None, code, message)
     }
 
     /// A finding wherever its field sits — a known line, or none on a field
     /// spliced in by a mutation.
+    ///
+    /// The message quotes the value it condemns and a hand can write a
+    /// field as long as it likes, so it is bounded here.
     #[must_use]
     pub fn located(line: Option<usize>, code: FindingCode, message: String) -> Self {
         Self {
             code,
             line,
-            message,
+            message: crate::encode::bounded_text(message),
         }
     }
 }

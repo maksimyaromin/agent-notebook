@@ -6,6 +6,7 @@
 //! handed it, which is what keeps a verb to one pass over the notebook.
 
 use crate::debt;
+use crate::encode;
 use crate::grammar::{self, Residence};
 use crate::graph::{TaskGraph, TaskNode};
 use crate::mention;
@@ -155,7 +156,10 @@ pub(super) fn listed_row(record: &Record, resolvable: &Resolver<'_>) -> ListedRe
         id: path_stem(record.path()).to_owned(),
         state,
         priority: file.field("priority").and_then(|value| value.parse().ok()),
-        title: file.field("title").map(str::to_owned),
+        title: file
+            .field("title")
+            .map(str::to_owned)
+            .map(encode::bounded_text),
     }
 }
 
@@ -214,7 +218,7 @@ fn ready_row(record: &Record) -> ReadyTask {
         id: path_stem(record.path()).to_owned(),
         priority: file.field("priority").and_then(|value| value.parse().ok()),
         created: file.field("created").unwrap_or_default().to_owned(),
-        title: file.field("title").unwrap_or_default().to_owned(),
+        title: encode::bounded_text(file.field("title").unwrap_or_default().to_owned()),
     }
 }
 
@@ -266,14 +270,19 @@ impl<'a> MembershipIndex<'a> {
             closed: BTreeSet::new(),
         };
         // Live before archived, so the duplicate-id corruption an
-        // interrupted archive move leaves reads as the live file's edges
-        // and not as the union of two. A record claims its slot even with
-        // nothing to wait on: waiting on nothing is an answer, and a file
-        // that gave none would let its archived twin answer for it.
+        // interrupted archive move leaves reads as the live file's record
+        // and not as the union of two: the first file to claim an id
+        // answers for it on every edge at once. Waiting on nothing, being
+        // born nowhere and standing open are answers like any other, so a
+        // claimed id closes the slot whether or not it filled one.
         for record in live.iter().chain(archived) {
             let id = path_stem(record.path());
-            let waits: Vec<&str> = record.file().field_values("blocked-by").collect();
-            index.waits_on.entry(id).or_insert(waits);
+            if index.waits_on.contains_key(id) {
+                continue;
+            }
+            index
+                .waits_on
+                .insert(id, record.file().field_values("blocked-by").collect());
             if let Some(origin) = record.origin() {
                 index.born_inside.entry(origin).or_default().push(id);
             }
@@ -440,8 +449,13 @@ pub(super) fn in_flight_tasks(live_valid: &[&Record]) -> Vec<ActiveTask> {
         .enumerate()
         .map(|(position, record)| ActiveTask {
             id: path_stem(record.path()).to_owned(),
-            title: record.file().field("title").unwrap_or_default().to_owned(),
-            log: (position == 0).then(|| last_log_line(record)).flatten(),
+            title: encode::bounded_text(
+                record.file().field("title").unwrap_or_default().to_owned(),
+            ),
+            log: (position == 0)
+                .then(|| last_log_line(record))
+                .flatten()
+                .map(encode::bounded_text),
         })
         .collect()
 }
@@ -497,7 +511,9 @@ pub(super) fn standing_rules(live_valid: &[&Record]) -> Vec<StatusRule> {
         .iter()
         .map(|record| StatusRule {
             id: path_stem(record.path()).to_owned(),
-            title: record.file().field("title").unwrap_or_default().to_owned(),
+            title: encode::bounded_text(
+                record.file().field("title").unwrap_or_default().to_owned(),
+            ),
         })
         .collect()
 }

@@ -8,7 +8,7 @@
 //! for a file it did not write, and following one would let a link
 //! committed to a project decide what a later reader's `view` prints.
 
-use anb_core::{Storage, StorageError};
+use anb_core::{ARCHIVE_DIR, RecordType, Storage, StorageError};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
@@ -64,12 +64,35 @@ pub fn notebook_root(start: &Path, named: Option<&Path>, from_env: Option<&OsStr
 /// exists" would be a true error about the wrong thing.
 #[must_use]
 pub fn unusable_root(root: &Path) -> Option<String> {
-    (root.exists() && !root.is_dir()).then(|| {
-        format!(
+    if root.exists() && !root.is_dir() {
+        return Some(format!(
             "notebook: {} is a file, not a notebook directory",
             root.display()
-        )
-    })
+        ));
+    }
+    record_directories()
+        .map(|relative| root.join(relative))
+        .find(|directory| is_symlink(directory))
+        .map(|directory| {
+            format!(
+                "notebook: {} is a link, not a notebook directory",
+                directory.display()
+            )
+        })
+}
+
+/// Every directory under the root that a record's path passes through.
+///
+/// The seam refuses a record that is a symlink, but it walks a directory
+/// without asking: a `tasks` linked elsewhere and committed to a project
+/// would have every listing read files the notebook never wrote, and every
+/// write land outside it. The set is the notebook's own and settled, so
+/// proving it costs one `lstat` each and no reading at all.
+fn record_directories() -> impl Iterator<Item = String> {
+    std::iter::once(ARCHIVE_DIR.to_owned()).chain(RecordType::ALL.into_iter().flat_map(|of| {
+        let directory = of.directory();
+        [directory.to_owned(), format!("{ARCHIVE_DIR}/{directory}")]
+    }))
 }
 
 /// Name this run's leavings in the notebook's own ignore file: the lock a

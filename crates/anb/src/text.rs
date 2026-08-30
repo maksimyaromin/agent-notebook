@@ -256,7 +256,7 @@ fn ready_table(rows: &[ReadyTask], shown: usize, today: &str, restore: &str) -> 
     }
     let mut out = String::new();
     let today_day = date::day_number(today).unwrap_or(0);
-    out.push_str(&encode::ready_table(rows, shown, today_day));
+    out.push_str(&ReadyTask::table(rows, shown, today_day));
     truncation_hint(&mut out, rows.len(), shown, restore);
     out
 }

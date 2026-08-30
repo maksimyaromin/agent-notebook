@@ -6,6 +6,7 @@
 //! hint for Debt and the view surfaces, never a validity judgment.
 
 use crate::grammar;
+use std::collections::BTreeSet;
 
 const TYPE_PREFIXES: [&str; 4] = ["task.", "decision.", "note.", "question."];
 
@@ -18,6 +19,7 @@ const TYPE_PREFIXES: [&str; 4] = ["task.", "decision.", "note.", "question."];
 pub(crate) fn mentions(text: &str) -> Vec<&str> {
     let bytes = text.as_bytes();
     let mut found: Vec<&str> = Vec::new();
+    let mut seen = BTreeSet::new();
     let mut at = 0;
     while at < bytes.len() {
         if bytes[at] == b'`' {
@@ -34,7 +36,7 @@ pub(crate) fn mentions(text: &str) -> Vec<&str> {
         }
         match id_at(text, at) {
             Some(id) => {
-                if !found.contains(&id) {
+                if seen.insert(id) {
                     found.push(id);
                 }
                 at += id.len();

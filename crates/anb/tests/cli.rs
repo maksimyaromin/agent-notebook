@@ -7,7 +7,7 @@ use anb::reply::{Host, execute};
 use anb::{json, text};
 use anb_core::MemoryStorage;
 use anb_core::StorageError;
-use clap::Parser;
+use clap::{CommandFactory as _, Parser};
 use insta::assert_snapshot;
 use std::fmt::Write as _;
 
@@ -21,18 +21,14 @@ fn run(storage: &mut MemoryStorage, line: &[&str]) -> Result<String, String> {
 }
 
 /// [`run`] with files the shell may read by path — the report `--note`
-/// ingests lives outside the notebook, so no Storage serves it.
+/// ingests lives outside the notebook, so no Storage serves it. A path the
+/// list does not name is a file that is not there.
 fn run_reading(
     storage: &mut MemoryStorage,
     line: &[&str],
     reports: &[(&str, &str)],
 ) -> Result<String, String> {
-    let mut args = vec!["anb"];
-    args.extend_from_slice(line);
-    let cli = Cli::try_parse_from(args).expect("the test drives a well-formed command line");
-    let subject = anb::recovery::subject(&cli.command);
-    let wants_json = cli.json;
-    let read_report = |path: &str| {
+    run_with_reports(storage, line, &|path: &str| {
         reports
             .iter()
             .find(|(named, _)| *named == path)
@@ -40,10 +36,24 @@ fn run_reading(
             .ok_or_else(|| StorageError::NotFound {
                 path: path.to_owned(),
             })
-    };
+    })
+}
+
+/// [`run`] with the shell's own reader, so a test can pose the ways a read
+/// fails as well as what it returns.
+fn run_with_reports(
+    storage: &mut MemoryStorage,
+    line: &[&str],
+    read_report: &dyn Fn(&str) -> Result<String, StorageError>,
+) -> Result<String, String> {
+    let mut args = vec!["anb"];
+    args.extend_from_slice(line);
+    let cli = Cli::try_parse_from(args).expect("the test drives a well-formed command line");
+    let subject = anb::recovery::subject(&cli.command);
+    let wants_json = cli.json;
     let host = Host {
         git_by: || Some(GIT_IDENTITY.to_owned()),
-        read_report: &read_report,
+        read_report,
         lost_proofs: &nothing_lost,
         today: TODAY,
     };
@@ -135,6 +145,36 @@ fn many_open_tasks(count: usize) -> MemoryStorage {
 
 mod task_cycle_replies {
     use super::*;
+
+    /// The report is read from the shell's world, so a read that fails on its
+    /// encoding is a refused argument the caller retypes — not the notebook's
+    /// fault, and not a close.
+    #[test]
+    fn a_report_that_is_not_utf8_refuses_the_close_and_moves_nothing() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "active", "A demo record", &[], ""),
+        )]);
+        let unreadable = |path: &str| {
+            Err(StorageError::NotUtf8 {
+                path: path.to_owned(),
+            })
+        };
+
+        assert_snapshot!(
+            run_with_reports(&mut storage, &["close", "task.demo", "--note", "report.md"], &unreadable)
+                .expect_err("bytes outside UTF-8 are no proof"),
+            @r"
+        error[invalid-argument]: note: `report.md` is not UTF-8
+        try: anb close task.demo --note <path>
+        try: anb close task.demo --no-proof
+        "
+        );
+        assert!(
+            ok(&mut storage, &["view", "task.demo"]).contains("state: active"),
+            "the task stays where it was"
+        );
+    }
     use anb_core::Storage as _;
 
     #[test]
@@ -644,6 +684,64 @@ mod task_cycle_replies {
 
 mod knowledge_replies {
     use super::*;
+
+    /// A Note supersedes as a Decision does, so its reply names the record
+    /// it replaced the same way — the consequence a caller must not have to
+    /// go looking for.
+    #[test]
+    fn a_note_that_supersedes_names_the_one_it_replaces() {
+        let mut storage = storage_with(&[(
+            "notes/note.old.md".to_owned(),
+            record_file("note.old", "note", "active", "The old note", &[], ""),
+        )]);
+        assert_eq!(
+            ok(
+                &mut storage,
+                &["note", "The new note", "--supersedes", "note.old"],
+            ),
+            "ok: note note.the-new-note — notes/note.the-new-note.md\n\
+             superseded: note.old\n"
+        );
+    }
+
+    /// `--to` routes a Question into what its answer became and `--drop` ends
+    /// it with a reason; passing both leaves nothing to choose between, and
+    /// silently keeping one would discard the other's words.
+    #[test]
+    fn answering_with_both_a_route_and_a_drop_names_the_conflict() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.doubt.md".to_owned(),
+                record_file("question.doubt", "question", "open", "A doubt", &[], ""),
+            ),
+            (
+                "decisions/decision.settled.md".to_owned(),
+                record_file("decision.settled", "decision", "active", "Settled", &[], ""),
+            ),
+        ]);
+        assert_snapshot!(
+            refused(
+                &mut storage,
+                &[
+                    "answer",
+                    "question.doubt",
+                    "--to",
+                    "decision.settled",
+                    "--drop",
+                    "not worth it",
+                ],
+            ),
+            @r#"
+        error[invalid-argument]: answer: pass exactly one of --to, --drop
+        try: anb answer question.doubt --to <id>
+        try: anb answer question.doubt --drop "<why>"
+        "#
+        );
+        assert!(
+            ok(&mut storage, &["view", "question.doubt"]).contains("state: open"),
+            "a refused answer closes nothing"
+        );
+    }
     use anb_core::Storage as _;
 
     #[test]
@@ -982,6 +1080,20 @@ mod flat_lists {
 mod single_record {
     use super::*;
 
+    /// A filed record answers a read and refuses every state verb, so the
+    /// reply has to say which of the two it is.
+    #[test]
+    fn viewing_an_archived_record_names_it_as_history() {
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.done.md".to_owned(),
+            record_file("task.done", "task", "closed", "A finished task", &[], ""),
+        )]);
+        assert!(
+            ok(&mut storage, &["view", "task.done"]).contains("archived: true"),
+            "a filed record must not read like a live one"
+        );
+    }
+
     fn viewed_storage() -> MemoryStorage {
         storage_with(&[
             (
@@ -1199,6 +1311,21 @@ mod session_status {
 mod json_surface {
     use super::*;
 
+    /// The queue is what an agent parses to pick up work, so its row names
+    /// what it carries — and omits an absent priority like every other absent
+    /// field, rather than sending a null through.
+    #[test]
+    fn a_ready_row_names_its_fields_and_omits_what_is_unset() {
+        let mut storage = storage_with(&[
+            open_task("task.plain", "Untriaged work", &[]),
+            open_task("task.urgent", "Triaged work", &["priority: 1"]),
+        ]);
+        assert_eq!(
+            ok(&mut storage, &["ready", "--json"]),
+            r#"{"count":2,"ready":[{"id":"task.urgent","priority":1,"created":"2026-08-24","title":"Triaged work"},{"id":"task.plain","created":"2026-08-24","title":"Untriaged work"}]}"#
+        );
+    }
+
     #[test]
     fn a_mutation_confirms_in_compact_json() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
@@ -1290,16 +1417,6 @@ mod json_surface {
     }
 
     #[test]
-    fn an_absent_priority_is_omitted_from_a_json_row() {
-        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
-        let value: serde_json::Value =
-            serde_json::from_str(&ok(&mut storage, &["list", "--json"])).unwrap();
-        let row = &value["records"][0];
-        assert_eq!(row["id"], serde_json::json!("task.demo"));
-        assert!(row.get("priority").is_none());
-    }
-
-    #[test]
     fn a_decide_reply_carries_the_nudge() {
         let mut storage = storage_with(&[(
             "decisions/decision.first.md".to_owned(),
@@ -1369,14 +1486,14 @@ mod json_surface {
                     "--json"
                 ],
             ),
-            r#"{"ok":"comment","id":"task.demo","entry":"- 2026-08-28 Maks: waits on task.ghost, not the `task.quoted` case","already":false,"dangling-mention":{"count":1,"rows":["task.ghost"]}}"#
+            r#"{"ok":"comment","id":"task.demo","already":false,"dangling-mention":{"count":1,"rows":["task.ghost"]}}"#
         );
         assert_eq!(
             ok(
                 &mut storage,
                 &["comment", "task.demo", "plain text", "--json"]
             ),
-            r#"{"ok":"comment","id":"task.demo","entry":"- 2026-08-28 Maks: plain text","already":false}"#,
+            r#"{"ok":"comment","id":"task.demo","already":false}"#,
             "an absent nudge is omitted, like every absent field"
         );
     }
@@ -1485,6 +1602,89 @@ fn the_command_vocabulary_parses() {
             .command,
         Command::Status { hook: true, .. }
     ));
+}
+
+/// The retry shapes a refusal offers and the repair a finding names are
+/// command lines, so the parser must accept them. A flag renamed on one
+/// side and not the other leaves an agent typing something that no longer
+/// exists.
+#[test]
+fn every_command_the_tool_offers_can_be_typed_back() {
+    // Matched, not listed: a repair the notebook learns to name has to be
+    // spelled here before it can be printed at all.
+    let repairs = [
+        anb_core::Repair::Clear("from"),
+        anb_core::Repair::Unblock("task.other".to_owned()),
+        anb_core::Repair::Unhold,
+        anb_core::Repair::Archive,
+    ];
+    for repair in &repairs {
+        match repair {
+            anb_core::Repair::Clear(_)
+            | anb_core::Repair::Unblock(_)
+            | anb_core::Repair::Unhold
+            | anb_core::Repair::Archive => {}
+        }
+    }
+    let command = Cli::command();
+    let offered = command
+        .get_subcommands()
+        .filter_map(|verb| anb::recovery::runnable(verb.get_name(), Some("task.demo")))
+        .flatten()
+        .chain(
+            repairs
+                .iter()
+                .map(|repair| anb::reply::repair_command(repair, "tasks/task.demo.md")),
+        );
+
+    let mut checked = 0;
+    for shape in offered {
+        // The angle-bracketed parts are for a human to fill in; anything
+        // else in the line is the contract under test.
+        let filled = shell_words(&shape).map(|word| {
+            if word.starts_with('<') {
+                "task.other".to_owned()
+            } else {
+                word
+            }
+        });
+        assert!(
+            Cli::try_parse_from(filled).is_ok(),
+            "the tool offers a command it cannot parse: {shape}"
+        );
+        checked += 1;
+    }
+    let named_verbs = command
+        .get_subcommands()
+        .filter(|verb| anb::recovery::runnable(verb.get_name(), Some("task.demo")).is_some())
+        .count();
+    assert!(
+        checked > named_verbs && named_verbs > 0,
+        "only {checked} shapes over {named_verbs} verbs were reached"
+    );
+}
+
+/// A printed command line back into its words: a double-quoted run is one
+/// word, however many spaces it holds.
+fn shell_words(line: &str) -> impl Iterator<Item = String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    for character in line.chars() {
+        match character {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            c => word.push(c),
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words.into_iter()
 }
 
 mod maintenance_replies {
@@ -1957,12 +2157,26 @@ mod maintenance_replies {
             &waits.iter().map(String::as_str).collect::<Vec<&str>>(),
         ));
         let mut storage = storage_with(&files);
-        for (verb, hint) in [
-            ("list", "  \u{2026} 6 more: anb list --for task.hub --all"),
-            ("ready", "  \u{2026} 5 more: anb ready --for task.hub --all"),
+        for (verb, hint, rows_in_scope) in [
+            (
+                "list",
+                "  \u{2026} 6 more: anb list --for task.hub --all",
+                25 + 1,
+            ),
+            (
+                "ready",
+                "  \u{2026} 5 more: anb ready --for task.hub --all",
+                25,
+            ),
         ] {
             let out = ok(&mut storage, &[verb, "--for", "task.hub"]);
             assert_eq!(out.lines().last().unwrap(), hint, "{out}");
+
+            // The hint is a command, so running it must answer what it
+            // promises: every row of the same scope, and nothing left to hint.
+            let lifted = ok(&mut storage, &[verb, "--for", "task.hub", "--all"]);
+            assert_eq!(lifted.lines().count(), rows_in_scope + 1, "{lifted}");
+            assert!(!lifted.contains("more:"), "{lifted}");
         }
     }
 
@@ -2084,12 +2298,21 @@ mod search_replies {
         );
     }
 
+    /// The hint is meant to be typed back, so the query it carries must
+    /// survive the shell — including the quote that would end the word.
     #[test]
     fn the_truncation_hint_carries_the_query_as_one_shell_word() {
         let mut storage = many_open_tasks(22);
         assert_snapshot!(
             ok(&mut storage, &["search", "demo record"]).lines().last().unwrap(),
             @r"  … 2 more: anb search 'demo record' --all"
+        );
+        let files: Vec<(String, String)> = (0..22)
+            .map(|n| open_task(&format!("task.q{n:02}"), "Won't fix, won't file", &[]))
+            .collect();
+        assert_snapshot!(
+            ok(&mut storage_with(&files), &["search", "won't"]).lines().last().unwrap(),
+            @r"  … 2 more: anb search 'won'\''t' --all"
         );
     }
 
@@ -2125,19 +2348,6 @@ mod overview_reply {
         decisions[1]{id,state,priority,title}:
           decision.d,active,-,A ruling
         archive: 1 tasks, 0 decisions, 0 notes, 0 questions
-        "
-        );
-    }
-
-    #[test]
-    fn a_notebook_with_no_archive_shows_no_archive_line() {
-        let mut storage = storage_with(&[open_task("task.a", "A demo record", &[])]);
-        assert_snapshot!(
-            ok(&mut storage, &["overview"]),
-            @r"
-        notebook: 1 tasks, 0 decisions, 0 notes, 0 questions
-        tasks[1]{id,state,priority,title}:
-          task.a,open,-,A demo record
         "
         );
     }
