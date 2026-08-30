@@ -800,24 +800,73 @@ mod archive_verb {
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
     }
 
+    /// The live copy is the record, and the copy an interrupted run left is
+    /// only where it was going: whatever was written into the record since
+    /// must survive the move, so finishing it writes the live bytes rather
+    /// than keeping what it found.
     #[test]
-    fn a_divergent_archived_copy_is_never_overwritten() {
-        let archived = task_file("closed", &["closed: 2026-08-20"]);
+    fn a_record_corrected_after_an_interrupted_move_keeps_the_correction() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &record_file(
+                    "task.demo",
+                    "task",
+                    "closed",
+                    &[],
+                    "\nThe log, corrected after review.\n",
+                ),
+            ),
+            (
+                "archive/tasks/task.demo.md",
+                &record_file(
+                    "task.demo",
+                    "task",
+                    "closed",
+                    &[],
+                    "\nThe log as first written.\n",
+                ),
+            ),
+        ]);
+
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+
+        assert!(!moved.already, "the live copy stood, so the move finished");
+        let filed = storage.read("archive/tasks/task.demo.md").unwrap();
+        assert!(filed.contains("corrected after review"), "{filed}");
+        assert!(matches!(
+            storage.read("tasks/task.demo.md"),
+            Err(StorageError::NotFound { .. })
+        ));
+    }
+
+    /// Another record wearing this one's name is not an interrupted move: a
+    /// file that does not answer for the id it sits under keeps its bytes
+    /// and refuses the move.
+    #[test]
+    fn a_foreign_record_at_the_destination_refuses_the_move() {
+        let planted = record_file("task.other", "task", "closed", &[], "");
         let mut storage = storage_with(&[
             ("tasks/task.demo.md", &task_file("closed", &[])),
-            ("archive/tasks/task.demo.md", &archived),
+            ("archive/tasks/task.demo.md", &planted),
         ]);
-        assert!(matches!(
-            Notebook::new(&mut storage)
-                .archive("task.demo", TODAY)
-                .unwrap_err(),
-            NotebookError::DuplicateId { .. }
-        ));
+
+        let refusal = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap_err();
+
+        assert!(
+            matches!(refusal, NotebookError::DuplicateId { ref id, .. } if id == "task.demo"),
+            "{refusal:?}"
+        );
         assert_eq!(
             storage.read("archive/tasks/task.demo.md").unwrap(),
-            archived,
-            "the archived history must survive the refused move"
+            planted,
+            "the file the move refused must survive it"
         );
+        assert!(storage.read("tasks/task.demo.md").is_ok());
     }
 
     /// [`MemoryStorage`] whose `remove` always fails — the crash between an

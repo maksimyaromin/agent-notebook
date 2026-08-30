@@ -1011,7 +1011,9 @@ impl<'a> Notebook<'a> {
             });
         }
         let reports = self.carriable_reports(&loaded.record)?;
-        self.guard_archive_destination_free(id, &moved.to, loaded.record.file())?;
+        // An archive move rewrites nothing, so a resume finds the record
+        // under its own name, answering for its own id.
+        self.guard_destination_free(&moved.to, |standing| standing.id() == Some(id))?;
         // The reports move first, so a run interrupted inside the cascade
         // leaves the record live and the next call finishes it.
         for report in reports {
@@ -1060,7 +1062,11 @@ impl<'a> Notebook<'a> {
                 });
             }
             let destination = record_path(&id, RecordType::Note, true);
-            self.guard_report_destination(&destination, origin)?;
+            // A report is retired as it is filed, so a resume finds this
+            // origin's own Note already wearing the state the move gave it.
+            self.guard_destination_free(&destination, |standing| {
+                standing.origin() == Some(origin) && standing.state() == Some("retired")
+            })?;
             reports.push(Report {
                 path,
                 record,
@@ -1070,34 +1076,33 @@ impl<'a> Notebook<'a> {
         Ok(reports)
     }
 
-    /// Refuse the report's place in the archive when another record holds
-    /// it. Free is a place this move may take, and so is one holding this
-    /// origin's own report from a run that crashed mid-cascade.
+    /// Refuse a place in the archive another record holds, and admit one
+    /// holding this very move's own copy, left where a run crashed between
+    /// its write and its remove. `is_this_moves_own` names what makes the
+    /// standing record that copy.
     ///
-    /// A report is retired as it is filed and stamped with the day it
-    /// moved, so it can never equal the live bytes the way an unchanged
-    /// record does: the interrupted move is recognised by what stands
-    /// there — this origin's report, retired, sound — and never by what it
-    /// says. What it says is the live copy's to decide, which is why the
-    /// move writes it again instead of trusting what it found.
-    fn guard_report_destination(
+    /// Identity is the whole admission test, and it settles only whether
+    /// the move may go on — never whether it must write. The file being
+    /// moved from is the authoritative one: it can carry a correction made
+    /// since the interrupted run, and a move that trusted what it found
+    /// would delete that correction unread. Bytes cannot serve as the test
+    /// either, in both directions: filing a report restamps it, so a sound
+    /// resume never matches, and a record corrected since its interrupted
+    /// move stops matching a twin that is its own.
+    fn guard_destination_free(
         &self,
         destination: &str,
-        origin: &str,
+        is_this_moves_own: impl Fn(&Record) -> bool,
     ) -> Result<(), NotebookError> {
-        let text = match self.storage.read(destination) {
-            Ok(text) => text,
+        let standing = match self.storage.read(destination) {
+            Ok(text) => Record::parse(destination, &text),
             Err(StorageError::NotFound { .. }) => return Ok(()),
             // Bytes no parse can read stand for a record that is not this
-            // report, which is the refusal below.
-            Err(StorageError::NotUtf8 { .. }) => String::new(),
+            // one, which is the refusal below.
+            Err(StorageError::NotUtf8 { .. }) => Record::unreadable(destination),
             Err(error) => return Err(error.into()),
         };
-        let standing = Record::parse(destination, &text);
-        if standing.origin() == Some(origin)
-            && standing.state() == Some("retired")
-            && !standing.has_errors()
-        {
+        if !standing.has_errors() && is_this_moves_own(&standing) {
             return Ok(());
         }
         Err(NotebookError::DuplicateId {
@@ -1175,31 +1180,6 @@ impl<'a> Notebook<'a> {
             id: id.to_owned(),
             paths,
         })
-    }
-
-    /// Refuse the move when the destination already holds different bytes —
-    /// ids are never reused, and overwriting a divergent archived copy would
-    /// delete history. Identical bytes pass: that is the replay of a move
-    /// that crashed between its write and its remove.
-    fn guard_archive_destination_free(
-        &self,
-        id: &str,
-        destination: &str,
-        file: &RecordFile,
-    ) -> Result<(), NotebookError> {
-        let holds_other = match self.storage.read(destination) {
-            Ok(existing) => existing != file.render(),
-            Err(StorageError::NotFound { .. }) => false,
-            Err(StorageError::NotUtf8 { .. }) => true,
-            Err(error) => return Err(error.into()),
-        };
-        if holds_other {
-            return Err(NotebookError::DuplicateId {
-                id: id.to_owned(),
-                holder: destination.to_owned(),
-            });
-        }
-        Ok(())
     }
 
     /// Apply the deliberate corrections of [`Edit`] to a live record of any
