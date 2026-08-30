@@ -123,7 +123,7 @@ fn the_dashboard_opens_only_the_archived_records_live_ones_name() {
             notebook.overview().unwrap();
         } else {
             notebook
-                .status(TODAY, Budget::Unbounded, nothing_lost)
+                .status(TODAY, Budget::Unbounded, nothing_lost, None)
                 .unwrap();
         }
         assert_eq!(
@@ -165,7 +165,7 @@ fn a_dashboard_opens_each_record_it_reads_once() {
             .unwrap();
     }
     Notebook::new(&mut storage)
-        .status(TODAY, Budget::Unbounded, nothing_lost)
+        .status(TODAY, Budget::Unbounded, nothing_lost, None)
         .unwrap();
 
     let mut once = storage.reads();
@@ -247,7 +247,7 @@ fn a_dashboard_reads_a_lineage_only_once_an_epic_can_hold_it() {
         .unwrap();
 
     Notebook::new(&mut storage)
-        .status(TODAY, Budget::Unbounded, nothing_lost)
+        .status(TODAY, Budget::Unbounded, nothing_lost, None)
         .unwrap();
     assert_eq!(
         storage.archived_reads(),
@@ -271,7 +271,7 @@ fn a_dashboard_reads_a_lineage_only_once_an_epic_can_hold_it() {
         .unwrap();
     storage.reads.borrow_mut().clear();
     Notebook::new(&mut storage)
-        .status(TODAY, Budget::Unbounded, nothing_lost)
+        .status(TODAY, Budget::Unbounded, nothing_lost, None)
         .unwrap();
     let mut opened = storage.archived_reads();
     opened.sort();

@@ -55,6 +55,7 @@ fn run_with_reports(
         git_by: || Some(GIT_IDENTITY.to_owned()),
         read_report,
         lost_proofs: &nothing_lost,
+        user_notebook: None,
         today: TODAY,
     };
     match execute(cli.command, storage, host) {
@@ -78,6 +79,7 @@ fn undated_host() -> Host<'static> {
         git_by: || None,
         read_report: &missing_report,
         lost_proofs: &nothing_lost,
+        user_notebook: None,
         today: "not-a-date",
     }
 }
@@ -1895,6 +1897,7 @@ mod maintenance_replies {
                 git_by: || None,
                 read_report: &missing_report,
                 lost_proofs: &nothing_lost,
+                user_notebook: None,
                 today: TODAY,
             },
         )
@@ -1923,6 +1926,7 @@ mod maintenance_replies {
                 git_by: || None,
                 read_report: &missing_report,
                 lost_proofs: &nothing_lost,
+                user_notebook: None,
                 today: TODAY,
             },
         )

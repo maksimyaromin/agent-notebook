@@ -207,7 +207,7 @@ mod status_fits_its_budget {
             let mut storage = MemoryStorage::from_files(files);
             let notebook = Notebook::new(&mut storage);
             let status = notebook
-                .status(TODAY, Budget::Tokens(ceiling), no_lost_proofs)
+                .status(TODAY, Budget::Tokens(ceiling), no_lost_proofs, None)
                 .unwrap();
             // The floor is counts, the first in-flight line, what the rest
             // of it came to, and the budget line.
@@ -225,7 +225,7 @@ mod status_fits_its_budget {
                 status.text
             );
             let default = notebook
-                .status(TODAY, Budget::Tokens(Budget::DEFAULT_TOKENS), no_lost_proofs)
+                .status(TODAY, Budget::Tokens(Budget::DEFAULT_TOKENS), no_lost_proofs, None)
                 .unwrap();
             prop_assert!(
                 !default.text.contains("cut:"),

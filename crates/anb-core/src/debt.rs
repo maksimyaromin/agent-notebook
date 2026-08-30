@@ -2,9 +2,9 @@
 //!
 //! Every clock is leading — computed from live open records' envelope dates
 //! at read time, keyed on Origin; nothing stores a score. The mention-borne
-//! signals — a dangling Mention, an undeclared Decision pair — are hints
-//! for a reader, never Check findings: the body is opaque prose and a
-//! citation in it is a hint, not an invalidity.
+//! signals are hints for a reader, never Check findings: the body is opaque
+//! prose and a citation in it is a hint, not an invalidity, in whichever
+//! notebook the id it names turns up.
 
 use crate::date;
 use crate::encode::quoted_if_delimited;
@@ -46,6 +46,11 @@ pub enum DebtSignal {
     DanglingMention { id: String, target: String },
     /// Two live Decisions where one cites the other with no declared edge.
     UndeclaredPair { first: Cited, second: Cited },
+    /// A live project Decision and a standing Decision of the user's
+    /// notebook, paired by a citation. Where the two disagree the project's
+    /// governs this repository — that is what a scope is — so the pair is
+    /// named and nothing is resolved.
+    Shadow { project: Cited, user: Cited },
     /// A record excluded from every derived query by its error findings.
     Invalid { path: String, errors: usize },
     /// A proof naming something the world no longer holds — a commit this
@@ -67,6 +72,7 @@ impl DebtSignal {
             DebtSignal::ReviewDue { .. } => "review-due",
             DebtSignal::DanglingMention { .. } => "dangling-mention",
             DebtSignal::UndeclaredPair { .. } => "undeclared-pair",
+            DebtSignal::Shadow { .. } => "shadow",
             DebtSignal::Invalid { .. } => "invalid",
             DebtSignal::LostProof { .. } => "lost-proof",
         }
@@ -93,6 +99,13 @@ impl DebtSignal {
                 second.id,
                 second.author()
             ),
+            DebtSignal::Shadow { project, user } => format!(
+                "{code}: {} ({}) <-> global {} ({})",
+                project.id,
+                project.author(),
+                user.id,
+                user.author()
+            ),
             DebtSignal::Invalid { path, errors } => {
                 let unit = if *errors == 1 { "error" } else { "errors" };
                 format!("{code}: {} ({errors} {unit})", quoted_if_delimited(path))
@@ -116,6 +129,10 @@ pub(crate) struct DebtSources<'a> {
     pub today_day: i64,
     /// The cited proofs the world no longer holds, as the host found them.
     pub lost_proofs: &'a [CitedProof],
+    /// The user's notebook behind this one: its live records and the ids
+    /// its archive holds, both empty when a project is read alone.
+    pub user_records: &'a [Record],
+    pub user_archived: &'a BTreeSet<String>,
 }
 
 /// A record's error findings plus a reference into nothing: the exclusion
@@ -163,12 +180,14 @@ pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) ->
         .map(|(record, _)| record)
         .collect();
 
+    let behind = Resolver::of(sources.user_records, sources.user_archived);
     let mut classes = SignalClasses::default();
     for record in &valid {
         collect_clock_signals(record, sources, thresholds, &mut classes);
-        collect_dangling_mentions(record, sources.resolvable, &mut classes);
+        collect_dangling_mentions(record, sources.resolvable, &behind, &mut classes);
     }
     classes.pairs = undeclared_pairs(&valid, sources.resolvable);
+    classes.shadows = shadows(&valid, sources.resolvable, &behind);
     classes.lost_proofs = lost_proofs(sources);
     // A corrupt live file is a hint the reader can act on today; a corrupt
     // filed one is `check`'s to name.
@@ -194,6 +213,7 @@ struct SignalClasses {
     review_due: Vec<DebtSignal>,
     dangling: Vec<DebtSignal>,
     pairs: Vec<DebtSignal>,
+    shadows: Vec<DebtSignal>,
     lost_proofs: Vec<DebtSignal>,
     invalid: Vec<DebtSignal>,
 }
@@ -210,6 +230,7 @@ impl SignalClasses {
             self.review_due,
             self.dangling,
             self.pairs,
+            self.shadows,
             self.lost_proofs,
             self.invalid,
         ] {
@@ -250,9 +271,10 @@ fn lost_proofs(sources: &DebtSources<'_>) -> Vec<DebtSignal> {
 }
 
 /// Oldest first where the signal carries an age; the classes without one
-/// order by their stable names — except pairs, which arrive already ranked
-/// by their older member's `created` and keep that order through the
-/// stable sort.
+/// order by their stable names — except the two paired classes, which
+/// arrive in an order of their own and keep it through the stable sort:
+/// undeclared pairs ranked by their older member's `created`, shadows in
+/// the order the project records name them.
 fn signal_rank(signal: &DebtSignal) -> (i64, String) {
     match signal {
         DebtSignal::TaskStale { id, days }
@@ -262,7 +284,7 @@ fn signal_rank(signal: &DebtSignal) -> (i64, String) {
         DebtSignal::OriginClosed { id, .. } => (0, id.clone()),
         DebtSignal::ReviewDue { id, date } => (0, format!("{date} {id}")),
         DebtSignal::DanglingMention { id, target } => (0, format!("{id} {target}")),
-        DebtSignal::UndeclaredPair { .. } => (0, String::new()),
+        DebtSignal::UndeclaredPair { .. } | DebtSignal::Shadow { .. } => (0, String::new()),
         DebtSignal::Invalid { path, .. } => (0, path.clone()),
         DebtSignal::LostProof { id, proof } => (0, format!("{id} {proof}")),
     }
@@ -388,19 +410,68 @@ fn origin_settled(origin: &str, resolvable: &Resolver<'_>) -> bool {
             .is_some_and(|task| task.state() == Some("closed"))
 }
 
+/// A citation names nothing only when neither notebook holds it. A reader
+/// standing in a project reaches the user's notebook too, so an id it
+/// carries is one they can open.
 fn collect_dangling_mentions(
     record: &Record,
     resolvable: &Resolver<'_>,
+    behind: &Resolver<'_>,
     classes: &mut SignalClasses,
 ) {
     for target in mention::mentions(record.file().body()) {
-        if !resolvable.resolves(target) {
+        if !resolvable.resolves(target) && !behind.resolves(target) {
             classes.dangling.push(DebtSignal::DanglingMention {
                 id: path_stem(record.path()).to_owned(),
                 target: target.to_owned(),
             });
         }
     }
+}
+
+/// The cross-scope pairs, in the order the project records name them.
+///
+/// A project Decision reaches one of the user's only through its prose: an
+/// envelope reference to a record this notebook does not hold is a dangling
+/// reference, which `check` refuses, so a citation is the edge that
+/// survives. A typed id in prose is deliberate, the same construction
+/// [`undeclared_pairs`] rests on.
+///
+/// A citation this notebook answers with a live record of its own is about
+/// that record and belongs to the pair below; only what this notebook has
+/// no live answer for reaches across. So a notebook read behind itself
+/// pairs with nobody, and a rule this project retired stops hiding the
+/// user's, which still stands.
+fn shadows(valid: &[&Record], resolvable: &Resolver<'_>, behind: &Resolver<'_>) -> Vec<DebtSignal> {
+    let mut found = Vec::new();
+    for record in valid
+        .iter()
+        .copied()
+        .filter(|record| record.record_type() == Some(RecordType::Decision) && record.is_live())
+    {
+        for target in mention::mentions(record.file().body()) {
+            if resolvable.read(target).is_some() {
+                continue;
+            }
+            let Some(rule) = behind.read(target).filter(|rule| is_standing(rule, behind)) else {
+                continue;
+            };
+            found.push(DebtSignal::Shadow {
+                project: Cited::of(record),
+                user: Cited::of(rule),
+            });
+        }
+    }
+    found
+}
+
+/// Whether a record of the notebook behind this one is a rule still
+/// binding. An invalid record is out of every derived query, and a pair
+/// drawn from one would name an id its own envelope disowns.
+fn is_standing(record: &Record, behind: &Resolver<'_>) -> bool {
+    record.record_type() == Some(RecordType::Decision)
+        && record.is_live()
+        && !is_excluded(record, behind)
 }
 
 /// The undeclared-conflict heuristic: a live Decision citing another live

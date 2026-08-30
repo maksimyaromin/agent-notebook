@@ -143,6 +143,10 @@ pub struct Host<'a> {
     /// Core holds neither git nor a filesystem, so the question is asked
     /// out here; a caller with nothing to ask answers with an empty list.
     pub lost_proofs: &'a dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
+    /// The user's notebook, when the host resolved a usable one: Status
+    /// pairs a project rule with the standing rule of it that the project
+    /// rule shadows. `None` names no such root, never an empty one.
+    pub user_notebook: Option<&'a dyn Storage>,
     pub today: &'a str,
 }
 
@@ -160,6 +164,7 @@ pub fn execute(
         git_by,
         read_report,
         lost_proofs,
+        user_notebook,
         today,
     } = host;
     let mut notebook = Notebook::new(storage);
@@ -241,7 +246,7 @@ pub fn execute(
             all,
         }),
         Command::Status { budget, hook } => {
-            status_reply(&notebook, budget, hook, lost_proofs, today)
+            status_reply(&notebook, budget, hook, lost_proofs, user_notebook, today)
         }
     }
 }
@@ -274,11 +279,15 @@ fn status_reply(
     budget: Option<u32>,
     hook: bool,
     lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
+    user_notebook: Option<&dyn Storage>,
     today: &str,
 ) -> Result<Reply, NotebookError> {
     // Every failure here — reading the notebook to find the proofs
     // included — passes through the one funnel the hook's fail-soft needs.
-    match (budgeted_status(notebook, budget, lost_proofs, today), hook) {
+    match (
+        budgeted_status(notebook, budget, lost_proofs, user_notebook, today),
+        hook,
+    ) {
         (Ok(status), hook) => Ok(Reply::Status { status, hook }),
         (Err(_), true) => Ok(Reply::Silence),
         (Err(error), false) => Err(error),
@@ -290,13 +299,14 @@ fn budgeted_status(
     notebook: &Notebook<'_>,
     budget: Option<u32>,
     lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
+    user_notebook: Option<&dyn Storage>,
     today: &str,
 ) -> Result<Status, NotebookError> {
     let ceiling = match budget {
         Some(ceiling) => Budget::from_ceiling(ceiling),
         None => notebook.config()?.budget(),
     };
-    notebook.status(today, ceiling, lost_proofs)
+    notebook.status(today, ceiling, lost_proofs, user_notebook)
 }
 
 fn edited(

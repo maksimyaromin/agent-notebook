@@ -269,6 +269,7 @@ impl<'a> Notebook<'a> {
         today: &str,
         budget: Budget,
         settle: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
+        user: Option<&dyn Storage>,
     ) -> Result<Status, NotebookError> {
         let today_day = write::guarded_day(today)?;
         let thresholds = self.config()?.debt_thresholds();
@@ -281,11 +282,14 @@ impl<'a> Notebook<'a> {
             .collect();
 
         let lost = settle(&query::cited_proofs(records));
+        let behind = user_scope(user);
         let sources = DebtSources {
             records,
             resolvable: &resolvable,
             today_day,
             lost_proofs: &lost,
+            user_records: &behind.records,
+            user_archived: &behind.archived,
         };
         let queue = query::ready_rows(records, &resolvable);
         let inputs = StatusInputs {
@@ -613,8 +617,7 @@ impl<'a> Notebook<'a> {
     /// find it.
     fn standing_report(&self, origin: &str, report: &str) -> Result<Option<String>, NotebookError> {
         let wanted = write::edited_body(report);
-        Ok(self
-            .records_in(RecordType::Note.directory())?
+        Ok(read_records_in(self.storage, RecordType::Note.directory())?
             .into_iter()
             .find(|note| note.origin() == Some(origin) && note.file().body() == wanted)
             .map(|note| path_stem(note.path()).to_owned()))
@@ -1474,8 +1477,8 @@ impl<'a> Notebook<'a> {
         let mut records = Vec::new();
         let mut held = RecordType::ALL.map(|record_type| (record_type, 0));
         for (record_type, tally) in &mut held {
-            records.extend(self.records_in(record_type.directory())?);
-            let filed = self.records_in(&archive_of(record_type.directory()))?;
+            records.extend(read_records_in(self.storage, record_type.directory())?);
+            let filed = read_records_in(self.storage, &archive_of(record_type.directory()))?;
             *tally = filed.len();
             records.extend(filed);
         }
@@ -1496,56 +1499,70 @@ impl<'a> Notebook<'a> {
     /// about work in motion costs what the live notebook costs, however far
     /// history has grown behind it.
     fn live_corpus(&self) -> Result<Corpus, NotebookError> {
-        let mut records = Vec::new();
-        for record_type in RecordType::ALL {
-            records.extend(self.records_in(record_type.directory())?);
-        }
-        self.corpus(records)
+        read_live_corpus(self.storage)
     }
+}
 
-    fn corpus(&self, records: Vec<Record>) -> Result<Corpus, NotebookError> {
-        let mut archived = BTreeSet::new();
-        let mut held = RecordType::ALL.map(|record_type| (record_type, 0));
-        for (record_type, tally) in &mut held {
-            for path in self.storage.list(&archive_of(record_type.directory()))? {
-                if !is_record_file(&path) {
-                    continue;
-                }
-                *tally += 1;
-                archived.extend(resolvable_id(&path).map(str::to_owned));
-            }
-        }
-        Ok(Corpus {
-            records,
-            archived,
-            archive: Counts::per_type(held),
-        })
+/// [`Notebook::live_corpus`] over any root, so a second notebook is read by
+/// the same rules as the first.
+fn read_live_corpus(storage: &dyn Storage) -> Result<Corpus, NotebookError> {
+    let mut records = Vec::new();
+    for record_type in RecordType::ALL {
+        records.extend(read_records_in(storage, record_type.directory())?);
     }
-
-    /// One directory's records, invalid ones included: an invalid record is
-    /// a visible first-class state, never a silent drop.
-    fn records_in(&self, dir: &str) -> Result<Vec<Record>, NotebookError> {
-        let mut records = Vec::new();
-        for path in self.storage.list(dir)? {
+    let mut archived = BTreeSet::new();
+    let mut held = RecordType::ALL.map(|record_type| (record_type, 0));
+    for (record_type, tally) in &mut held {
+        for path in storage.list(&archive_of(record_type.directory()))? {
             if !is_record_file(&path) {
                 continue;
             }
-            match self.storage.read(&path) {
-                Ok(text) => records.push(Record::parse(&path, &text)),
-                // The adapter's duty ends at naming the encoding; the
-                // file stays a visible invalid record, not an abort.
-                Err(StorageError::NotUtf8 { .. }) => records.push(Record::unreadable(&path)),
-                // A listing is a snapshot. Between it and this read another
-                // process may have filed or expunged the record, and a
-                // reader that answered `not found` for the whole notebook
-                // would be reporting someone else's completed work as its
-                // own failure.
-                Err(StorageError::NotFound { .. }) => {}
-                Err(error) => return Err(error.into()),
-            }
+            *tally += 1;
+            archived.extend(resolvable_id(&path).map(str::to_owned));
         }
-        Ok(records)
     }
+    Ok(Corpus {
+        records,
+        archived,
+        archive: Counts::per_type(held),
+    })
+}
+
+/// The user's notebook standing behind a project's, read by the same rules
+/// as any other: its live records, and the ids its archive holds.
+///
+/// A second root is read for a hint on somebody else's dashboard, so a root
+/// that cannot be read leaves the hint out instead of taking that dashboard
+/// down. What is wrong with that notebook is what a `check` against it
+/// reports.
+fn user_scope(user: Option<&dyn Storage>) -> Corpus {
+    user.and_then(|storage| read_live_corpus(storage).ok())
+        .unwrap_or_else(Corpus::empty)
+}
+
+/// One directory's records, invalid ones included: an invalid record is a
+/// visible first-class state, never a silent drop.
+fn read_records_in(storage: &dyn Storage, dir: &str) -> Result<Vec<Record>, NotebookError> {
+    let mut records = Vec::new();
+    for path in storage.list(dir)? {
+        if !is_record_file(&path) {
+            continue;
+        }
+        match storage.read(&path) {
+            Ok(text) => records.push(Record::parse(&path, &text)),
+            // The adapter's duty ends at naming the encoding; the
+            // file stays a visible invalid record, not an abort.
+            Err(StorageError::NotUtf8 { .. }) => records.push(Record::unreadable(&path)),
+            // A listing is a snapshot. Between it and this read another
+            // process may have filed or expunged the record, and a
+            // reader that answered `not found` for the whole notebook
+            // would be reporting someone else's completed work as its
+            // own failure.
+            Err(StorageError::NotFound { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(records)
 }
 
 /// The records one query reads, beside the ids the archive holds. The two
@@ -1558,6 +1575,15 @@ struct Corpus {
 }
 
 impl Corpus {
+    /// The notebook a caller was handed no root for.
+    fn empty() -> Corpus {
+        Corpus {
+            records: Vec::new(),
+            archived: BTreeSet::new(),
+            archive: Counts::default(),
+        }
+    }
+
     fn resolver(&self) -> Resolver<'_> {
         Resolver::of(&self.records, &self.archived)
     }

@@ -59,7 +59,7 @@ mod budget_ladder {
     fn rendered(budget: Budget) -> Rendered {
         let mut storage = full_notebook();
         let status = Notebook::new(&mut storage)
-            .status(TODAY, budget, no_lost_proofs)
+            .status(TODAY, budget, no_lost_proofs, None)
             .unwrap();
         Rendered {
             text: status.text,
@@ -123,6 +123,7 @@ mod budget_ladder {
                 TODAY,
                 Budget::Tokens(Budget::DEFAULT_TOKENS),
                 no_lost_proofs,
+                None,
             )
             .unwrap();
         let (sections, budget_line) = status.text.rsplit_once("budget: ").unwrap();
@@ -173,7 +174,7 @@ mod budget_ladder {
     fn the_floor_keeps_one_in_flight_line_however_many_are_flying() {
         let mut storage = crowded_notebook();
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1), no_lost_proofs)
+            .status(TODAY, Budget::Tokens(1), no_lost_proofs, None)
             .unwrap();
         assert_eq!(
             status.text.lines().count(),
@@ -358,7 +359,7 @@ mod budget_ladder {
             let step = {
                 let mut storage = full_notebook();
                 Notebook::new(&mut storage)
-                    .status(TODAY, ceiling, no_lost_proofs)
+                    .status(TODAY, ceiling, no_lost_proofs, None)
                     .unwrap()
             };
             let whole = anb_core::estimate_tokens(&step.text);
@@ -388,7 +389,7 @@ mod budget_ladder {
         for ceiling in [200, 100, 60, 40, 20, 10, 2] {
             let mut storage = MemoryStorage::from_files(files.clone());
             let status = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Tokens(ceiling), no_lost_proofs)
+                .status(TODAY, Budget::Tokens(ceiling), no_lost_proofs, None)
                 .unwrap();
             if let Some(cut) = status.text.split("cut: ").nth(1) {
                 assert!(
@@ -433,7 +434,7 @@ mod budget_ladder {
             &task_file("closed", &["closed: 2026-08-25"]),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1), no_lost_proofs)
+            .status(TODAY, Budget::Tokens(1), no_lost_proofs, None)
             .unwrap();
         assert!(status.quiet);
         assert!(
@@ -500,7 +501,7 @@ mod budget_ladder {
         }
         let mut storage = MemoryStorage::from_files(files);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1500), no_lost_proofs)
+            .status(TODAY, Budget::Tokens(1500), no_lost_proofs, None)
             .unwrap();
         assert!(!status.text.contains("cut:"), "{}", status.text);
         assert!(

@@ -80,8 +80,12 @@ pub fn notebook_root(
     })
 }
 
-/// The user's own notebook root inside `home`.
-fn user_root(home: Option<&Path>) -> Result<PathBuf, String> {
+/// The user's own notebook root inside `home`: the notebook `--global`
+/// names, and the one a project Status reads behind its own.
+///
+/// # Errors
+/// The reason, when there is no absolute home to name one in.
+pub fn user_root(home: Option<&Path>) -> Result<PathBuf, String> {
     let Some(home) = home else {
         return Err(
             "notebook: --global names a notebook in the home directory, and this run knows no home"

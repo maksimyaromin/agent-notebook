@@ -6,7 +6,7 @@ use anb::fs_storage::{FsStorage, notebook_root, resolve_root};
 use anb_core::{Storage, StorageError};
 use std::ffi::OsStr;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn storage_in(dir: &TempDir) -> FsStorage {
@@ -615,6 +615,164 @@ mod the_users_notebook {
         );
     }
 
+    /// The pair the second root exists to make visible: a project rule
+    /// standing against one of the user's own, named in the project's own
+    /// Status with both sides and their authors.
+    #[test]
+    fn a_project_rule_standing_against_the_users_own_reaches_the_projects_status() {
+        let home = TempDir::new().unwrap();
+        let project = a_project();
+        a_pair_across_the_scopes(&home, &project);
+
+        let status = served(&home, project.path(), None, &["status"]);
+        let shadow = status
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with("shadow:"))
+            .unwrap_or_else(|| panic!("no shadow line in: {status}"));
+        assert_eq!(
+            shadow, "shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)",
+            "the project rule leads: it is the one this repository follows"
+        );
+        assert!(
+            !status.contains("dangling-mention"),
+            "and the citation names something, so nothing calls it missing: {status}"
+        );
+    }
+
+    /// An agent reads the dashboard as data, so the pair reaches it in
+    /// whichever shape it asked for.
+    #[test]
+    fn the_pair_reaches_the_json_dashboard_under_its_own_code() {
+        let home = TempDir::new().unwrap();
+        let project = a_project();
+        a_pair_across_the_scopes(&home, &project);
+
+        let payload = served(&home, project.path(), None, &["--json", "status"]);
+        let parsed: serde_json::Value = serde_json::from_str(payload.trim()).unwrap();
+        let rows = parsed["debt"]["rows"].as_array().expect("debt rows");
+        assert!(
+            rows.iter().any(|row| {
+                row["code"] == "shadow"
+                    && row["line"]
+                        == "shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)"
+            }),
+            "no shadow row in: {payload}"
+        );
+    }
+
+    /// The second root is read and never written: a repository does not
+    /// mutate the user's home.
+    #[test]
+    fn reading_the_users_notebook_for_a_status_leaves_it_byte_for_byte() {
+        let home = TempDir::new().unwrap();
+        let project = a_project();
+        a_pair_across_the_scopes(&home, &project);
+        let before = tree_of(&home.path().join(".agent-notebook"));
+
+        served(&home, project.path(), None, &["status"]);
+
+        assert_eq!(tree_of(&home.path().join(".agent-notebook")), before);
+    }
+
+    /// A session opens with a Status, so a project's own dashboard cannot
+    /// be stopped by the state of a notebook that project does not own.
+    #[test]
+    fn a_users_notebook_that_is_a_file_leaves_the_projects_status_standing() {
+        let home = TempDir::new().unwrap();
+        let project = a_project();
+        served(
+            &home,
+            project.path(),
+            None,
+            &["add", "Work with a project", "--id", "task.work"],
+        );
+        fs::write(home.path().join(".agent-notebook"), "not a notebook").unwrap();
+
+        let status = served(&home, project.path(), None, &["status"]);
+        assert!(status.contains("task.work"), "{status}");
+    }
+
+    /// The user's notebook is a notebook root like any other, and the seam
+    /// will not walk a directory it did not write.
+    #[cfg(unix)]
+    #[test]
+    fn a_users_notebook_behind_a_linked_directory_is_no_second_scope() {
+        let home = TempDir::new().unwrap();
+        let project = a_project();
+        a_pair_across_the_scopes(&home, &project);
+        let decisions = home.path().join(".agent-notebook/decisions");
+        let elsewhere = home.path().join("elsewhere");
+        fs::rename(&decisions, &elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &decisions).unwrap();
+
+        let status = served(&home, project.path(), None, &["status"]);
+        assert!(
+            !status.contains("shadow:"),
+            "a linked directory is not the user's notebook: {status}"
+        );
+    }
+
+    /// A rule in each scope, the project's citing the user's.
+    fn a_pair_across_the_scopes(home: &TempDir, project: &TempDir) {
+        served(
+            home,
+            project.path(),
+            None,
+            &[
+                "decide",
+                "Indent with tabs",
+                "--id",
+                "decision.tabs",
+                "--kind",
+                "rule",
+                "--by",
+                "Reader",
+                "--global",
+            ],
+        );
+        served(
+            home,
+            project.path(),
+            None,
+            &[
+                "decide",
+                "Indent with spaces here",
+                "--id",
+                "decision.spaces",
+                "--kind",
+                "rule",
+                "--by",
+                "Teammate",
+                "--body",
+                "This repository indents with spaces, against decision.tabs.",
+            ],
+        );
+    }
+
+    /// Every file under `root` with its bytes, so a case about what a read
+    /// left behind sees an added or removed file as well as a changed one.
+    fn tree_of(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut found = Vec::new();
+        let mut pending = vec![root.to_owned()];
+        while let Some(directory) = pending.pop() {
+            let Ok(entries) = fs::read_dir(&directory) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    let bytes = fs::read(&path).unwrap_or_default();
+                    found.push((path, bytes));
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
     /// The same verb without the flag is the project's to serve, so the
     /// refusal is the scope's and not the verb's.
     #[test]
@@ -648,11 +806,15 @@ mod a_notebook_that_moved {
     }
 
     /// One command against a notebook the environment names, run from `cwd`.
+    /// `HOME` is pointed at the project: a Status reads the user's notebook
+    /// behind the project's, and the developer's own must not decide what a
+    /// case proves.
     fn anb_in(cwd: &Path, root: &str, line: &[&str]) -> String {
         let output = Command::new(env!("CARGO_BIN_EXE_anb"))
             .args(line)
             .current_dir(cwd)
             .env("ANB_NOTEBOOK", root)
+            .env("HOME", cwd)
             .output()
             .expect("the binary runs");
         assert!(

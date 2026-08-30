@@ -2,7 +2,7 @@
 //! shell and print one reply.
 
 use anb::cli::{Cli, Command};
-use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root, unusable_root};
+use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root, unusable_root, user_root};
 use anb::lock;
 use anb::reconcile::lost_proofs;
 use anb::reply::{Host, execute};
@@ -109,6 +109,14 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         return stopped(&NotebookError::InvalidArgument { reason });
     }
     let mut storage = FsStorage::new(root.clone());
+    // The user's notebook is held to the same rules as any other root, and
+    // a root that cannot hold a notebook is no root: Status pairs a project
+    // rule against nothing rather than against a directory the seam would
+    // refuse to serve.
+    let user = user_root(std::env::home_dir().as_deref())
+        .ok()
+        .filter(|user| unusable_root(user).is_none())
+        .map(FsStorage::new);
     let today = jiff::Zoned::now().date().to_string();
 
     // Bound to a name, so the claim lives until the command has answered;
@@ -123,6 +131,7 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         git_by: anb::git::user_name,
         read_report: &read_report,
         lost_proofs: &lost,
+        user_notebook: user.as_ref().map(|user| user as &dyn anb_core::Storage),
         today: &today,
     };
     match execute(cli.command, &mut storage, host) {
