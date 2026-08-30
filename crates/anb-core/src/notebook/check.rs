@@ -11,7 +11,8 @@ use crate::graph;
 use crate::record::{
     REF_KEYS, Record, RecordType, dangling_finding, linked_record, not_utf8_finding,
 };
-use crate::reply::FileFinding;
+use crate::reply::{FileFinding, Repair};
+use crate::request::CLEARABLE;
 use crate::resolve::{Resolver, path_stem};
 use crate::storage::{Storage, StorageError};
 use std::collections::BTreeMap;
@@ -37,10 +38,7 @@ impl<S: Storage> Notebook<'_, S> {
         let mut located = Vec::new();
         for record in records {
             for finding in record.findings() {
-                located.push(FileFinding {
-                    path: record.path().to_owned(),
-                    finding: finding.clone(),
-                });
+                located.push(FileFinding::on(record.path(), finding.clone()));
             }
             check_refs(record, &resolvable, &mut located);
             check_supersession_pair(record, &by_stem, &mut located);
@@ -49,6 +47,7 @@ impl<S: Storage> Notebook<'_, S> {
         check_dep_cycles(records, &by_stem, &mut located);
         check_origin_cycles(records, &by_stem, &mut located);
         self.check_config(&mut located)?;
+        name_repairs(&mut located, records);
 
         located.sort_by(|left, right| finding_order(left).cmp(&finding_order(right)));
         Ok(located)
@@ -61,22 +60,55 @@ impl<S: Storage> Notebook<'_, S> {
             Ok(text) => text,
             Err(StorageError::NotFound { .. }) => return Ok(()),
             Err(StorageError::NotUtf8 { .. }) => {
-                out.push(FileFinding {
-                    path: CONFIG_PATH.to_owned(),
-                    finding: not_utf8_finding(),
-                });
+                out.push(FileFinding::on(CONFIG_PATH, not_utf8_finding()));
                 return Ok(());
             }
             Err(error) => return Err(error.into()),
         };
         for finding in Config::parse(&text).findings() {
-            out.push(FileFinding {
-                path: CONFIG_PATH.to_owned(),
-                finding: finding.clone(),
-            });
+            out.push(FileFinding::on(CONFIG_PATH, finding.clone()));
         }
         Ok(())
     }
+}
+
+/// Name the move that erases each finding, where the notebook has one.
+///
+/// It is read off the line the finding sits on, so the same rule covers a
+/// bad value, a dangling reference, a duplicated key and a cycle: whatever
+/// is wrong with the line, erasing it is the repair. A finding on the
+/// config file, or on a line no verb writes, keeps none.
+fn name_repairs(located: &mut [FileFinding], records: &[Record]) {
+    let by_path: BTreeMap<&str, &Record> = records
+        .iter()
+        .map(|record| (record.path(), record))
+        .collect();
+    for finding in located {
+        finding.repair = by_path
+            .get(finding.path.as_str())
+            .and_then(|record| repair_of(&finding.finding, record));
+    }
+}
+
+fn repair_of(finding: &Finding, record: &Record) -> Option<Repair> {
+    if finding.code == FindingCode::UnarchivedSettledRecord {
+        return Some(Repair::Archive);
+    }
+    let line = finding.line?;
+    let file = record.file();
+    // `unblock` refuses a record that is not a Task, so the edge on a
+    // record that should carry none is not this verb's to erase.
+    if record.record_type() == Some(RecordType::Task)
+        && let Some((target, _)) = file
+            .field_entries("blocked-by")
+            .find(|(_, at)| *at == Some(line))
+    {
+        return Some(Repair::Unblock(target.to_owned()));
+    }
+    CLEARABLE
+        .into_iter()
+        .find(|key| file.field_entries(key).any(|(_, at)| at == Some(line)))
+        .map(Repair::Clear)
 }
 
 /// Errors first, then file, then line (file-level findings last), then code.
@@ -101,10 +133,10 @@ fn check_refs(record: &Record, resolvable: &Resolver<'_>, out: &mut Vec<FileFind
         if grammar::id_error(target).is_some() || resolvable.resolves(target) {
             return;
         }
-        out.push(FileFinding {
-            path: record.path().to_owned(),
-            finding: dangling_finding(record, key, target, line),
-        });
+        out.push(FileFinding::on(
+            record.path(),
+            dangling_finding(record, key, target, line),
+        ));
     };
     for key in REF_KEYS {
         for (target, line) in record.file().field_entries(key) {
@@ -130,10 +162,7 @@ fn check_supersession_pair(
 ) {
     let stem = path_stem(record.path());
     let mut pair_finding = |path: &str, finding: Finding| {
-        out.push(FileFinding {
-            path: path.to_owned(),
-            finding,
-        });
+        out.push(FileFinding::on(path, finding));
     };
 
     if let Some((target, line)) = record.file().field_entry("supersedes")
@@ -218,13 +247,13 @@ fn check_duplicate_ids(records: &[Record], out: &mut Vec<FileFinding>) {
                 .map(|other| other.path())
                 .filter(|path| *path != record.path())
                 .collect();
-            out.push(FileFinding {
-                path: record.path().to_owned(),
-                finding: Finding::for_file(
+            out.push(FileFinding::on(
+                record.path(),
+                Finding::for_file(
                     FindingCode::DuplicateId,
                     format!("id `{id}` is also claimed by {}", others.join(", ")),
                 ),
-            });
+            ));
         }
     }
 }
@@ -294,14 +323,14 @@ fn cycle_findings(
                 .field_entries(field)
                 .find(|(target, _)| target == next)
                 .and_then(|(_, line)| line);
-            out.push(FileFinding {
-                path: record.path().to_owned(),
-                finding: Finding::located(
+            out.push(FileFinding::on(
+                record.path(),
+                Finding::located(
                     line,
                     code,
                     format!("{field}: `{next}` closes the cycle {walk}"),
                 ),
-            });
+            ));
         }
     }
 }

@@ -99,8 +99,13 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// One record whole: envelope, body, and its mention blocks.
-    View { id: String },
+    /// One record: envelope, body, and its mention blocks.
+    View {
+        id: String,
+        /// The whole body; a long one prints its ends by default.
+        #[arg(long)]
+        all: bool,
+    },
     /// The session Status: one quiet line, or the budgeted composite.
     Status {
         /// Token ceiling for this call, outranking the config key; 0 = no ceiling.

@@ -135,12 +135,19 @@ fn every_valid_case_is_accepted_and_round_trips_byte_exact() {
         );
 
         let normalized = case.file.normalize();
-        if let Ok(canonical) = fs::read_to_string(path.with_extension("normalized")) {
-            assert_eq!(
+        // A case whose canonical form differs from its bytes exists for
+        // that difference, so it must state what it becomes.
+        match fs::read_to_string(path.with_extension("normalized")) {
+            Ok(canonical) => assert_eq!(
                 normalized, canonical,
                 "{}: canonical form mismatch",
                 case.rel
-            );
+            ),
+            Err(_) => assert_eq!(
+                normalized, case.input,
+                "{}: normalize rewrites this case, so it needs a .normalized sidecar",
+                case.rel
+            ),
         }
         assert_eq!(
             RecordFile::parse(&normalized).normalize(),

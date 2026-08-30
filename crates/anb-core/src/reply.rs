@@ -267,4 +267,34 @@ pub struct View {
 pub struct FileFinding {
     pub path: String,
     pub finding: Finding,
+    /// The move that erases this finding, when the notebook has one.
+    pub repair: Option<Repair>,
+}
+
+impl FileFinding {
+    /// A finding against a file, with no repair named yet.
+    pub(crate) fn on(path: &str, finding: Finding) -> FileFinding {
+        FileFinding {
+            path: path.to_owned(),
+            finding,
+            repair: None,
+        }
+    }
+}
+
+/// The move that erases a finding: a verb the notebook already has,
+/// aimed at the record the finding sits on.
+///
+/// The host spells it as a command. Most findings carry none — a hand
+/// edit can break a line no verb writes, and repairing that is a hand
+/// edit too. A record broken in more ways than one refuses the move
+/// until the findings no verb reaches are repaired by hand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Repair {
+    /// Erase the optional field on the finding's line.
+    Clear(&'static str),
+    /// Erase the dependency edge on the finding's line.
+    Unblock(String),
+    /// File the settled record where it belongs.
+    Archive,
 }

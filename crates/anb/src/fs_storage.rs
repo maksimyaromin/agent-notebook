@@ -3,12 +3,18 @@
 //!
 //! Writes are atomic — a temp file in the target directory, then a rename —
 //! so a reader never sees a half-written record.
+//!
+//! The root is the seam's whole universe. A symlink inside it names a file
+//! the notebook does not own, so it is not a record: following one would
+//! let a file committed to a project decide what a later reader's `view`
+//! prints.
 
 use anb_core::{Storage, StorageError};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use tempfile::Builder;
 
 /// The project `start` belongs to: the nearest ancestor already holding a
 /// notebook or a repository, else `start` itself. A directory above `.git`
@@ -94,6 +100,15 @@ impl FsStorage {
     fn absolute(&self, path: &str) -> PathBuf {
         self.root.join(path)
     }
+
+    /// A failure names the file as the filesystem knows it, root included:
+    /// a seam path alone leaves the reader guessing which notebook it was.
+    fn failed(&self, path: &str, error: &std::io::Error) -> StorageError {
+        StorageError::Io {
+            path: self.absolute(path).display().to_string(),
+            detail: error.to_string(),
+        }
+    }
 }
 
 impl Storage for FsStorage {
@@ -101,11 +116,11 @@ impl Storage for FsStorage {
         let entries = match fs::read_dir(self.absolute(dir)) {
             Ok(entries) => entries,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(io_error(dir, &error)),
+            Err(error) => return Err(self.failed(dir, &error)),
         };
         let mut paths = Vec::new();
         for entry in entries {
-            let entry = entry.map_err(|error| io_error(dir, &error))?;
+            let entry = entry.map_err(|error| self.failed(dir, &error))?;
             if !names_a_file(&entry) {
                 continue;
             }
@@ -120,37 +135,45 @@ impl Storage for FsStorage {
     }
 
     fn read(&self, path: &str) -> Result<String, StorageError> {
-        let bytes = match fs::read(self.absolute(path)) {
+        let absolute = self.absolute(path);
+        if is_symlink(&absolute) {
+            return Err(StorageError::NotFound {
+                path: path.to_owned(),
+            });
+        }
+        let bytes = match fs::read(&absolute) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 return Err(StorageError::NotFound {
                     path: path.to_owned(),
                 });
             }
-            Err(error) => return Err(io_error(path, &error)),
+            Err(error) => return Err(self.failed(path, &error)),
         };
         String::from_utf8(bytes).map_err(|_| StorageError::NotUtf8 {
             path: path.to_owned(),
         })
     }
 
+    /// The notebook root appears here: a write is the first thing that
+    /// needs it to exist, so a command refused before it writes leaves no
+    /// directory behind.
     fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
         let target = self.absolute(path);
         let directory = target.parent().expect("a joined path has a parent");
-        fs::create_dir_all(directory).map_err(|error| io_error(path, &error))?;
-        let temp = directory.join(format!(
-            ".{}.{}.tmp",
-            target
-                .file_name()
-                .expect("a record path names a file")
-                .to_string_lossy(),
-            std::process::id()
-        ));
-        fs::write(&temp, content).map_err(|error| io_error(path, &error))?;
-        fs::rename(&temp, &target).map_err(|error| {
-            let _ = fs::remove_file(&temp);
-            io_error(path, &error)
-        })
+        fs::create_dir_all(directory).map_err(|error| self.failed(path, &error))?;
+        ignore_leavings(&self.root);
+        // A temp file that owns itself: every way out of here but the
+        // rename drops it, so a failed write leaves nothing behind.
+        let temp = Builder::new()
+            .prefix(".")
+            .suffix(".tmp")
+            .tempfile_in(directory)
+            .map_err(|error| self.failed(path, &error))?;
+        fs::write(temp.path(), content).map_err(|error| self.failed(path, &error))?;
+        temp.persist(&target)
+            .map_err(|error| self.failed(path, &error.error))?;
+        Ok(())
     }
 
     fn remove(&mut self, path: &str) -> Result<(), StorageError> {
@@ -159,35 +182,27 @@ impl Storage for FsStorage {
             Err(error) if error.kind() == ErrorKind::NotFound => Err(StorageError::NotFound {
                 path: path.to_owned(),
             }),
-            Err(error) => Err(io_error(path, &error)),
+            Err(error) => Err(self.failed(path, &error)),
         }
     }
 
     /// The filesystem answers this from the inode, so an id's existence
     /// costs a `stat` rather than the record it names.
     fn exists(&self, path: &str) -> Result<bool, StorageError> {
-        match fs::metadata(self.absolute(path)) {
+        match fs::symlink_metadata(self.absolute(path)) {
             Ok(found) => Ok(found.is_file()),
             Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(io_error(path, &error)),
+            Err(error) => Err(self.failed(path, &error)),
         }
     }
 }
 
 /// Whether the entry names a file to read. The kind arrives with the
-/// listing on the platforms that report it, so only a symlink — whose
-/// target the listing cannot know — costs a question to the filesystem.
+/// listing, so this costs no question to the filesystem.
 fn names_a_file(entry: &fs::DirEntry) -> bool {
-    match entry.file_type() {
-        Ok(kind) if kind.is_symlink() => entry.path().is_file(),
-        Ok(kind) => kind.is_file(),
-        Err(_) => false,
-    }
+    entry.file_type().is_ok_and(|kind| kind.is_file())
 }
 
-fn io_error(path: &str, error: &std::io::Error) -> StorageError {
-    StorageError::Io {
-        path: path.to_owned(),
-        detail: error.to_string(),
-    }
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|found| found.is_symlink())
 }

@@ -409,32 +409,32 @@ mod archive_verb {
         );
     }
 
+    /// A report is the record's own output: linked as evidence and born
+    /// inside it. Either half alone leaves the Note where it is.
     #[test]
     fn only_a_report_born_inside_the_record_is_carried() {
-        for (case, path, file) in [
-            (
-                "a Note born from another Task",
-                "notes/note.report.md",
-                record_file("note.report", "note", "active", &["from: task.other"], ""),
-            ),
-            (
-                "a Question this Task spawned",
-                "questions/question.doubt.md",
-                record_file(
-                    "question.doubt",
-                    "question",
-                    "open",
-                    &["from: task.demo"],
-                    "",
-                ),
-            ),
+        for (case, links, origin) in [
+            ("a Note born from another Task", true, "task.other"),
+            ("a Note this record never linked", false, "task.demo"),
         ] {
+            let task_lines: &[&str] = if links {
+                &["link: note note.report"]
+            } else {
+                &[]
+            };
+            let path = "notes/note.report.md";
             let mut storage = storage_with(&[
+                ("tasks/task.demo.md", &task_file("closed", task_lines)),
                 (
-                    "tasks/task.demo.md",
-                    &task_file("closed", &["link: note note.report"]),
+                    path,
+                    &record_file(
+                        "note.report",
+                        "note",
+                        "active",
+                        &[&format!("from: {origin}")],
+                        "",
+                    ),
                 ),
-                (path, &file),
             ]);
             let moved = Notebook::new(&mut storage)
                 .archive("task.demo", TODAY)

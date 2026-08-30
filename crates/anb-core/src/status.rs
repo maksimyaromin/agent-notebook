@@ -171,7 +171,13 @@ impl Ladder {
             return None;
         }
         if self.reached(Collapse::Floor) {
-            return Some("all but the first in-flight".to_owned());
+            // The floor keeps the counts line and the first in-flight
+            // Task, so with nothing in flight it keeps the counts alone.
+            return Some(if inputs.in_flight.is_empty() {
+                "all but the counts".to_owned()
+            } else {
+                "all but the first in-flight".to_owned()
+            });
         }
         let mut cuts = Vec::new();
         if self.ready_trimmed > 0 {
@@ -317,10 +323,9 @@ fn render_in_flight(out: &mut String, in_flight: &[ActiveTask], ladder: Ladder) 
         SECTION_ROWS
     }
     .min(in_flight.len());
-    for (position, task) in in_flight.iter().take(shown).enumerate() {
+    for task in in_flight.iter().take(shown) {
         let _ = writeln!(out, "in-flight: {} {}", task.id, json_quoted(&task.title));
-        if position == 0
-            && !ladder.reached(Collapse::Log)
+        if !ladder.reached(Collapse::Log)
             && let Some(log) = &task.log
         {
             let _ = writeln!(out, "log: {log}");

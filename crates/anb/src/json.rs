@@ -3,7 +3,7 @@
 //! programmatically. Pretty JSON is never emitted.
 
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, shown};
+use crate::reply::{Reply, bounded_body, repair_command, shown};
 use anb_core::{
     Cited, Counts, DebtSignal, FileFinding, Held, ListedRecord, NotebookError, Overview, ReadyTask,
     SECTION_ROWS, Status, View, debt_classes,
@@ -68,21 +68,21 @@ pub fn render(reply: &Reply) -> String {
             insert_dangling_mentions(&mut object, &commented.dangling_mentions);
             Value::Object(object)
         }
-        Reply::Ready { rows, all } => json!({
+        Reply::Ready { rows, all, .. } => json!({
             "count": rows.len(),
             "ready": rows[..shown(rows.len(), *all)]
                 .iter()
                 .map(ready_row)
                 .collect::<Vec<Value>>(),
         }),
-        Reply::Listing { rows, all } => json!({
+        Reply::Listing { rows, all, .. } => json!({
             "count": rows.len(),
             "records": rows[..shown(rows.len(), *all)]
                 .iter()
                 .map(listed_row)
                 .collect::<Vec<Value>>(),
         }),
-        Reply::Viewed(view) => view_value(view),
+        Reply::Viewed { view, all } => view_value(view, *all),
         Reply::Status { status, hook } => {
             if *hook {
                 return hook_payload(status);
@@ -272,6 +272,12 @@ fn finding_value(located: &FileFinding) -> Value {
         json!(located.finding.code.severity().as_str()),
     );
     object.insert("code".into(), json!(located.finding.code.as_str()));
+    if let Some(repair) = &located.repair {
+        object.insert(
+            "repair".into(),
+            json!(repair_command(repair, &located.path)),
+        );
+    }
     object.insert("message".into(), json!(located.finding.message));
     Value::Object(object)
 }
@@ -317,15 +323,15 @@ fn counts_value(counts: &Counts) -> Value {
     })
 }
 
-fn view_value(view: &View) -> Value {
+fn view_value(view: &View, all: bool) -> Value {
     json!({
         "id": view.id,
         "path": view.path,
         "archived": view.archived,
         "fields": view.fields.iter().map(|(key, value)| json!([key, value])).collect::<Vec<Value>>(),
-        "body": view.body,
-        "mentions": bounded_section(&view.mentions, |id| json!(id)),
-        "mentioned-by": bounded_section(&view.mentioned_by, |id| json!(id)),
+        "body": bounded_body(&view.body, &view.id, all),
+        "mentions": section(&view.mentions, shown(view.mentions.len(), all), |id| json!(id)),
+        "mentioned-by": section(&view.mentioned_by, shown(view.mentioned_by.len(), all), |id| json!(id)),
     })
 }
 

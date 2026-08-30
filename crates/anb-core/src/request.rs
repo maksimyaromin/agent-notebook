@@ -90,6 +90,14 @@ pub struct Edit {
     pub clear: Vec<String>,
 }
 
+/// The optional fields `edit` erases: the ones it can also write, minus
+/// those with an eraser of their own — a body through an empty `--body`, a
+/// tag through `--untag`. A field the record's type does not allow is
+/// erasable all the same; erasing it is the repair.
+pub const CLEARABLE: [&str; 3] = ["from", PRIORITY, "review-by"];
+
+pub(crate) const PRIORITY: &str = "priority";
+
 impl Edit {
     pub(crate) fn changes_nothing(&self) -> bool {
         self.title.is_none()

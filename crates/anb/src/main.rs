@@ -90,6 +90,14 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         cli.notebook.as_deref(),
         std::env::var_os(NOTEBOOK_ENV).as_deref(),
     );
+    if root.exists() && !root.is_dir() {
+        return Err(render_failure(&NotebookError::InvalidArgument {
+            reason: format!(
+                "notebook: {} is a file, not a notebook directory",
+                root.display()
+            ),
+        }));
+    }
     let mut storage = FsStorage::new(root.clone());
     let today = jiff::Zoned::now().date().to_string();
 
@@ -101,7 +109,7 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     };
 
     let host = Host {
-        git_by: git_user_name,
+        git_by: anb::git::user_name,
         read_report,
         lost_proofs: |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited),
         today: &today,
@@ -149,18 +157,4 @@ fn read_report(path: &str) -> Result<String, StorageError> {
             detail: error.to_string(),
         },
     })
-}
-
-/// The accountable identity, as git knows it; absence is legal.
-fn git_user_name() -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["config", "--get", "user.name"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let name = String::from_utf8(output.stdout).ok()?;
-    let name = name.trim();
-    (!name.is_empty()).then(|| name.to_owned())
 }

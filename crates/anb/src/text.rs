@@ -5,12 +5,12 @@
 
 use crate::json;
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, shown};
+use crate::reply::{Reply, bounded_body, lifted, repair_command, shown};
+use anb_core::date;
 use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
 use anb_core::{
     FileFinding, ListedRecord, NotebookError, Overview, ReadyTask, View, counts_phrase, encode,
-    grammar,
 };
 use std::fmt::Write as _;
 
@@ -62,24 +62,21 @@ pub fn render(reply: &Reply, today: &str) -> String {
             already_mark(edge.already)
         ),
         Reply::Commented(commented) => commented_lines(commented),
-        Reply::Ready { rows, all } => ready_table(rows, shown(rows.len(), *all), today),
-        Reply::Listing { rows, all } => {
-            listing_table(rows, shown(rows.len(), *all), "records", "anb list --all")
-        }
-        Reply::Viewed(view) => single_record(view),
+        Reply::Ready { rows, scope, all } => ready_table(
+            rows,
+            shown(rows.len(), *all),
+            today,
+            &lifted("ready", scope.as_ref()),
+        ),
+        Reply::Listing { rows, scope, all } => listing_table(
+            rows,
+            shown(rows.len(), *all),
+            "records",
+            &lifted("list", scope.as_ref()),
+        ),
+        Reply::Viewed { view, all } => single_record(view, *all),
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
-        Reply::Archived(moved) => {
-            let mut out = if moved.already {
-                format!("ok: archive {} — archived (already)\n", moved.id)
-            } else {
-                format!(
-                    "ok: archive {} — {}\u{2192}{}\n",
-                    moved.id, moved.from, moved.to
-                )
-            };
-            named_line(&mut out, "carried", &moved.carried);
-            out
-        }
+        Reply::Archived(moved) => archive_lines(moved),
         Reply::Expunged(gone) => format!(
             "ok: expunge {} — {} removed\n",
             gone.id,
@@ -145,7 +142,7 @@ fn created_lines(command: &str, created: &anb_core::Created) -> String {
         .iter()
         .map(|cited| format!("{} ({})", cited.id, cited.author()))
         .collect();
-    named_line(&mut out, "may-conflict", &named);
+    named_line(&mut out, "may-conflict", &named, ROW_BOUND);
     dangling_mention_line(&mut out, &created.dangling_mentions);
     out
 }
@@ -166,13 +163,32 @@ fn closed_lines(closed: &anb_core::Closed) -> String {
         let _ = writeln!(out, "report: {note}");
     }
     dangling_mention_line(&mut out, &closed.dangling_mentions);
-    named_line(&mut out, "unblocked", &closed.unblocked);
-    named_line(&mut out, "open-questions", &closed.open_questions);
+    named_line(&mut out, "unblocked", &closed.unblocked, ROW_BOUND);
+    named_line(
+        &mut out,
+        "open-questions",
+        &closed.open_questions,
+        ROW_BOUND,
+    );
     out
 }
 
-/// A reply's inline list: how many there are, then the bounded naming.
-fn named_line(out: &mut String, label: &str, items: &[String]) {
+fn archive_lines(moved: &anb_core::Archived) -> String {
+    let mut out = if moved.already {
+        format!("ok: archive {} — archived (already)\n", moved.id)
+    } else {
+        format!(
+            "ok: archive {} — {}\u{2192}{}\n",
+            moved.id, moved.from, moved.to
+        )
+    };
+    named_line(&mut out, "carried", &moved.carried, ROW_BOUND);
+    out
+}
+
+/// A reply's inline list: how many there are, then the naming, cut at
+/// `bound`.
+fn named_line(out: &mut String, label: &str, items: &[String], bound: usize) {
     if items.is_empty() {
         return;
     }
@@ -180,7 +196,7 @@ fn named_line(out: &mut String, label: &str, items: &[String]) {
         out,
         "{label}[{}]: {}",
         items.len(),
-        encode::id_list(items, ROW_BOUND)
+        encode::id_list(items, bound)
     );
 }
 
@@ -217,14 +233,14 @@ fn transition_line(command: &str, transition: &anb_core::Transitioned) -> String
 /// so it states the count the header would have carried.
 const EMPTY_LISTING: &str = "count: 0\n";
 
-fn ready_table(rows: &[ReadyTask], shown: usize, today: &str) -> String {
+fn ready_table(rows: &[ReadyTask], shown: usize, today: &str, restore: &str) -> String {
     if rows.is_empty() {
         return EMPTY_LISTING.to_owned();
     }
     let mut out = String::new();
-    let today_day = grammar::day_number(today).unwrap_or(0);
+    let today_day = date::day_number(today).unwrap_or(0);
     out.push_str(&encode::ready_table(rows, shown, today_day));
-    truncation_hint(&mut out, rows.len(), shown, "anb ready --all");
+    truncation_hint(&mut out, rows.len(), shown, restore);
     out
 }
 
@@ -258,7 +274,7 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
         return EMPTY_LISTING.to_owned();
     }
     let mut out = format!(
-        "findings[{}]{{file,line,severity,code,message}}:\n",
+        "findings[{}]{{file,line,severity,code,repair,message}}:\n",
         findings.len()
     );
     for located in &findings[..shown] {
@@ -266,9 +282,13 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
             .finding
             .line
             .map_or_else(|| "-".to_owned(), |line| line.to_string());
+        let repair = located.repair.as_ref().map_or_else(
+            || "-".to_owned(),
+            |repair| repair_command(repair, &located.path),
+        );
         let _ = writeln!(
             out,
-            "  {},{line},{},{},{}",
+            "  {},{line},{},{},{repair},{}",
             located.path,
             located.finding.code.severity().as_str(),
             located.finding.code.as_str(),
@@ -327,7 +347,7 @@ fn truncation_hint(out: &mut String, total: usize, shown: usize, restore: &str) 
     }
 }
 
-fn single_record(view: &View) -> String {
+fn single_record(view: &View, all: bool) -> String {
     let mut out = String::new();
     for (key, value) in &view.fields {
         if value.is_empty() {
@@ -341,7 +361,7 @@ fn single_record(view: &View) -> String {
     }
     if !view.body.is_empty() {
         out.push_str("body: |\n");
-        for line in view.body.lines() {
+        for line in bounded_body(&view.body, &view.id, all).lines() {
             if line.is_empty() {
                 out.push('\n');
             } else {
@@ -353,7 +373,7 @@ fn single_record(view: &View) -> String {
         ("mentions", &view.mentions),
         ("mentioned-by", &view.mentioned_by),
     ] {
-        named_line(&mut out, label, ids);
+        named_line(&mut out, label, ids, shown(ids.len(), all));
     }
     out
 }

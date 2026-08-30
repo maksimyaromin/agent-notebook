@@ -3,9 +3,10 @@
 //! becomes. The write itself is the verb's, in the parent.
 
 use super::error::NotebookError;
+use crate::date;
 use crate::grammar::{self, RecordFile};
 use crate::record::{Record, RecordType};
-use crate::request::{Draft, Edit, Proof};
+use crate::request::{CLEARABLE, Draft, Edit, PRIORITY, Proof};
 use crate::resolve::{path_stem, record_path, type_of};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -130,14 +131,6 @@ pub(super) fn validate_edit(record_type: RecordType, edit: &Edit) -> Result<(), 
     Ok(())
 }
 
-/// The optional fields `edit` erases: the ones it can also write, minus
-/// those with an eraser of their own — a body through an empty `--body`, a
-/// tag through `--untag`. A field the record's type does not allow is
-/// erasable all the same; erasing it is the repair.
-const CLEARABLE: [&str; 3] = ["from", PRIORITY, "review-by"];
-
-const PRIORITY: &str = "priority";
-
 /// Whether the same call also writes `key`: the one contradiction a clear
 /// can carry, asked of the list that will do the writing.
 fn writes(edit: &Edit, key: &str) -> bool {
@@ -164,7 +157,7 @@ pub(super) fn guard_proof(proof: &Proof) -> Result<(), NotebookError> {
 /// [`guard_today`] plus the day number the clocks subtract from.
 pub(super) fn guarded_day(today: &str) -> Result<i64, NotebookError> {
     guard_today(today)?;
-    grammar::day_number(today).ok_or_else(|| NotebookError::InvalidArgument {
+    date::day_number(today).ok_or_else(|| NotebookError::InvalidArgument {
         reason: format!("today: `{today}` is not a date"),
     })
 }

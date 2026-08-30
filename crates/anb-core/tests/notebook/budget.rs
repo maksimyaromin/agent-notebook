@@ -257,9 +257,11 @@ mod budget_ladder {
     #[test]
     fn sections_degrade_in_the_fixed_order_as_the_budget_shrinks() {
         let mut stages = Vec::new();
-        for ceiling in [
-            400, 150, 130, 110, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 1,
-        ] {
+        // Each ceiling below 130 is a rung this fixture actually steps
+        // down: at 122 the epics collapse, at 118 the debt, at 113 the
+        // rules, and 100 is already the floor. A ceiling between two rungs
+        // renders what the one above it did, and proves nothing.
+        for ceiling in [400, 150, 130, 122, 118, 113, 110, 100, 1] {
             let step = rendered(Budget::Tokens(ceiling));
             let ready_rows = rows_under(&step.text, "ready[");
             let epics_itemized = step.text.contains("epics[");
@@ -377,6 +379,11 @@ mod budget_ladder {
                 assert!(
                     !cut.contains("log"),
                     "no log line existed to cut at {ceiling}: {}",
+                    status.text
+                );
+                assert!(
+                    !cut.contains("in-flight"),
+                    "no Task was in flight to keep at {ceiling}: {}",
                     status.text
                 );
             }
