@@ -87,7 +87,7 @@ pub(super) fn validate_edit(record_type: RecordType, edit: &Edit) -> Result<(), 
 
     if edit.changes_nothing() {
         return invalid(
-            "edit: nothing to change — pass --title, --body, --tag, --untag, --from, --priority, or --review-by"
+            "edit: nothing to change — pass --title, --body, --tag, --untag, --from, --priority, --review-by, or --clear"
                 .to_owned(),
         );
     }
@@ -116,7 +116,34 @@ pub(super) fn validate_edit(record_type: RecordType, edit: &Edit) -> Result<(), 
     {
         return invalid(format!("review-by: {why}"));
     }
+    for field in &edit.clear {
+        let Some(key) = CLEARABLE.iter().find(|key| **key == field.as_str()) else {
+            return invalid(format!(
+                "clear: `{field}` is not an erasable field — {}",
+                CLEARABLE.join(", ")
+            ));
+        };
+        if writes(edit, key) {
+            return invalid(format!("clear: `{key}` is both written and cleared"));
+        }
+    }
     Ok(())
+}
+
+/// The optional fields `edit` erases: the ones it can also write, minus
+/// those with an eraser of their own — a body through an empty `--body`, a
+/// tag through `--untag`. A field the record's type does not allow is
+/// erasable all the same; erasing it is the repair.
+const CLEARABLE: [&str; 3] = ["from", PRIORITY, "review-by"];
+
+const PRIORITY: &str = "priority";
+
+/// Whether the same call also writes `key`: the one contradiction a clear
+/// can carry, asked of the list that will do the writing.
+fn writes(edit: &Edit, key: &str) -> bool {
+    edited_fields(edit)
+        .iter()
+        .any(|(written, value)| *written == key && value.is_some())
 }
 
 /// A proof is a link value: one non-empty line, or an explicit waiver.
@@ -264,22 +291,12 @@ pub(super) fn report_note_title(task_title: &str) -> String {
 /// that actually moved.
 pub(super) fn spliced(file: &mut RecordFile, edit: &Edit) -> Vec<&'static str> {
     let mut changed = Vec::new();
-    let fields = [
-        (
-            "title",
-            edit.title.as_deref().map(str::trim).map(str::to_owned),
-        ),
-        ("from", edit.from.clone()),
-        (
-            "priority",
-            edit.priority.map(|priority| priority.to_string()),
-        ),
-        ("review-by", edit.review_by.clone()),
-    ];
-    for (key, value) in fields {
-        if let Some(value) = value
-            && file.set_field(key, &value)
-        {
+    for (key, value) in edited_fields(edit) {
+        let touched = match value {
+            Some(value) => file.set_field(key, &value),
+            None => file.remove_field(key),
+        };
+        if touched {
             changed.push(key);
         }
     }
@@ -294,6 +311,32 @@ pub(super) fn spliced(file: &mut RecordFile, edit: &Edit) -> Vec<&'static str> {
         }
     }
     changed
+}
+
+/// The envelope lines this edit means to write, in splice order: `Some`
+/// sets the line, `None` erases it. Written and cleared fields share one
+/// list so that what an edit changes and what it may change over cannot
+/// drift apart.
+fn edited_fields(edit: &Edit) -> Vec<(&'static str, Option<String>)> {
+    let mut fields: Vec<(&'static str, Option<String>)> = [
+        (
+            "title",
+            edit.title.as_deref().map(str::trim).map(str::to_owned),
+        ),
+        ("from", edit.from.clone()),
+        (PRIORITY, edit.priority.map(|priority| priority.to_string())),
+        ("review-by", edit.review_by.clone()),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|value| (key, Some(value))))
+    .collect();
+    fields.extend(
+        edit.clear
+            .iter()
+            .filter_map(|field| CLEARABLE.iter().find(|key| **key == field.as_str()))
+            .map(|key| (*key, None)),
+    );
+    fields
 }
 
 /// Splice the edit's tag additions and removals into the `tags` field;

@@ -55,6 +55,28 @@ pub fn notebook_root(start: &Path, named: Option<&Path>, from_env: Option<&OsStr
     }
 }
 
+/// Name this run's leavings in the notebook's own ignore file: the lock a
+/// writer takes and the temp file an interrupted write leaves behind belong
+/// to a machine, not to the project's history.
+///
+/// A notebook that already states its own rules keeps them, and a root that
+/// refuses the file works exactly as well — only git sees the difference.
+pub fn ignore_leavings(root: &Path) {
+    let _ = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(root.join(".gitignore"))
+        .and_then(|mut file| std::io::Write::write_all(&mut file, IGNORED.as_bytes()));
+}
+
+/// The lock file's name in the notebook root. It carries no `.md` suffix
+/// and sits outside every type directory, so no listing, query, or check
+/// can mistake it for a record.
+pub const LOCK_FILE: &str = ".lock";
+
+/// `*.tmp` is the temp file [`FsStorage::write`] renames from.
+const IGNORED: &str = "# A run's leavings, not the project's history.\n.lock\n*.tmp\n";
+
 pub const NOTEBOOK_ENV: &str = "ANB_NOTEBOOK";
 
 const NOTEBOOK_DIR: &str = ".agent-notebook";

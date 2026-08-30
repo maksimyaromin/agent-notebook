@@ -6,7 +6,6 @@
 //! handed it, which is what keeps a verb to one pass over the notebook.
 
 use crate::debt;
-use crate::finding::Finding;
 use crate::grammar::{self, Residence};
 use crate::graph::{TaskGraph, TaskNode};
 use crate::mention;
@@ -124,16 +123,6 @@ pub(super) fn edge_exists(record: &Record, target: &str) -> bool {
         .file()
         .field_values("blocked-by")
         .any(|value| value == target)
-}
-
-/// An error finding sitting on one of the record's own `blocked-by` lines:
-/// the class `unblock` exists to erase.
-pub(super) fn edge_borne(record: &Record, finding: &Finding) -> bool {
-    finding.line.is_some()
-        && record
-            .file()
-            .field_entries("blocked-by")
-            .any(|(_, line)| line == finding.line)
 }
 
 /// The same edges [`task_edges`] draws, each node carrying whether its

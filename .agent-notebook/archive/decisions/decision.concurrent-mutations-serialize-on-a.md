@@ -1,13 +1,14 @@
 ---
 id: decision.concurrent-mutations-serialize-on-a
 type: decision
-state: active
+state: superseded
 kind: rule
 title: Concurrent mutations serialize on a notebook lock
 by: Maksim Yaromin
 via: claude-code
 from: question.should-two-agents-writing-one-record-be
 tags: storage, concurrency
+superseded-by: decision.concurrent-access-serializes-on-a
 created: 2026-08-30
 updated: 2026-08-30
 ---

@@ -280,6 +280,7 @@ fn edited<S: Storage>(
         from,
         priority,
         review_by,
+        clear,
     } = args;
     let edit = Edit {
         title,
@@ -289,6 +290,7 @@ fn edited<S: Storage>(
         from,
         priority,
         review_by,
+        clear,
     };
     Ok(Reply::Edited(notebook.edit(&id, &edit, today)?))
 }

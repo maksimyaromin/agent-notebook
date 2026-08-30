@@ -1781,6 +1781,34 @@ mod maintenance_replies {
     }
 
     #[test]
+    fn a_repeated_clear_flag_names_every_field_it_erased() {
+        let mut storage = storage_with(&[open_task(
+            "task.demo",
+            "A demo record",
+            &["from: task.parent", "priority: 2"],
+        )]);
+        assert_snapshot!(
+            ok(
+                &mut storage,
+                &["edit", "task.demo", "--clear", "from", "--clear", "priority"],
+            ),
+            @"ok: edit task.demo — from, priority"
+        );
+    }
+
+    #[test]
+    fn a_field_with_no_eraser_is_a_recovery_payload() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            refused(&mut storage, &["edit", "task.demo", "--clear", "state"]),
+            @r#"
+        error[invalid-argument]: clear: `state` is not an erasable field — from, priority, review-by
+        try: anb edit task.demo --title "<title>"
+        "#
+        );
+    }
+
+    #[test]
     fn an_edit_changing_nothing_answers_already() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         assert_snapshot!(
@@ -1810,7 +1838,7 @@ mod maintenance_replies {
         assert_snapshot!(
             refused(&mut storage, &["edit", "task.demo"]),
             @r#"
-        error[invalid-argument]: edit: nothing to change — pass --title, --body, --tag, --untag, --from, --priority, or --review-by
+        error[invalid-argument]: edit: nothing to change — pass --title, --body, --tag, --untag, --from, --priority, --review-by, or --clear
         try: anb edit task.demo --title "<title>"
         "#
         );

@@ -219,6 +219,10 @@ pub struct EditArgs {
     /// The explicit resurfacing date.
     #[arg(long)]
     pub review_by: Option<String>,
+    /// The optional field to erase: `from`, `priority`, or `review-by`;
+    /// repeatable.
+    #[arg(long = "clear", value_name = "FIELD")]
+    pub clear: Vec<String>,
 }
 
 #[derive(Args)]

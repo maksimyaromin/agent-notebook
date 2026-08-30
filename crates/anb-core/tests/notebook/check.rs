@@ -424,10 +424,6 @@ fn a_lineage_loop_leaves_its_records_open_to_repair() {
             "tasks/task.b.md",
             &record_file("task.b", "task", "open", &["from: task.a"], ""),
         ),
-        (
-            "tasks/task.root.md",
-            &record_file("task.root", "task", "open", &[], ""),
-        ),
     ]);
     assert_eq!(
         Notebook::new(&mut storage).check().unwrap().len(),
@@ -435,7 +431,7 @@ fn a_lineage_loop_leaves_its_records_open_to_repair() {
         "the loop stands before the repair"
     );
     let edit = Edit {
-        from: Some("task.root".to_owned()),
+        clear: vec!["from".to_owned()],
         ..Edit::default()
     };
     let edited = Notebook::new(&mut storage)
@@ -444,7 +440,7 @@ fn a_lineage_loop_leaves_its_records_open_to_repair() {
     assert_eq!(edited.changed, vec!["from"]);
     assert!(
         Notebook::new(&mut storage).check().unwrap().is_empty(),
-        "the loop is gone once one of its edges points elsewhere"
+        "the loop is gone once the line that closes it is erased"
     );
 }
 

@@ -3,6 +3,7 @@
 
 use anb::cli::{Cli, Command};
 use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root};
+use anb::lock;
 use anb::reconcile::lost_proofs;
 use anb::reply::{Host, execute};
 use anb::{json, text};
@@ -91,6 +92,13 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     );
     let mut storage = FsStorage::new(root.clone());
     let today = jiff::Zoned::now().date().to_string();
+
+    // Bound to a name, so the claim lives until the command has answered;
+    // `let _ =` would release it before the first read.
+    let _lock = match lock::taken(&root, &cli.command) {
+        Ok(lock) => lock,
+        Err(error) => return Err(render_failure(&NotebookError::Storage(error))),
+    };
 
     let host = Host {
         git_by: git_user_name,
