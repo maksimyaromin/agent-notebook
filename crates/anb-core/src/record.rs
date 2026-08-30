@@ -7,7 +7,7 @@
 //! Question closes only by routing. This module judges one record at a time;
 //! rules that need a second record live in the notebook.
 
-use crate::finding::{Finding, FindingCode, Severity};
+use crate::finding::{Finding, FindingCode};
 use crate::grammar::{self, RecordFile, Residence};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,16 +292,14 @@ impl Record {
     pub fn error_findings(&self) -> Vec<Finding> {
         self.findings
             .iter()
-            .filter(|finding| finding.code.severity() == Severity::Error)
+            .filter(|finding| finding.is_error())
             .cloned()
             .collect()
     }
 
     #[must_use]
     pub fn has_errors(&self) -> bool {
-        self.findings
-            .iter()
-            .any(|finding| finding.code.severity() == Severity::Error)
+        self.findings.iter().any(Finding::is_error)
     }
 
     #[must_use]

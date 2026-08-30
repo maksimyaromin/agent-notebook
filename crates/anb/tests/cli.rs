@@ -6,7 +6,7 @@ use anb::cli::{Cli, Command};
 use anb::reply::{Host, execute};
 use anb::{json, text};
 use anb_core::MemoryStorage;
-use anb_core::storage::StorageError;
+use anb_core::StorageError;
 use clap::Parser;
 use insta::assert_snapshot;
 use std::fmt::Write as _;
@@ -43,8 +43,8 @@ fn run_reading(
     };
     let host = Host {
         git_by: || Some(GIT_IDENTITY.to_owned()),
-        read_report,
-        lost_proofs: nothing_lost,
+        read_report: &read_report,
+        lost_proofs: &nothing_lost,
         today: TODAY,
     };
     match execute(cli.command, storage, host) {
@@ -61,22 +61,13 @@ fn run_reading(
     }
 }
 
-/// A host built from plain functions, so a case can name one without
-/// spelling out two closure types.
-type PlainHost = Host<
-    'static,
-    fn() -> Option<String>,
-    fn(&str) -> Result<String, StorageError>,
-    fn(&[anb_core::CitedProof]) -> Vec<anb_core::CitedProof>,
->;
-
 /// The host of a shell whose clock has gone wrong: the one fact these cases
 /// vary.
-fn undated_host() -> PlainHost {
+fn undated_host() -> Host<'static> {
     Host {
         git_by: || None,
-        read_report: missing_report,
-        lost_proofs: nothing_lost,
+        read_report: &missing_report,
+        lost_proofs: &nothing_lost,
         today: "not-a-date",
     }
 }
@@ -492,6 +483,27 @@ mod task_cycle_replies {
           line 4: bad-value state: `cancelled` is not one of open, active, review, closed for a task
         try: anb view task.demo
         "
+        );
+    }
+
+    /// A refusal's detail lines are the reason it refused. The data
+    /// rendering carries them or an agent parsing it is told only that
+    /// something was wrong.
+    #[test]
+    fn a_json_refusal_carries_the_findings_the_text_lists() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "cancelled", "A demo record", &[], ""),
+        )]);
+        let refusal: serde_json::Value =
+            serde_json::from_str(&refused(&mut storage, &["start", "task.demo", "--json"]))
+                .unwrap();
+        assert_eq!(refusal["error"], serde_json::json!("invalid-record"));
+        let findings = refusal["findings"].as_array().unwrap();
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0].as_str().unwrap().contains("bad-value"),
+            "{findings:?}"
         );
     }
 
@@ -1039,6 +1051,18 @@ mod single_record {
         assert_eq!(body.len(), 41, "twenty lines each end, and the elision");
     }
 
+    /// The bound belongs to the reply, not to one rendering of it: the data
+    /// surface is the one an agent parses without ever reading it.
+    #[test]
+    fn the_json_body_is_bounded_like_the_text() {
+        let mut storage = logged_task(60);
+        let view: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["view", "task.long", "--json"])).unwrap();
+        assert_eq!(view["body"]["lines"], serde_json::json!(60));
+        assert_eq!(view["body"]["head"].as_str().unwrap().lines().count(), 20);
+        assert_eq!(view["body"]["tail"].as_str().unwrap().lines().count(), 20);
+    }
+
     #[test]
     fn view_all_prints_every_line_of_a_long_body() {
         let mut storage = logged_task(60);
@@ -1555,6 +1579,31 @@ mod maintenance_replies {
         assert_snapshot!(ok(&mut storage, &["check"]), @"count: 0");
     }
 
+    /// A repair is a command that runs. A line only a Task verb erases,
+    /// standing on a record of another type, names no repair — one that did
+    /// would send an agent straight into a `wrong-type` refusal.
+    #[test]
+    fn a_task_only_line_on_another_type_names_no_repair() {
+        let mut storage = storage_with(&[(
+            "notes/note.stray.md".to_owned(),
+            record_file(
+                "note.stray",
+                "note",
+                "active",
+                "A demo record",
+                &["kind: fact", "hold-until: 2026-09-01"],
+                "",
+            ),
+        )]);
+        let report: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["check", "--json"])).unwrap();
+        let findings = report["findings"].as_array().unwrap();
+        assert!(!findings.is_empty(), "the stray line is a finding");
+        for finding in findings {
+            assert!(finding.get("repair").is_none(), "{finding}");
+        }
+    }
+
     /// A verb resolves an id to the one live path its type dictates, so a
     /// record it could never arrive at is a record it cannot repair — and a
     /// row that named a command anyway would send an agent in a circle.
@@ -1602,8 +1651,8 @@ mod maintenance_replies {
             &mut storage,
             Host {
                 git_by: || None,
-                read_report: missing_report,
-                lost_proofs: nothing_lost,
+                read_report: &missing_report,
+                lost_proofs: &nothing_lost,
                 today: TODAY,
             },
         )
@@ -1630,8 +1679,8 @@ mod maintenance_replies {
             &mut storage,
             Host {
                 git_by: || None,
-                read_report: missing_report,
-                lost_proofs: nothing_lost,
+                read_report: &missing_report,
+                lost_proofs: &nothing_lost,
                 today: TODAY,
             },
         )
@@ -2169,6 +2218,16 @@ mod check_bounds {
         let out = ok(&mut storage, &["check"]);
         assert!(out.starts_with("findings[22]{"), "got: {out}");
         assert_eq!(out.lines().last().unwrap(), "  … 2 more: anb check --all");
+    }
+
+    /// The same bound in the rendering an agent parses rather than reads.
+    #[test]
+    fn the_json_findings_are_bounded_like_the_table() {
+        let mut storage = many_broken_records(22);
+        let checked: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["check", "--json"])).unwrap();
+        assert_eq!(checked["count"], serde_json::json!(22));
+        assert_eq!(checked["findings"].as_array().unwrap().len(), 20);
     }
 }
 

@@ -134,12 +134,11 @@ fn task_graph(records: &[Record]) -> TaskGraph {
         if record.record_type() != Some(RecordType::Task) {
             continue;
         }
-        let blocked_by = record.blocked_by().map(str::to_owned).collect();
         nodes
             .entry(path_stem(record.path()).to_owned())
-            .or_insert(TaskNode {
+            .or_insert_with(|| TaskNode {
                 closed: record.state() == Some("closed"),
-                blocked_by,
+                blocked_by: record.blocked_by().map(str::to_owned).collect(),
             });
     }
     TaskGraph::new(nodes)
@@ -339,6 +338,13 @@ impl<'a> MembershipIndex<'a> {
         }
         scope
     }
+}
+
+/// Whether any live record is a hub: what decides whether an epic query
+/// has anything to ask the archive.
+pub(super) fn any_hub(live: &[Record], archived: &[Record], resolvable: &Resolver<'_>) -> bool {
+    let index = MembershipIndex::of(live, archived);
+    live.iter().any(|record| index.is_hub(record, resolvable))
 }
 
 /// The hubs and where each stands, in notebook order. Progress counts the

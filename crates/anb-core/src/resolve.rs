@@ -55,8 +55,10 @@ impl<'a> Resolver<'a> {
 /// but claims no id, so it resolves nothing anywhere.
 pub(crate) fn resolvable_id(path: &str) -> Option<&str> {
     let stem = path_stem(path);
-    let canonical = record_path(stem, type_of(stem)?, is_archived(path));
-    (path == canonical).then_some(stem)
+    let home = type_of(stem)?.directory();
+    let filed = path.strip_prefix("archive/").unwrap_or(path);
+    let (directory, filename) = filed.rsplit_once('/')?;
+    (directory == home && is_record_file(filename)).then_some(stem)
 }
 
 pub(crate) fn archive_of(directory: &str) -> String {
@@ -94,7 +96,10 @@ pub(crate) fn record_path(id: &str, record_type: RecordType, archived: bool) -> 
 }
 
 /// The format is byte-exact: `.MD` is not a record file.
-#[allow(clippy::case_sensitive_file_extension_comparisons)]
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "the lint offers Path::extension, which folds case on some platforms and would put std::path behind a seam that speaks only strings"
+)]
 pub(crate) fn is_record_file(path: &str) -> bool {
     path.ends_with(".md")
 }

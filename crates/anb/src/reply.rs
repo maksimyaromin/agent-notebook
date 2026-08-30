@@ -132,13 +132,14 @@ impl Reply {
 /// Storage speaks only in paths under the notebook root, and a report is
 /// written wherever the work happened. `today` is the host's date — the
 /// Core holds no clock.
-pub struct Host<'a, G, R, C> {
-    pub git_by: G,
-    pub read_report: R,
+#[derive(Clone, Copy)]
+pub struct Host<'a> {
+    pub git_by: fn() -> Option<String>,
+    pub read_report: &'a dyn Fn(&str) -> Result<String, StorageError>,
     /// Which of the proofs a notebook cites the world no longer holds. The
     /// Core holds neither git nor a filesystem, so the question is asked
     /// out here; a caller with nothing to ask answers with an empty list.
-    pub lost_proofs: C,
+    pub lost_proofs: &'a dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
     pub today: &'a str,
 }
 
@@ -147,17 +148,11 @@ pub struct Host<'a, G, R, C> {
 /// # Errors
 /// The Core's refusal, or the shell's own argument refusal — either
 /// renders as a recovery payload.
-pub fn execute<S, G, R, C>(
+pub fn execute<S: Storage>(
     command: Command,
     storage: &mut S,
-    host: Host<'_, G, R, C>,
-) -> Result<Reply, NotebookError>
-where
-    S: Storage,
-    G: FnOnce() -> Option<String>,
-    R: FnOnce(&str) -> Result<String, StorageError>,
-    C: FnOnce(&[CitedProof]) -> Vec<CitedProof>,
-{
+    host: Host<'_>,
+) -> Result<Reply, NotebookError> {
     let Host {
         git_by,
         read_report,
@@ -275,7 +270,7 @@ fn status_reply<S: Storage>(
     notebook: &Notebook<'_, S>,
     budget: Option<u32>,
     hook: bool,
-    lost_proofs: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
+    lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
     today: &str,
 ) -> Result<Reply, NotebookError> {
     // Every failure here — reading the notebook to find the proofs
@@ -291,7 +286,7 @@ fn status_reply<S: Storage>(
 fn budgeted_status<S: Storage>(
     notebook: &Notebook<'_, S>,
     budget: Option<u32>,
-    lost_proofs: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
+    lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
     today: &str,
 ) -> Result<Status, NotebookError> {
     let ceiling = match budget {
@@ -477,7 +472,7 @@ fn chosen_proof(args: &mut CloseArgs) -> Result<ChosenProof, NotebookError> {
 fn close_reply<S: Storage>(
     notebook: &mut Notebook<'_, S>,
     mut args: CloseArgs,
-    read_report: impl FnOnce(&str) -> Result<String, StorageError>,
+    read_report: &dyn Fn(&str) -> Result<String, StorageError>,
     git_by: impl FnOnce() -> Option<String>,
     today: &str,
 ) -> Result<Closed, NotebookError> {

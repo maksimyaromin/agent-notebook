@@ -8,6 +8,62 @@ mod status_dashboard {
             .text
     }
 
+    /// The dashboard is a derived query like every other: a record whose
+    /// findings put it outside `ready` and `list` cannot lead a session
+    /// from the in-flight, review or rules line either. Each of the three
+    /// reads the notebook through its own fold, so each can lose the gate
+    /// on its own.
+    #[test]
+    fn an_invalid_record_reaches_no_line_of_the_dashboard() {
+        for (case, path, id, type_word, state, extra) in [
+            (
+                "in-flight",
+                "tasks/task.demo.md",
+                "task.demo",
+                "task",
+                "active",
+                &[][..],
+            ),
+            (
+                "review",
+                "tasks/task.demo.md",
+                "task.demo",
+                "task",
+                "review",
+                &[][..],
+            ),
+            (
+                "rules",
+                "decisions/decision.demo.md",
+                "decision.demo",
+                "decision",
+                "active",
+                &["kind: rule"][..],
+            ),
+        ] {
+            let sound = record_file(id, type_word, state, extra, "");
+            let mut storage = storage_with(&[(path, &sound)]);
+            let seen = Notebook::new(&mut storage)
+                .status(TODAY, Budget::Unbounded, no_lost_proofs)
+                .unwrap();
+            let lines = seen.in_flight.len() + seen.review.len() + seen.rules.len();
+            assert_eq!(lines, 1, "{case}: a sound record is one line");
+
+            // A reference no record answers is what excludes the record;
+            // its state is untouched, so only the gate can drop the line.
+            let mut broken_lines = extra.to_vec();
+            broken_lines.push("from: task.ghost");
+            let broken = record_file(id, type_word, state, &broken_lines, "");
+            let mut storage = storage_with(&[(path, &broken)]);
+            let seen = Notebook::new(&mut storage)
+                .status(TODAY, Budget::Unbounded, no_lost_proofs)
+                .unwrap();
+            assert_eq!(seen.in_flight, vec![], "{case}");
+            assert_eq!(seen.review, Vec::<String>::new(), "{case}");
+            assert_eq!(seen.rules, vec![], "{case}");
+        }
+    }
+
     #[test]
     fn an_active_task_is_the_in_flight_line_with_its_last_log_line() {
         let body = "Acceptance: the ladder holds.\n\n- 2026-08-25 claude: stopped at the ladder\n";
@@ -348,12 +404,12 @@ mod debt_signals {
         }
     }
 
-    /// The thresholds a notebook with no config file runs on, checked the
-    /// day before each is owed: a default quietly shortened would otherwise
-    /// have every "it fires on day N" test still passing.
+    /// The thresholds a notebook with no config file runs on, read from
+    /// both sides: silent the day before, speaking on the day it is owed.
+    /// A default quietly shortened passes every one-sided test there is.
     #[test]
-    fn no_default_clock_speaks_the_day_before_it_is_owed() {
-        for (case, path, id, type_word, state, extra, touched) in [
+    fn every_default_clock_speaks_on_the_day_it_is_owed_and_not_before() {
+        for (case, path, id, type_word, state, extra, quiet, owed, signal) in [
             (
                 "task-stale at 7",
                 "tasks/task.demo.md",
@@ -362,6 +418,11 @@ mod debt_signals {
                 "active",
                 &[][..],
                 "2026-08-21",
+                "2026-08-20",
+                DebtSignal::TaskStale {
+                    id: "task.demo".into(),
+                    days: 7,
+                },
             ),
             (
                 "question-age at 14",
@@ -371,6 +432,11 @@ mod debt_signals {
                 "open",
                 &[][..],
                 "2026-08-14",
+                "2026-08-13",
+                DebtSignal::QuestionAge {
+                    id: "question.demo".into(),
+                    days: 14,
+                },
             ),
             (
                 "hold-quiet at 14",
@@ -380,6 +446,11 @@ mod debt_signals {
                 "open",
                 &["hold: waiting on the owner"][..],
                 "2026-08-14",
+                "2026-08-13",
+                DebtSignal::HoldQuiet {
+                    id: "task.demo".into(),
+                    days: 14,
+                },
             ),
             (
                 "review-wait at 7",
@@ -389,26 +460,18 @@ mod debt_signals {
                 "review",
                 &[][..],
                 "2026-08-21",
+                "2026-08-20",
+                DebtSignal::ReviewWait {
+                    id: "task.demo".into(),
+                    days: 7,
+                },
             ),
         ] {
-            let mut storage = storage_with(&[(path, &aged(id, type_word, state, touched, extra))]);
-            assert_eq!(debt_of(&mut storage), vec![], "{case}");
+            let mut before = storage_with(&[(path, &aged(id, type_word, state, quiet, extra))]);
+            assert_eq!(debt_of(&mut before), vec![], "{case}, the day before");
+            let mut owed_day = storage_with(&[(path, &aged(id, type_word, state, owed, extra))]);
+            assert_eq!(debt_of(&mut owed_day), vec![signal], "{case}, on the day");
         }
-    }
-
-    #[test]
-    fn an_active_task_untouched_for_seven_days_is_stale() {
-        let mut storage = storage_with(&[(
-            "tasks/task.demo.md",
-            &aged("task.demo", "task", "active", "2026-08-20", &[]),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::TaskStale {
-                id: "task.demo".into(),
-                days: 7
-            }]
-        );
     }
 
     #[test]
@@ -445,21 +508,6 @@ mod debt_signals {
             ),
         )]);
         assert_eq!(debt_of(&mut storage), vec![]);
-    }
-
-    #[test]
-    fn a_free_standing_question_ages_at_fourteen_days() {
-        let mut storage = storage_with(&[(
-            "questions/question.demo.md",
-            &aged("question.demo", "question", "open", "2026-08-13", &[]),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::QuestionAge {
-                id: "question.demo".into(),
-                days: 14
-            }]
-        );
     }
 
     #[test]
@@ -516,21 +564,6 @@ mod debt_signals {
             vec![DebtSignal::OriginClosed {
                 id: "question.parked".into(),
                 origin: "task.origin".into()
-            }]
-        );
-    }
-
-    #[test]
-    fn a_review_task_waiting_seven_days_surfaces() {
-        let mut storage = storage_with(&[(
-            "tasks/task.demo.md",
-            &aged("task.demo", "task", "review", "2026-08-20", &[]),
-        )]);
-        assert_eq!(
-            debt_of(&mut storage),
-            vec![DebtSignal::ReviewWait {
-                id: "task.demo".into(),
-                days: 7
             }]
         );
     }

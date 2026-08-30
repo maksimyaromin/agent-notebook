@@ -110,6 +110,27 @@ mod expunge_verb {
         );
     }
 
+    /// History cites like anything else: a filed record still names what it
+    /// grew from, and expunging out from under it would leave the archive
+    /// pointing at a record that never existed.
+    #[test]
+    fn a_record_the_archive_still_names_cannot_be_expunged() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.mistake.md",
+                &record_file("note.mistake", "note", "active", &[], ""),
+            ),
+            (
+                "archive/tasks/task.filed.md",
+                &record_file("task.filed", "task", "closed", &["from: note.mistake"], ""),
+            ),
+        ]);
+        assert_eq!(
+            blockers_of(&mut storage, "note.mistake"),
+            vec![held_by("task.filed", "from")]
+        );
+    }
+
     #[test]
     fn a_link_that_names_no_record_holds_nothing() {
         let mut storage = storage_with(&[
@@ -529,28 +550,34 @@ mod archive_verb {
         assert!(storage.read("tasks/task.demo.md").is_ok());
     }
 
-    /// A link target is free text until the grammar says otherwise: one
-    /// that is no Note id names no record, so nothing follows it and
-    /// nothing turns it into a path.
+    /// A link target is free text until the grammar says otherwise, and a
+    /// target that is no Note id is never spelled into a path. The proof is
+    /// a file waiting at exactly the path an unguarded cascade would build
+    /// from it — here one that climbs out of the notes directory.
     #[test]
-    fn a_link_target_that_is_no_note_id_is_not_followed() {
-        for target in ["../notes/note.report", "task.demo", "NOTE.REPORT"] {
-            let mut storage = storage_with(&[
-                (
-                    "tasks/task.demo.md",
-                    &task_file("closed", &[&format!("link: note {target}")]),
-                ),
-                (
-                    "notes/note.report.md",
-                    &record_file("note.report", "note", "active", &["from: task.demo"], ""),
-                ),
-            ]);
-            let moved = Notebook::new(&mut storage)
-                .archive("task.demo", TODAY)
-                .unwrap();
-            assert!(moved.carried.is_empty(), "`{target}` names no report");
-            assert!(storage.read("notes/note.report.md").is_ok());
-        }
+    fn a_link_target_that_is_no_note_id_is_never_turned_into_a_path() {
+        let escaping = "../notes/note.report";
+        let reachable_only_unguarded = "notes/../notes/note.report.md";
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &[&format!("link: note {escaping}")]),
+            ),
+            (
+                reachable_only_unguarded,
+                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
+            ),
+        ]);
+
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+
+        assert!(moved.carried.is_empty(), "`{escaping}` names no report");
+        assert!(
+            storage.read(reachable_only_unguarded).is_ok(),
+            "the file the target would have named is left where it lies"
+        );
     }
 
     /// The reports move first, so an interruption leaves the record live

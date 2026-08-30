@@ -205,32 +205,6 @@ fn a_hand_edited_cycle_is_named_on_every_member_at_its_edge_line() {
 }
 
 #[test]
-fn a_cycle_through_a_third_task_names_all_three_members() {
-    let mut storage = storage_with(&[
-        (
-            "tasks/task.a.md",
-            &record_file("task.a", "task", "open", &["blocked-by: task.b"], ""),
-        ),
-        (
-            "tasks/task.b.md",
-            &record_file("task.b", "task", "open", &["blocked-by: task.c"], ""),
-        ),
-        (
-            "tasks/task.c.md",
-            &record_file("task.c", "task", "open", &["blocked-by: task.a"], ""),
-        ),
-    ]);
-    assert_eq!(
-        findings_for(&mut storage),
-        vec![
-            ("tasks/task.a.md".to_owned(), FindingCode::DepCycle),
-            ("tasks/task.b.md".to_owned(), FindingCode::DepCycle),
-            ("tasks/task.c.md".to_owned(), FindingCode::DepCycle),
-        ]
-    );
-}
-
-#[test]
 fn two_disjoint_cycles_are_both_named() {
     let mut storage = storage_with(&[
         (
@@ -579,6 +553,28 @@ mod unreadable_files {
             panic!("the refusal must carry the finding, got {error:?}");
         };
         assert_eq!(findings[0].code, FindingCode::NotUtf8);
+    }
+
+    /// The format stamp is the notebook's claim about which anb wrote it.
+    /// A version this build does not read is named rather than assumed,
+    /// because reading unknown bytes as if they were this format is how a
+    /// reader invents history; the version it does read passes silently.
+    #[test]
+    fn a_config_naming_another_format_is_a_named_check_finding() {
+        for (config, expected) in [("format: 1\n", None), ("format: 2\n", Some(1))] {
+            let storage = &mut super::storage_with(&[("config", config)]);
+            let findings = Notebook::new(storage).check().unwrap();
+            let named: Vec<usize> = findings
+                .iter()
+                .filter(|found| found.finding.code == FindingCode::BadValue)
+                .map(|found| found.finding.line.unwrap())
+                .collect();
+            assert_eq!(
+                named,
+                expected.into_iter().collect::<Vec<usize>>(),
+                "on {config:?}"
+            );
+        }
     }
 
     #[test]

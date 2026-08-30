@@ -72,40 +72,56 @@ impl TaskGraph {
 pub(crate) fn cycles(edges: &BTreeMap<&str, Vec<&str>>) -> Vec<Vec<String>> {
     let mut found = Vec::new();
     let mut visits = BTreeMap::new();
-    let mut stack = Vec::new();
     for id in edges.keys() {
-        collect_cycles(edges, id, &mut visits, &mut stack, &mut found);
+        walk_cycles(edges, id, &mut visits, &mut found);
     }
     found
 }
 
-fn collect_cycles<'a>(
+/// The depth-first walk from one id, carrying its own stack of frames: a
+/// frame is a node and how many of its edges have been taken, so the frames
+/// are the path in progress and a cycle is the tail of them. The edges come
+/// from files a hand can edit, where a chain is bounded by nothing — a walk
+/// that recursed would abort the process on a long enough one.
+fn walk_cycles<'a>(
     edges: &BTreeMap<&'a str, Vec<&'a str>>,
-    at: &'a str,
+    from: &'a str,
     visits: &mut BTreeMap<&'a str, Visit>,
-    stack: &mut Vec<&'a str>,
     found: &mut Vec<Vec<String>>,
 ) {
-    if visits.contains_key(at) {
+    if visits.contains_key(from) {
         return;
     }
-    visits.insert(at, Visit::InProgress);
-    stack.push(at);
-    for target in edges.get(at).map(Vec::as_slice).unwrap_or_default() {
+    visits.insert(from, Visit::InProgress);
+    let mut frames: Vec<(&'a str, usize)> = vec![(from, 0)];
+    while let Some(&(at, taken)) = frames.last() {
+        let Some(&target) = edges.get(at).map_or(&[][..], Vec::as_slice).get(taken) else {
+            visits.insert(at, Visit::Done);
+            frames.pop();
+            continue;
+        };
+        let deepest = frames.len() - 1;
+        frames[deepest].1 += 1;
         match visits.get(target) {
             Some(Visit::InProgress) => {
-                let start = stack
+                let start = frames
                     .iter()
-                    .position(|id| id == target)
-                    .expect("an in-progress id is on the stack");
-                found.push(stack[start..].iter().map(|id| (*id).to_owned()).collect());
+                    .position(|(id, _)| *id == target)
+                    .expect("an in-progress id is on the walk's own stack");
+                found.push(
+                    frames[start..]
+                        .iter()
+                        .map(|(id, _)| (*id).to_owned())
+                        .collect(),
+                );
             }
             Some(Visit::Done) => {}
-            None => collect_cycles(edges, target, visits, stack, found),
+            None => {
+                visits.insert(target, Visit::InProgress);
+                frames.push((target, 0));
+            }
         }
     }
-    stack.pop();
-    visits.insert(at, Visit::Done);
 }
 
 /// The edge chain from `from` to `to`, both ends included, walked over a
@@ -121,27 +137,69 @@ pub(crate) fn chain<E>(
     to: &str,
     mut edges: impl FnMut(&str) -> Result<Vec<String>, E>,
 ) -> Result<Option<Vec<String>>, E> {
-    let mut visited = BTreeSet::new();
+    let mut visited = BTreeSet::from([from.to_owned()]);
     let mut trail = vec![from.to_owned()];
-    Ok(extend_chain(from, to, &mut edges, &mut visited, &mut trail)?.then_some(trail))
+    // One pending-edge iterator per name on the trail, so the walk's depth
+    // lives on the heap: the edges are read from files, and a chain long
+    // enough to overflow the call stack is one hand edit away.
+    let mut pending = vec![edges(from)?.into_iter()];
+    while let Some(edges_left) = pending.last_mut() {
+        let Some(target) = edges_left.next() else {
+            pending.pop();
+            trail.pop();
+            continue;
+        };
+        trail.push(target.clone());
+        if target == to {
+            return Ok(Some(trail));
+        }
+        if visited.insert(target.clone()) {
+            pending.push(edges(&target)?.into_iter());
+        } else {
+            trail.pop();
+        }
+    }
+    Ok(None)
 }
 
-fn extend_chain<E>(
-    at: &str,
-    to: &str,
-    edges: &mut impl FnMut(&str) -> Result<Vec<String>, E>,
-    visited: &mut BTreeSet<String>,
-    trail: &mut Vec<String>,
-) -> Result<bool, E> {
-    if !visited.insert(at.to_owned()) {
-        return Ok(false);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Edges are read from files a hand can edit, so their depth is bounded
+    /// by nothing the tool controls. Both walks must answer on a chain far
+    /// longer than a call stack holds — a recursive walk aborts the process
+    /// instead of refusing the edge.
+    const DEEP: usize = 100_000;
+
+    fn name(index: usize) -> String {
+        format!("task.link-{index:06}")
     }
-    for target in edges(at)? {
-        trail.push(target.clone());
-        if target == to || extend_chain(&target, to, edges, visited, trail)? {
-            return Ok(true);
+
+    #[test]
+    fn a_chain_deeper_than_the_call_stack_is_still_walked_end_to_end() {
+        let walked = chain::<()>(&name(0), &name(DEEP - 1), |at| {
+            let index: usize = at["task.link-".len()..].parse().unwrap();
+            Ok(if index + 1 < DEEP {
+                vec![name(index + 1)]
+            } else {
+                Vec::new()
+            })
+        })
+        .unwrap()
+        .expect("the far end is reachable");
+        assert_eq!(walked.len(), DEEP);
+    }
+
+    #[test]
+    fn a_cycle_closing_a_chain_deeper_than_the_call_stack_is_still_named() {
+        let names: Vec<String> = (0..DEEP).map(name).collect();
+        let mut edges: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (index, id) in names.iter().enumerate() {
+            edges.insert(id, vec![names[(index + 1) % DEEP].as_str()]);
         }
-        trail.pop();
+        let found = cycles(&edges);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].len(), DEEP);
     }
-    Ok(false)
 }

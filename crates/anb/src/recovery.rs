@@ -3,9 +3,9 @@
 //! reply and is bounded like one.
 
 use crate::cli::Command;
+use anb_core::StorageError;
 use anb_core::encode::ROW_BOUND;
 use anb_core::path_stem;
-use anb_core::storage::StorageError;
 use anb_core::{Finding, NotebookError};
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 

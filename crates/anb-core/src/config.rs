@@ -22,9 +22,11 @@ const fn config_key(key: &'static str, default: u32) -> ConfigKey {
 }
 
 // Every key the config carries, all integers: `format` names the format
-// version, `budget` the Status ceiling (`0` = no ceiling), the `debt-*`
-// keys the clock thresholds in days. Each named constant is both a table
-// row and the extraction handle, so a key cannot drift from its default.
+// version the notebook is written in, `budget` the Status ceiling (`0` = no
+// ceiling), the `debt-*` keys the clock thresholds in days. Each named
+// constant is both a table row and the extraction handle, so a key cannot
+// drift from its default — and `format`'s default is the version this build
+// reads, which is what makes a disagreement a finding rather than a guess.
 const FORMAT: ConfigKey = config_key("format", 1);
 const BUDGET: ConfigKey = config_key("budget", Budget::DEFAULT_TOKENS);
 const TASK_STALE: ConfigKey = config_key("debt-task-stale", 7);
@@ -125,6 +127,13 @@ fn read_values(text: &str) -> (Vec<(String, u32)>, Vec<Finding>) {
             continue;
         }
         match parse_integer(&value) {
+            Ok(parsed) if key == FORMAT.key && parsed != FORMAT.default => {
+                let message = format!(
+                    "format: `{parsed}` is not the format this anb reads (`{}`) — the notebook was written by another version",
+                    FORMAT.default
+                );
+                findings.push(Finding::at(line, FindingCode::BadValue, message));
+            }
             Ok(parsed) => values.push((key, parsed)),
             Err(why) => {
                 let message = format!("{key}: `{value}` {why}");

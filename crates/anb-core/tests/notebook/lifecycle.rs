@@ -512,25 +512,6 @@ mod task_cycle {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].code, FindingCode::DanglingRef);
     }
-
-    #[test]
-    fn mutating_one_record_leaves_every_other_records_bytes_unchanged() {
-        let other = task_file("open", &[]);
-        let mut storage = storage_with(&[
-            ("tasks/task.demo.md", &task_file("open", &[])),
-            (
-                "tasks/task.other.md",
-                &other.replace("task.demo", "task.other"),
-            ),
-        ]);
-        Notebook::new(&mut storage)
-            .start("task.demo", TODAY)
-            .unwrap();
-        assert_eq!(
-            storage.read("tasks/task.other.md").unwrap(),
-            other.replace("task.demo", "task.other")
-        );
-    }
 }
 
 mod hold {

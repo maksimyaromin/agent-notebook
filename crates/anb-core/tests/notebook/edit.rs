@@ -25,6 +25,27 @@ mod edit_verb {
         );
     }
 
+    /// A record comes in sound, so the repair gate has nothing to hold
+    /// against it: only the request's own guard stands between a caller and
+    /// a value `check` would immediately condemn.
+    #[test]
+    fn a_priority_outside_the_scale_is_refused_on_a_sound_record() {
+        let text = task_file("open", &[]);
+        let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
+        let error = Notebook::new(&mut storage)
+            .edit(
+                "task.demo",
+                &Edit {
+                    priority: Some(9),
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::InvalidArgument { .. }));
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+    }
+
     #[test]
     fn an_edit_matching_the_standing_values_changes_no_byte() {
         let text = task_file("open", &[]);
