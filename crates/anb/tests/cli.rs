@@ -1094,6 +1094,43 @@ mod single_record {
         );
     }
 
+    /// A record's envelope grows with the notebook — an epic hub carries a
+    /// `blocked-by` line per child — and a value in it is as long as the
+    /// hand that wrote it. `view` bounds both, and `--all` restores the
+    /// record whole.
+    #[test]
+    fn view_bounds_a_long_envelope_and_a_long_value() {
+        let edges: Vec<String> = (0..80)
+            .map(|n| format!("blocked-by: task.c{n:03}"))
+            .collect();
+        let lines: Vec<&str> = edges.iter().map(String::as_str).collect();
+        let long_title = "word ".repeat(400);
+        let mut storage = storage_with(&[(
+            "tasks/task.hub.md".to_owned(),
+            record_file("task.hub", "task", "open", &long_title, &lines, ""),
+        )]);
+
+        let bounded = ok(&mut storage, &["view", "task.hub"]);
+        assert!(
+            bounded.contains("more: anb view task.hub --all"),
+            "the envelope names what it left out: {bounded}"
+        );
+        assert!(
+            !bounded.contains(&long_title),
+            "a value as long as a hand wrote it is cut: {bounded}"
+        );
+
+        let whole = ok(&mut storage, &["view", "task.hub", "--all"]);
+        assert!(whole.contains("blocked-by: task.c079"), "{whole}");
+        assert!(whole.contains(long_title.trim_end()), "{whole}");
+        assert!(
+            whole.len() > bounded.len() * 4,
+            "the bound is what makes the default reply small: {} vs {}",
+            bounded.len(),
+            whole.len()
+        );
+    }
+
     fn viewed_storage() -> MemoryStorage {
         storage_with(&[
             (
@@ -1209,7 +1246,10 @@ mod single_record {
         let output = ok(&mut viewed_storage(), &["view", "task.demo", "--json"]);
         let value: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(value["archived"], serde_json::json!(false));
-        assert_eq!(value["fields"][0], serde_json::json!(["id", "task.demo"]));
+        assert_eq!(
+            value["fields"]["rows"][0],
+            serde_json::json!(["id", "task.demo"])
+        );
         assert_eq!(
             value["mentions"],
             serde_json::json!({"count": 1, "rows": ["decision.chosen"]})

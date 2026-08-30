@@ -8,7 +8,7 @@ by: supolka
 via: claude-code
 from: question.why-demo
 tags: core, parser
-link: doc .tmp/docs/spec-anb-format.md
+link: doc docs/record-format.md
 link: pr https://example.com/pull/7
 supersedes: task.old-demo
 superseded-by: task.new-demo

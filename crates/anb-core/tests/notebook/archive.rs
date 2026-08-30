@@ -871,4 +871,33 @@ mod archive_verb {
             Err(StorageError::NotFound { .. })
         ));
     }
+    /// A record whose `link` names itself is a hand edit, and carrying it
+    /// as its own report would file it twice — the second write landing on
+    /// a source the first had already removed, so a completed move
+    /// reported a storage failure.
+    #[test]
+    fn a_record_linking_itself_is_filed_once() {
+        let mut storage = storage_with(&[(
+            "notes/note.loop.md",
+            &record_file(
+                "note.loop",
+                "note",
+                "retired",
+                &["from: note.loop", "link: note note.loop"],
+                "A note that names itself.\n",
+            ),
+        )]);
+
+        let moved = Notebook::new(&mut storage)
+            .archive("note.loop", TODAY)
+            .unwrap();
+
+        assert_eq!(
+            moved.carried,
+            Vec::<String>::new(),
+            "it is not its own report"
+        );
+        assert!(storage.read("archive/notes/note.loop.md").is_ok());
+        assert!(storage.read("notes/note.loop.md").is_err());
+    }
 }

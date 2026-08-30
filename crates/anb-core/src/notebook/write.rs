@@ -461,10 +461,8 @@ fn slugify(title: &str) -> String {
 const SUFFIX_COUNT: usize = 36 * 36;
 
 fn base36_pair(n: usize) -> String {
-    const DIGITS: [char; 36] = [
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h',
-        'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-    ];
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
     debug_assert!(n < SUFFIX_COUNT);
-    format!("{}{}", DIGITS[n / 36], DIGITS[n % 36])
+    let digit = |place: usize| char::from(DIGITS[place]);
+    format!("{}{}", digit(n / DIGITS.len()), digit(n % DIGITS.len()))
 }
