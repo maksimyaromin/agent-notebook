@@ -224,10 +224,15 @@ fn dumped(browser: &Path, page: &Path, arrangement: &str) -> String {
         .expect("the browser is waited on")
         .is_none()
     {
-        assert!(
-            Instant::now() < deadline,
-            "the browser did not open the map within {PATIENCE:?}"
-        );
+        if Instant::now() >= deadline {
+            // A browser that never finished has to be ended here. Left to
+            // itself it outlives the run that started it and goes on holding
+            // a profile directory open for as long as the machine is up,
+            // with no test left to notice it.
+            let _ = opening.kill();
+            let _ = opening.wait();
+            panic!("the browser did not open the map within {PATIENCE:?}");
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
     std::fs::read_to_string(&written).expect("the browser wrote the document")
