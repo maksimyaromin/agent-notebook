@@ -267,13 +267,13 @@ impl<'a> MembershipIndex<'a> {
         };
         // Live before archived, so the duplicate-id corruption an
         // interrupted archive move leaves reads as the live file's edges
-        // and not as the union of two.
+        // and not as the union of two. A record claims its slot even with
+        // nothing to wait on: waiting on nothing is an answer, and a file
+        // that gave none would let its archived twin answer for it.
         for record in live.iter().chain(archived) {
             let id = path_stem(record.path());
             let waits: Vec<&str> = record.file().field_values("blocked-by").collect();
-            if !waits.is_empty() {
-                index.waits_on.entry(id).or_insert(waits);
-            }
+            index.waits_on.entry(id).or_insert(waits);
             if let Some(origin) = record.origin() {
                 index.born_inside.entry(origin).or_default().push(id);
             }

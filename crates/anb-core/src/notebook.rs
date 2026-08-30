@@ -46,8 +46,8 @@ use crate::reply::{
 };
 use crate::request::{Draft, Edit, Proof};
 use crate::resolve::{
-    Resolver, archive_of, canonical_paths, is_archived, is_record_file, path_stem, record_path,
-    resolvable_id,
+    Resolver, archive_of, archived_among, canonical_paths, is_archived, is_record_file, path_stem,
+    record_path, resolvable_id,
 };
 use crate::status::{self, Budget, Status, StatusInputs};
 use crate::storage::{Storage, StorageError};
@@ -152,17 +152,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// live records alone would forget its own progress and, in the end,
     /// that it was ever a hub; and a live record born inside an archived
     /// one belongs to the same epic through a lineage only that archived
-    /// record spells out. Reading follows declared edges out of the live
-    /// notebook, so it costs the history still connected to today rather
-    /// than the archive's size — how much that is, is how much of the
-    /// archive the live records still point at.
-    ///
-    /// The edges are followed the way they are written, so an archived
-    /// record that only *carries* an Origin into the walk — one born inside
-    /// a member, named by nothing live — is not reached, and a live record
-    /// waiting on it alone falls outside the scope. Finding it would mean
-    /// opening the archive to read Origins backwards, which is the cost
-    /// this avoids.
+    /// record spells out.
     fn archived_kin(&self, corpus: &Corpus) -> Result<Vec<Record>, NotebookError> {
         let archived = corpus.resolver();
         let wanted = archived_among(corpus.records.iter().flat_map(query::kin_of), &archived);
@@ -209,6 +199,16 @@ impl<'a, S: Storage> Notebook<'a, S> {
 
     /// Read the archived records `wanted` names, and those they name in
     /// turn, beside the `kin` already read.
+    ///
+    /// The walk leaves the live notebook along declared edges, so it costs
+    /// the history still connected to today rather than the archive's size
+    /// — how much that is, is how much of the archive the live records
+    /// still point at. And it follows edges the way they are written: an
+    /// archived record that only *carries* an Origin into the walk, one
+    /// born inside a member and named by nothing live, is never reached,
+    /// and a live record waiting on it alone falls outside the scope.
+    /// Finding it would mean opening the archive to read Origins backwards,
+    /// which is the cost this avoids.
     fn kin_closure(
         &self,
         archived: &Resolver<'_>,
@@ -1753,16 +1753,4 @@ struct Victim {
     path: String,
     record: Record,
     dead_state: &'static str,
-}
-
-/// The ids among `targets` the archive holds, each once, in the order the
-/// records name them.
-fn archived_among<'a>(
-    targets: impl Iterator<Item = &'a str>,
-    archived: &Resolver<'_>,
-) -> Vec<String> {
-    targets
-        .filter(|target| archived.archived(target))
-        .map(str::to_owned)
-        .collect()
 }

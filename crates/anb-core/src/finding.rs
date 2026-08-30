@@ -138,8 +138,6 @@ pub struct Finding {
 }
 
 impl Finding {
-    /// Whether this finding is the kind that freezes its record: the one
-    /// question every caller of a finding list asks, so it is asked here.
     #[must_use]
     pub fn is_error(&self) -> bool {
         self.code.severity() == Severity::Error

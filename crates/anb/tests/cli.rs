@@ -487,10 +487,10 @@ mod task_cycle_replies {
     }
 
     /// A refusal's detail lines are the reason it refused. The data
-    /// rendering carries them or an agent parsing it is told only that
+    /// rendering carries them, or an agent parsing it is told only that
     /// something was wrong.
     #[test]
-    fn a_json_refusal_carries_the_findings_the_text_lists() {
+    fn a_json_refusal_carries_its_detail_lines() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md".to_owned(),
             record_file("task.demo", "task", "cancelled", "A demo record", &[], ""),
@@ -1051,8 +1051,8 @@ mod single_record {
         assert_eq!(body.len(), 41, "twenty lines each end, and the elision");
     }
 
-    /// The bound belongs to the reply, not to one rendering of it: the data
-    /// surface is the one an agent parses without ever reading it.
+    /// Both renderings cut the body through the same encoder, and the data
+    /// one is what an agent parses without ever reading it.
     #[test]
     fn the_json_body_is_bounded_like_the_text() {
         let mut storage = logged_task(60);
@@ -1591,7 +1591,7 @@ mod maintenance_replies {
                 "note",
                 "active",
                 "A demo record",
-                &["kind: fact", "hold-until: 2026-09-01"],
+                &["hold-until: 2026-09-01"],
                 "",
             ),
         )]);
@@ -2177,6 +2177,29 @@ mod unknown_verbs {
         try: anb --help
         "
         );
+    }
+
+    /// `--help` is what an agent reads before it types anything, so a flag
+    /// carrying no help is a flag only the source explains.
+    #[test]
+    fn every_verb_and_every_flag_it_takes_says_what_it_is_for() {
+        use clap::CommandFactory;
+        let command = Cli::command();
+        for verb in command.get_subcommands() {
+            assert!(
+                verb.get_about().is_some(),
+                "`{}` has no description",
+                verb.get_name()
+            );
+            for flag in verb.get_arguments().filter(|arg| arg.get_long().is_some()) {
+                assert!(
+                    flag.get_help().is_some(),
+                    "`{} --{}` has no help",
+                    verb.get_name(),
+                    flag.get_long().unwrap_or_default()
+                );
+            }
+        }
     }
 
     #[test]

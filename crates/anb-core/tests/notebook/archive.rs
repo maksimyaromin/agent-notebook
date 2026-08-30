@@ -553,31 +553,36 @@ mod archive_verb {
     /// A link target is free text until the grammar says otherwise, and a
     /// target that is no Note id is never spelled into a path. The proof is
     /// a file waiting at exactly the path an unguarded cascade would build
-    /// from it — here one that climbs out of the notes directory.
+    /// from each shape: one that climbs out of the notes directory, one
+    /// whose case is wrong, and one that names another type.
     #[test]
     fn a_link_target_that_is_no_note_id_is_never_turned_into_a_path() {
-        let escaping = "../notes/note.report";
-        let reachable_only_unguarded = "notes/../notes/note.report.md";
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &[&format!("link: note {escaping}")]),
-            ),
-            (
-                reachable_only_unguarded,
-                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
-            ),
-        ]);
+        for (target, reachable_only_unguarded) in [
+            ("../notes/note.report", "notes/../notes/note.report.md"),
+            ("NOTE.REPORT", "notes/NOTE.REPORT.md"),
+            ("task.report", "notes/task.report.md"),
+        ] {
+            let mut storage = storage_with(&[
+                (
+                    "tasks/task.demo.md",
+                    &task_file("closed", &[&format!("link: note {target}")]),
+                ),
+                (
+                    reachable_only_unguarded,
+                    &record_file("note.report", "note", "active", &["from: task.demo"], ""),
+                ),
+            ]);
 
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
+            let moved = Notebook::new(&mut storage)
+                .archive("task.demo", TODAY)
+                .unwrap();
 
-        assert!(moved.carried.is_empty(), "`{escaping}` names no report");
-        assert!(
-            storage.read(reachable_only_unguarded).is_ok(),
-            "the file the target would have named is left where it lies"
-        );
+            assert!(moved.carried.is_empty(), "`{target}` names no report");
+            assert!(
+                storage.read(reachable_only_unguarded).is_ok(),
+                "`{target}` left the file it would have named where it lies"
+            );
+        }
     }
 
     /// The reports move first, so an interruption leaves the record live

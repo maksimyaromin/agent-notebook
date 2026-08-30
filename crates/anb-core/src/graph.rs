@@ -6,6 +6,10 @@
 //! edges on demand; none of them is ever stored. The graph knows a Task
 //! only as an id with a closed flag and its edges — records, files, and
 //! validity are the notebook's business.
+//!
+//! Both walks carry their own stack. The edges are read from files a hand
+//! can edit, so nothing bounds how deep one runs, and a walk that recursed
+//! would end the process instead of answering.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -73,17 +77,15 @@ pub(crate) fn cycles(edges: &BTreeMap<&str, Vec<&str>>) -> Vec<Vec<String>> {
     let mut found = Vec::new();
     let mut visits = BTreeMap::new();
     for id in edges.keys() {
-        walk_cycles(edges, id, &mut visits, &mut found);
+        collect_cycles_from(edges, id, &mut visits, &mut found);
     }
     found
 }
 
-/// The depth-first walk from one id, carrying its own stack of frames: a
+/// The depth-first walk from one id, appending every cycle it closes. A
 /// frame is a node and how many of its edges have been taken, so the frames
-/// are the path in progress and a cycle is the tail of them. The edges come
-/// from files a hand can edit, where a chain is bounded by nothing — a walk
-/// that recursed would abort the process on a long enough one.
-fn walk_cycles<'a>(
+/// are the path in progress and a cycle is the tail of them.
+fn collect_cycles_from<'a>(
     edges: &BTreeMap<&'a str, Vec<&'a str>>,
     from: &'a str,
     visits: &mut BTreeMap<&'a str, Visit>,
@@ -92,16 +94,16 @@ fn walk_cycles<'a>(
     if visits.contains_key(from) {
         return;
     }
-    visits.insert(from, Visit::InProgress);
-    let mut frames: Vec<(&'a str, usize)> = vec![(from, 0)];
-    while let Some(&(at, taken)) = frames.last() {
-        let Some(&target) = edges.get(at).map_or(&[][..], Vec::as_slice).get(taken) else {
+    let mut frames = Vec::new();
+    enter(&mut frames, visits, from);
+    while let Some(&mut (at, ref mut taken)) = frames.last_mut() {
+        let step = *taken;
+        let Some(&target) = edges.get(at).map_or(&[][..], Vec::as_slice).get(step) else {
             visits.insert(at, Visit::Done);
             frames.pop();
             continue;
         };
-        let deepest = frames.len() - 1;
-        frames[deepest].1 += 1;
+        *taken += 1;
         match visits.get(target) {
             Some(Visit::InProgress) => {
                 let start = frames
@@ -116,12 +118,19 @@ fn walk_cycles<'a>(
                 );
             }
             Some(Visit::Done) => {}
-            None => {
-                visits.insert(target, Visit::InProgress);
-                frames.push((target, 0));
-            }
+            None => enter(&mut frames, visits, target),
         }
     }
+}
+
+/// Step into a node: it is on the path until its own edges are spent.
+fn enter<'a>(
+    frames: &mut Vec<(&'a str, usize)>,
+    visits: &mut BTreeMap<&'a str, Visit>,
+    id: &'a str,
+) {
+    visits.insert(id, Visit::InProgress);
+    frames.push((id, 0));
 }
 
 /// The edge chain from `from` to `to`, both ends included, walked over a
@@ -139,9 +148,6 @@ pub(crate) fn chain<E>(
 ) -> Result<Option<Vec<String>>, E> {
     let mut visited = BTreeSet::from([from.to_owned()]);
     let mut trail = vec![from.to_owned()];
-    // One pending-edge iterator per name on the trail, so the walk's depth
-    // lives on the heap: the edges are read from files, and a chain long
-    // enough to overflow the call stack is one hand edit away.
     let mut pending = vec![edges(from)?.into_iter()];
     while let Some(edges_left) = pending.last_mut() {
         let Some(target) = edges_left.next() else {
@@ -166,10 +172,8 @@ pub(crate) fn chain<E>(
 mod tests {
     use super::*;
 
-    /// Edges are read from files a hand can edit, so their depth is bounded
-    /// by nothing the tool controls. Both walks must answer on a chain far
-    /// longer than a call stack holds — a recursive walk aborts the process
-    /// instead of refusing the edge.
+    /// Far past what any call stack holds: at this length the walk that
+    /// recursed aborts, and the walk that answers must still answer.
     const DEEP: usize = 100_000;
 
     fn name(index: usize) -> String {

@@ -146,13 +146,10 @@ fn a_reader_waits_for_a_writer() {
     assert!(ended(read).contains("task.contended"));
 }
 
-/// The classification read through its one consequence: a verb that takes
-/// the notebook exclusively leaves the lock file behind, and a reader —
-/// which creates nothing — never makes one.
 /// A notebook comes into being on its first record, not on the first
-/// command typed at it: a verb that can only be refused must leave the
+/// command typed at it: a verb that can only be refused leaves the
 /// directory it was pointed at exactly as it found it — no root, no lock
-/// file.
+/// file — and the record is what brings one about.
 #[test]
 fn a_refused_first_command_brings_no_notebook_into_being() {
     let dir = TempDir::new().unwrap();
@@ -161,16 +158,28 @@ fn a_refused_first_command_brings_no_notebook_into_being() {
         &["start", "task.absent"][..],
         &["comment", "task.absent", "text"],
         &["archive", "task.absent"],
-        &["status"],
     ] {
-        let ran = anb(&root, line);
+        let refusal = anb(&root, line);
+        assert!(!refusal.status.success(), "{line:?} was not refused");
         assert!(!root.exists(), "{line:?} brought a notebook into being");
-        assert!(!ran.status.success() || line == ["status"], "{line:?}");
     }
     assert!(anb(&root, &["add", "The first record"]).status.success());
-    assert!(root.is_dir(), "a record is what makes the notebook");
+    assert!(root.is_dir());
 }
 
+/// A read against a notebook that is not there answers rather than
+/// refusing, and still leaves nothing behind.
+#[test]
+fn a_read_against_no_notebook_answers_and_creates_nothing() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("nb");
+    assert!(anb(&root, &["status"]).status.success());
+    assert!(!root.exists());
+}
+
+/// The classification read through its one consequence: a verb that takes
+/// the notebook exclusively leaves the lock file behind, and a reader —
+/// which creates nothing — never makes one.
 #[test]
 fn the_lock_is_taken_by_every_writing_verb_and_by_no_reading_one() {
     let writes = [

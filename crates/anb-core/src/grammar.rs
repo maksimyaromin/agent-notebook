@@ -916,6 +916,20 @@ mod tests {
             .collect()
     }
 
+    /// A key may repeat, and `field` answers with the first line that
+    /// carries it — the envelope reads top down, and a later line is a
+    /// second value, never a correction of the one above.
+    #[test]
+    fn a_repeated_key_reads_as_its_first_line() {
+        let file =
+            RecordFile::parse("---\nid: task.demo\nlink: sha aaa\nlink: sha bbb\n---\nbody\n");
+        assert_eq!(file.field("link"), Some("sha aaa"));
+        assert_eq!(
+            file.field_values("link").collect::<Vec<_>>(),
+            vec!["sha aaa", "sha bbb"]
+        );
+    }
+
     #[test]
     fn normalize_orders_fields_canonically_and_fixes_separators() {
         let text = record(

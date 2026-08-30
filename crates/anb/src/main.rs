@@ -102,11 +102,11 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         Err(error) => return Err(render_failure(&NotebookError::Storage(error))),
     };
 
-    let settled = |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited);
+    let lost = |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited);
     let host = Host {
         git_by: anb::git::user_name,
         read_report: &read_report,
-        lost_proofs: &settled,
+        lost_proofs: &lost,
         today: &today,
     };
     match execute(cli.command, &mut storage, host) {

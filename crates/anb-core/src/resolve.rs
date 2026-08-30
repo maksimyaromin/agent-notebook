@@ -61,6 +61,20 @@ pub(crate) fn resolvable_id(path: &str) -> Option<&str> {
     (directory == home && is_record_file(filename)).then_some(stem)
 }
 
+/// The ids among `targets` the archive holds, each once, in the order the
+/// records name them.
+pub(crate) fn archived_among<'a>(
+    targets: impl Iterator<Item = &'a str>,
+    archived: &Resolver<'_>,
+) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    targets
+        .filter(|target| archived.archived(target))
+        .filter(|target| seen.insert(*target))
+        .map(str::to_owned)
+        .collect()
+}
+
 pub(crate) fn archive_of(directory: &str) -> String {
     format!("archive/{directory}")
 }
@@ -98,7 +112,7 @@ pub(crate) fn record_path(id: &str, record_type: RecordType, archived: bool) -> 
 /// The format is byte-exact: `.MD` is not a record file.
 #[expect(
     clippy::case_sensitive_file_extension_comparisons,
-    reason = "the lint offers Path::extension, which folds case on some platforms and would put std::path behind a seam that speaks only strings"
+    reason = "the lint's fix folds case, and this format does not: `.MD` names no record"
 )]
 pub(crate) fn is_record_file(path: &str) -> bool {
     path.ends_with(".md")
