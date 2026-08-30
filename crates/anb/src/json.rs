@@ -348,10 +348,10 @@ fn status_value(status: &Status) -> Value {
 }
 
 /// The fields of one object, in insertion order, where a null value lands
-/// no key at all: an absent field is omitted rather than rendered null, in
-/// every reply and every row shape. No reply field is legitimately null,
-/// so this is the whole rule.
-fn fields<const N: usize>(entries: [(&str, Value); N]) -> Map<String, Value> {
+/// no key at all: an absent field is omitted rather than rendered null.
+/// Every shape holding an optional field is built here; the ones built by
+/// a `json!` literal have none to omit.
+fn fields<'a>(entries: impl IntoIterator<Item = (&'a str, Value)>) -> Map<String, Value> {
     entries
         .into_iter()
         .filter(|(_, value)| !value.is_null())

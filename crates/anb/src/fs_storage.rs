@@ -106,7 +106,7 @@ pub fn ignore_leavings(root: &Path) {
         .write(true)
         .create_new(true)
         .open(root.join(".gitignore"))
-        .and_then(|mut file| std::io::Write::write_all(&mut file, IGNORED.as_bytes()));
+        .and_then(|mut file| std::io::Write::write_all(&mut file, ignored_names().as_bytes()));
 }
 
 /// The lock file's name in the notebook root. It carries no `.md` suffix
@@ -114,8 +114,14 @@ pub fn ignore_leavings(root: &Path) {
 /// can mistake it for a record.
 pub const LOCK_FILE: &str = ".lock";
 
-/// `*.tmp` is the temp file [`FsStorage::write`] renames from.
-const IGNORED: &str = "# A run's leavings, not the project's history.\n.lock\n*.tmp\n";
+/// The suffix on the temp file [`FsStorage::write`] renames from.
+const TEMP_SUFFIX: &str = "tmp";
+
+/// What a notebook committed with its project must not carry: the two
+/// names a run leaves behind, each written by the code above it.
+fn ignored_names() -> String {
+    format!("# A run's leavings, not the project's history.\n{LOCK_FILE}\n*.{TEMP_SUFFIX}\n")
+}
 
 pub const NOTEBOOK_ENV: &str = "ANB_NOTEBOOK";
 
@@ -258,7 +264,7 @@ impl Pending {
         let directory = target.parent().unwrap_or(Path::new("."));
         let name = target.file_name().unwrap_or_default().to_string_lossy();
         Pending {
-            path: directory.join(format!(".{name}.{}.tmp", std::process::id())),
+            path: directory.join(format!(".{name}.{}.{TEMP_SUFFIX}", std::process::id())),
             persisted: false,
         }
     }

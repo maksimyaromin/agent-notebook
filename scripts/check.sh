@@ -15,4 +15,6 @@ fi
 cargo test --workspace --doc
 # The Core is a library a host embeds, so a broken link in its API docs is a
 # defect like any other.
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --quiet
+# `--document-private-items` because a link is as broken for the next
+# reader of this repository as for a host reading the published API.
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --quiet

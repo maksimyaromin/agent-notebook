@@ -417,7 +417,8 @@ fn task_edges(records: &[Record]) -> BTreeMap<&str, Vec<&str>> {
 }
 
 /// The `from` edge every record draws, keyed by file stem, under the rule
-/// [`blocked_by`] states: a malformed target is a finding, never an edge.
+/// `Record::blocked_by` states: a malformed target is a finding, never an
+/// edge.
 /// A record has at most one Origin, so a lineage is a path — one that
 /// meets itself is the corruption `check` names.
 fn origin_edges(records: &[Record]) -> BTreeMap<&str, Vec<&str>> {

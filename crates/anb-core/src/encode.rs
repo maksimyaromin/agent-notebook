@@ -1,6 +1,12 @@
 //! The encoding every reply surface shares — the bound on a list, the
 //! bound on a text, and the quoting rule — so no two surfaces spell the
 //! same value differently.
+//!
+//! No cell carrying a record's own text is written raw. Inside a table the
+//! comma is the delimiter, so [`quoted_if_delimited`] quotes only a value
+//! that would break out of its cell; on a line of its own there is no
+//! delimiter, so [`quoted_line_text`] always quotes and the reader can see
+//! where the text ends.
 
 use std::fmt::Write as _;
 
@@ -131,6 +137,14 @@ pub fn quoted_if_delimited(value: &str) -> String {
     } else {
         value.to_owned()
     }
+}
+
+/// A record's text on a line of its own, always quoted: with no delimiter
+/// to break out of, the quotes are what tell a reader — and a terminal —
+/// where a hand-written value ends.
+#[must_use]
+pub fn quoted_line_text(value: &str) -> String {
+    json_quoted(value)
 }
 
 /// A character a terminal treats as an instruction rather than as text:

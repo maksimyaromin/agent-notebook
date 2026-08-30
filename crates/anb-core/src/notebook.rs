@@ -13,9 +13,9 @@
 //! The mutation gate holds a record's own error findings and its dangling
 //! references against it; findings that need a second record — a broken
 //! supersession pair, a multi-file dependency cycle — are `check`'s alone
-//! and freeze nothing. The one way past the gate is a repair: `unblock`
-//! and `edit` read a record over its error findings and are judged on the
-//! bytes they produce, so a corrupted line cannot freeze the verb that
+//! and freeze nothing. The one way past the gate is a repair: a verb that
+//! erases a line reads its record over the error findings and is judged on
+//! the bytes it produces, so a corrupted line cannot freeze the verb that
 //! clears it and a half-repair is refused like any other invalid write.
 //!
 //! The verbs are here, and with them every read and write that touches
@@ -27,6 +27,7 @@
 
 mod check;
 mod error;
+mod gate;
 mod query;
 mod write;
 
@@ -36,12 +37,11 @@ use crate::config::{CONFIG_PATH, Config};
 use crate::debt::{self, DebtSources};
 use crate::encode;
 use crate::finding::Finding;
-use crate::grammar::{self, RecordFile, Residence};
+use crate::grammar::{self, RecordFile};
 use crate::graph;
 use crate::mention;
 use crate::record::{
     REF_KEYS, Record, RecordType, TaskAction, TaskState, Transition, dangling_finding,
-    not_utf8_finding,
 };
 use crate::reply::{
     Archived, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged, Edited, Expunged,
@@ -54,6 +54,7 @@ use crate::resolve::{
 };
 use crate::status::{self, Budget, Status, StatusInputs};
 use crate::storage::{Storage, StorageError};
+use gate::LoadedLive;
 use std::collections::BTreeSet;
 
 /// A report landed in the notebook, and what its body cited.
@@ -356,7 +357,7 @@ impl<'a> Notebook<'a> {
                 record_type,
                 rows: records
                     .iter()
-                    .filter(|record| query::sits_in(record, record_type, Residence::Live))
+                    .filter(|record| query::lives_in(record, record_type))
                     .map(|record| query::listed_row(record, &resolvable))
                     .collect(),
             })
@@ -1279,158 +1280,6 @@ impl<'a> Notebook<'a> {
         })
     }
 
-    /// Resolve `id` to its live record, cleared for mutation: the type
-    /// matches the command, the record exists live, and it carries no error
-    /// finding — from its own bytes or from a dangling reference.
-    fn load_live(&self, id: &str, expected: &[RecordType]) -> Result<LoadedLive, NotebookError> {
-        self.resolve_live(id, commanded_type(id, expected)?)
-    }
-
-    /// [`Notebook::load_live`] for a repair: the record is read over its
-    /// error findings, and the only way on from there is
-    /// [`Notebook::commit_repair`].
-    fn load_live_repairing(
-        &self,
-        id: &str,
-        expected: &[RecordType],
-    ) -> Result<Repairing, NotebookError> {
-        self.resolve_live_repairing(id, commanded_type(id, expected)?)
-    }
-
-    /// The one gate every write passes: the record is live and carries no
-    /// error finding, so no path — a verb or a supersession flip — can
-    /// rewrite an invalid record.
-    fn resolve_live(&self, id: &str, record_type: RecordType) -> Result<LoadedLive, NotebookError> {
-        let (loaded, errors) = self.read_live(id, record_type)?;
-        if errors.is_empty() {
-            return Ok(loaded);
-        }
-        Err(NotebookError::InvalidRecord {
-            path: loaded.path,
-            findings: errors,
-        })
-    }
-
-    /// [`Notebook::resolve_live`] for a verb that repairs: it is let past
-    /// the record's error findings and judged on the bytes it produces
-    /// instead. A file with no envelope is not let past, because splicing
-    /// one is not defined.
-    fn resolve_live_repairing(
-        &self,
-        id: &str,
-        record_type: RecordType,
-    ) -> Result<Repairing, NotebookError> {
-        let (loaded, errors) = self.read_live(id, record_type)?;
-        if !errors.is_empty() && !loaded.record.file().has_envelope() {
-            return Err(NotebookError::InvalidRecord {
-                path: loaded.path,
-                findings: errors,
-            });
-        }
-        Ok(Repairing {
-            loaded,
-            carried: errors,
-        })
-    }
-
-    /// The live record `id` names, beside the error findings that exclude
-    /// it from mutation — read once here, because the two gates above
-    /// differ only in what they do with them.
-    fn read_live(
-        &self,
-        id: &str,
-        record_type: RecordType,
-    ) -> Result<(LoadedLive, Vec<Finding>), NotebookError> {
-        let path = record_path(id, record_type, false);
-        let text = match self.storage.read(&path) {
-            Ok(text) => text,
-            Err(StorageError::NotFound { .. }) => {
-                return Err(match self.holder_path(id)? {
-                    Some(_) => NotebookError::Archived { id: id.to_owned() },
-                    None => NotebookError::UnknownId { id: id.to_owned() },
-                });
-            }
-            Err(StorageError::NotUtf8 { .. }) => {
-                return Err(NotebookError::InvalidRecord {
-                    path,
-                    findings: vec![not_utf8_finding()],
-                });
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let record = Record::parse(&path, &text);
-        let errors = self.exclusion_errors(&record)?;
-        Ok((LoadedLive { path, record }, errors))
-    }
-
-    /// A repairing verb's whole write, and the only way a [`Repairing`]
-    /// reaches storage: the splice runs on the record that was read, the
-    /// bytes it produced are judged, and a splice that moved nothing is
-    /// written nowhere. `splice` answers `None` when the record already
-    /// reads as asked — the replay — and otherwise whatever the verb needs
-    /// to report.
-    ///
-    /// The obligation cannot be forgotten because it is not the caller's:
-    /// [`Repairing`] hands out no bytes to write.
-    fn commit_repair<T>(
-        &mut self,
-        repairing: Repairing,
-        today: &str,
-        splice: impl FnOnce(&mut RecordFile) -> Option<T>,
-    ) -> Result<Option<T>, NotebookError> {
-        let Repairing {
-            loaded: LoadedLive { path, record },
-            carried,
-        } = repairing;
-        let mut file = record.into_file();
-        let moved = splice(&mut file);
-        if moved.is_some() {
-            file.set_field("updated", today);
-        }
-        if !carried.is_empty() {
-            self.guard_repaired(&path, &carried, &file)?;
-        }
-        if moved.is_some() {
-            self.storage.write(&path, &file.render())?;
-        }
-        Ok(moved)
-    }
-
-    /// The repair's other half: a verb let past a record's error findings
-    /// must leave it better than it found it — fewer of them, and none it
-    /// did not already carry — or the call is refused and nothing is
-    /// written. The proof is the bytes the splice produced: a line that
-    /// carries a finding is not always the line a splice rewrites, and a
-    /// splice that reaches the right line may still leave a duplicate of it
-    /// standing.
-    ///
-    /// Progress, not perfection, because a record broken several ways is
-    /// repaired one verb at a time, and each verb erases only what it
-    /// names. A call that erases nothing is refused all the same, which is
-    /// why this runs before the replay answers: a record that came in
-    /// invalid must not be told `already` while it still is.
-    fn guard_repaired(
-        &self,
-        path: &str,
-        before: &[Finding],
-        file: &RecordFile,
-    ) -> Result<(), NotebookError> {
-        let repaired = Record::parse(path, &file.render());
-        let after = self.exclusion_errors(&repaired)?;
-        let already_carried = |finding: &Finding| {
-            before
-                .iter()
-                .any(|had| had.code == finding.code && had.message == finding.message)
-        };
-        if after.len() < before.len() && after.iter().all(already_carried) {
-            return Ok(());
-        }
-        Err(NotebookError::InvalidRecord {
-            path: path.to_owned(),
-            findings: after,
-        })
-    }
-
     /// The cycle the edge `id → on` would close, walked in full: `on`
     /// already waits on `id`, or is `id` itself.
     fn would_cycle(&self, id: &str, on: &str) -> Result<Option<Vec<String>>, NotebookError> {
@@ -1723,48 +1572,6 @@ impl Corpus {
     fn resolver(&self) -> Resolver<'_> {
         Resolver::of(&self.records, &self.archived)
     }
-}
-
-/// A live record cleared for mutation, so it carries no error finding.
-struct LoadedLive {
-    path: String,
-    record: Record,
-}
-
-impl LoadedLive {
-    /// A record with no state carries an error finding, and one of those
-    /// is what [`Notebook::resolve_live`] refuses, so a value of this type
-    /// always has one.
-    fn state_word(&self) -> &str {
-        self.record.state().expect("a clean record carries a state")
-    }
-}
-
-/// A live record read over its error findings, for the verbs that erase
-/// them. It is the whole repair protocol: the findings it came in with
-/// travel with it, and [`Notebook::commit_repair`] is the only way to the
-/// bytes — so a verb cannot write an invalid record by forgetting a step.
-struct Repairing {
-    loaded: LoadedLive,
-    carried: Vec<Finding>,
-}
-
-impl Repairing {
-    fn record(&self) -> &Record {
-        &self.loaded.record
-    }
-}
-
-/// The type `id` names, refused when the command does not accept it.
-fn commanded_type(id: &str, expected: &[RecordType]) -> Result<RecordType, NotebookError> {
-    let record_type = write::parsed_type(id)?;
-    if expected.contains(&record_type) {
-        return Ok(record_type);
-    }
-    Err(NotebookError::WrongType {
-        id: id.to_owned(),
-        expected: error::type_list(expected),
-    })
 }
 
 /// A report an archive move carries, judged before the first byte moves.

@@ -251,8 +251,9 @@ impl Record {
     }
 
     /// The record at `path` whose bytes could not cross the Storage seam:
-    /// an empty envelope carrying only the `not-utf8` finding, so the file
-    /// stays visible as invalid instead of aborting the command that met it.
+    /// no envelope and no body, carrying only the `not-utf8` finding, so the
+    /// file stays visible as invalid instead of aborting the command that
+    /// met it. Having no envelope, it is a record no verb can splice.
     #[must_use]
     pub fn unreadable(path: &str) -> Self {
         Record {

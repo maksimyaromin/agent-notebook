@@ -1,7 +1,7 @@
 //! Token measurement for the Budget: a deterministic estimate, no tokenizer.
 //!
-//! The Core targets WASM and carries no dependencies, so it cannot ship a
-//! BPE vocabulary; it estimates from byte counts instead. Calibrated against
+//! The Core carries no dependencies, so it cannot ship a BPE vocabulary;
+//! it estimates from byte counts instead. Calibrated against
 //! `o200k_base` (via the gpt-tokenizer npm package) on Status-shaped
 //! fixtures, 2026-08-28: structured dashboard text runs ~3.7
 //! bytes per token, and dividing by 3.5 keeps the estimate at or above the

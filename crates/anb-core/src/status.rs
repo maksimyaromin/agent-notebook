@@ -15,7 +15,7 @@
 //! it names the cut and carries the command that restores it.
 
 use crate::debt::DebtSignal;
-use crate::encode::{self, json_quoted};
+use crate::encode::{self, quoted_line_text};
 use crate::reply::{Counts, Epic, ReadyTask};
 use crate::tokens::estimate_tokens;
 use std::fmt::Write as _;
@@ -324,11 +324,16 @@ fn render_in_flight(out: &mut String, in_flight: &[ActiveTask], ladder: Ladder) 
     }
     .min(in_flight.len());
     for task in in_flight.iter().take(shown) {
-        let _ = writeln!(out, "in-flight: {} {}", task.id, json_quoted(&task.title));
+        let _ = writeln!(
+            out,
+            "in-flight: {} {}",
+            task.id,
+            quoted_line_text(&task.title)
+        );
         if !ladder.reached(Collapse::Log)
             && let Some(log) = &task.log
         {
-            let _ = writeln!(out, "log: {log}");
+            let _ = writeln!(out, "log: {}", quoted_line_text(log));
         }
     }
     if in_flight.len() > shown {
@@ -345,7 +350,7 @@ fn section_hint(out: &mut String, total: usize, shown: usize) {
     }
 }
 
-/// Where each epic stands, so a session that opens with "continue <epic>"
+/// Where each epic stands, so a session that opens with `continue <epic>`
 /// can see which one it means and what it would pick up.
 fn render_epics(out: &mut String, epics: &[Epic], ladder: Ladder) {
     if epics.is_empty() {
@@ -404,7 +409,7 @@ fn render_rules(out: &mut String, rules: &[StatusRule], ladder: Ladder) {
     }
     let _ = writeln!(out, "rules[{}]:", rules.len());
     for rule in rules.iter().take(SECTION_ROWS) {
-        let _ = writeln!(out, "  {}: {}", rule.id, rule.title);
+        let _ = writeln!(out, "  {}: {}", rule.id, quoted_line_text(&rule.title));
     }
     section_hint(out, rules.len(), SECTION_ROWS);
 }

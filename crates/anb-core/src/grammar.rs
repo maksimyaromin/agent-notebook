@@ -801,7 +801,7 @@ fn lower_word_error(value: &str) -> Option<String> {
 
 fn type_word_error(value: &str) -> Option<String> {
     (!TYPE_WORDS.contains(&value))
-        .then(|| format!("`{value}` is not one of task, decision, note, question"))
+        .then(|| format!("`{value}` is not one of {}", TYPE_WORDS.join(", ")))
 }
 
 fn tag_list_error(value: &str) -> Option<String> {

@@ -126,7 +126,7 @@ pub(super) fn edge_exists(record: &Record, target: &str) -> bool {
         .any(|value| value == target)
 }
 
-/// The same edges [`task_edges`] draws, each node carrying whether its
+/// The same edges `check`'s `task_edges` draws, each node carrying whether its
 /// Task has closed — the flag the ready gate and the unblock consequences
 /// read, and the reason this owns its ids rather than borrowing them.
 fn task_graph(records: &[Record]) -> TaskGraph {
@@ -176,10 +176,10 @@ pub(super) fn matches_query(record: &Record, needle: &str) -> bool {
     .any(|surface| surface.to_lowercase().contains(needle))
 }
 
-/// Whether the record's file sits in `record_type`'s live or archive
-/// directory — residence, the axis a reader browsing the tree sees.
-pub(super) fn sits_in(record: &Record, record_type: RecordType, home: Residence) -> bool {
-    grammar::residence(record.path(), record_type.word()) == Some(home)
+/// Whether the record's file sits in `record_type`'s live directory —
+/// residence, the axis a reader browsing the tree sees.
+pub(super) fn lives_in(record: &Record, record_type: RecordType) -> bool {
+    grammar::residence(record.path(), record_type.word()) == Some(Residence::Live)
 }
 
 /// The dispatch queue's rows: live, open, valid, unblocked, unheld Tasks
@@ -211,7 +211,6 @@ pub(super) fn unblocked_by_close(
         .collect()
 }
 
-/// The live, open, valid Tasks passing `keep`, in ready order.
 fn ready_row(record: &Record) -> ReadyTask {
     let file = record.file();
     ReadyTask {
@@ -230,6 +229,7 @@ fn ready_rank(row: &ReadyTask) -> (u8, &str, &str) {
     (row.priority.unwrap_or(2), &row.created, &row.id)
 }
 
+/// The live, open, valid Tasks passing `keep`, in ready order.
 fn open_rows(
     records: &[Record],
     resolvable: &Resolver<'_>,
