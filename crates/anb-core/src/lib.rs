@@ -3,10 +3,8 @@
 //! The Core runs with no filesystem, git, or network access: all data flows
 //! through the [`Storage`] seam, fed by the host.
 
-// The crate's surface is the flat re-export below, so that every name a
-// host can reach has exactly one path and the modules stay free to move.
-// The two that stay public are namespaces a caller reads as one: the
-// encoders a host renders replies with, and the calendar.
+// Every name a host can reach has exactly one path: the flat re-export
+// below, or one of these two namespaces a caller reads as one.
 pub mod date;
 pub mod encode;
 

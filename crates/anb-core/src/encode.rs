@@ -16,14 +16,11 @@ use std::fmt::Write as _;
 /// whatever the notebook holds; a listing lifts that with `--all`, and a
 /// consequence named in passing has no lift. A record's own bytes are not
 /// derived, so `view` shows them as they stand — until a body outgrows a
-/// reply on its own, when it too is answered at a fixed size and `--all`
-/// lifts it.
+/// reply on its own, when it too is bounded and `--all` lifts it.
 ///
-/// Its other half, for every block a reply heads with `label[n]`: `n` is
-/// the whole set, and the rows under it are as many as the reply affords,
-/// with the shortfall named by the block's own hint. A header that counted
-/// its rows would say what the reader can already see and hide what it
-/// cannot.
+/// Where a reply heads a block with `label[n]`, `n` is the whole set and
+/// the rows under it are as many as the reply affords, with the shortfall
+/// named by the block's own hint.
 pub const ROW_BOUND: usize = 20;
 
 /// How many characters of a record's own text a derived reply carries.

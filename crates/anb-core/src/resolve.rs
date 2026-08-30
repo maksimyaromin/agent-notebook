@@ -59,11 +59,16 @@ impl<'a> Resolver<'a> {
 pub(crate) fn resolvable_id(path: &str) -> Option<&str> {
     let stem = path_stem(path);
     let home = type_of(stem)?.directory();
-    let filed = path
-        .strip_prefix(&format!("{ARCHIVE_DIR}/"))
-        .unwrap_or(path);
+    let filed = archived_tail(path).unwrap_or(path);
     let (directory, filename) = filed.rsplit_once('/')?;
     (directory == home && is_record_file(filename)).then_some(stem)
+}
+
+/// What an archived path names below the archive, if it is one at all. The
+/// prefix rule has this one home, and asking costs no allocation, which
+/// matters because every derived query asks it once per record.
+fn archived_tail(path: &str) -> Option<&str> {
+    path.strip_prefix(ARCHIVE_DIR)?.strip_prefix('/')
 }
 
 /// The ids among `targets` the archive holds, each once, in the order the
@@ -124,7 +129,7 @@ pub(crate) fn is_record_file(path: &str) -> bool {
 }
 
 pub(crate) fn is_archived(path: &str) -> bool {
-    path.starts_with(&format!("{ARCHIVE_DIR}/"))
+    archived_tail(path).is_some()
 }
 
 /// The id a canonical record path carries: the filename minus `.md`. The
