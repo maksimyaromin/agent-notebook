@@ -15,7 +15,7 @@ use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
 use anb_core::{
     EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, ListedRecord, NotebookError, Overview,
-    ReadyTask, View, counts_phrase, encode,
+    ReadyTask, RecordType, View, counts_phrase, encode,
 };
 use std::fmt::Write as _;
 
@@ -104,9 +104,6 @@ pub fn render(reply: &Reply, today: &str) -> String {
         ),
         Reply::Overviewed { overview, all } => overview_page(overview, *all),
         Reply::Graphed { graph, full, all } => graph_blocks(graph, *full, *all),
-        Reply::Mapped { path, tasks, edges } => {
-            format!("ok: graph {path} — {tasks} tasks, {edges} edges\n")
-        }
         Reply::Status { status, hook } => {
             if *hook {
                 json::hook_payload(status)
@@ -325,7 +322,7 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
     out
 }
 
-/// The graph as the rows a caller reads: the tiles, the lines between them,
+/// The graph as the rows a caller reads: the records, the edges between them,
 /// and — when the caller asked for the records whole — each record's
 /// envelope and body under them.
 fn graph_blocks(graph: &Graph, full: bool, all: bool) -> String {
@@ -347,17 +344,27 @@ fn tiles_block(out: &mut String, graph: &Graph, all: bool, restore: &str) {
     let shown = shown(graph.nodes.len(), all);
     let _ = writeln!(
         out,
-        "nodes[{}]{{id,state,archived,degree,epic,title}}:",
+        "nodes[{}]{{id,type,state,ready,archived,degree,priority,created,epic,title}}:",
         graph.nodes.len()
     );
     for node in &graph.nodes[..shown] {
         let _ = writeln!(
             out,
-            "  {},{},{},{},{},{}",
+            "  {},{},{},{},{},{},{},{},{},{}",
             node.id,
+            node.kind.map_or("unknown", RecordType::word),
             node.state,
+            node.ready
+                .map_or("-", |ready| if ready { "yes" } else { "no" }),
             if node.archived { "yes" } else { "no" },
             degrees.get(node.id.as_str()).copied().unwrap_or_default(),
+            node.priority
+                .map_or_else(|| "-".to_owned(), |priority| priority.to_string()),
+            if node.created.is_empty() {
+                "-"
+            } else {
+                &node.created
+            },
             node.epic.as_ref().map_or_else(
                 || "-".to_owned(),
                 |epic| format!("{}/{}", epic.closed, epic.total)
@@ -377,13 +384,14 @@ fn edges_block(out: &mut String, edges: &[GraphEdge<'_>], all: bool, restore: &s
         let word = match edge.kind {
             EdgeKind::BlockedBy => "waits",
             EdgeKind::Origin => "born",
+            EdgeKind::Mentions => "mentions",
         };
         let _ = writeln!(out, "  {},{},{word}", edge.from, edge.to);
     }
     truncation_hint(out, edges.len(), shown, restore);
 }
 
-/// What a tile opens: each record's envelope a line at a time, and each
+/// The records behind the graph: each envelope a line at a time, and each
 /// body under its own id. A body carries newlines, which the quoting rule
 /// escapes, so one record is still one row.
 fn record_blocks(out: &mut String, nodes: &[GraphNode], all: bool, restore: &str) {

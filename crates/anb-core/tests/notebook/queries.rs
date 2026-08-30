@@ -356,18 +356,42 @@ mod task_map {
             .collect()
     }
 
-    /// A map draws Tasks; a Decision is knowledge, not work in a queue.
+    /// The graph is of the notebook, not of its queue: a Decision is as
+    /// much a record as the Task that cites it, and a reader drawing the
+    /// notebook needs both.
     #[test]
-    fn the_map_draws_tasks_and_nothing_else() {
-        let mut storage = storage_with(&[
+    fn every_kind_of_record_is_a_node() {
+        assert_eq!(
+            map_of(&mut a_task_and_a_decision(), &whole()),
+            vec!["task.open", "decision.rule"]
+        );
+    }
+
+    /// The kinds are a slice a caller asks for, so one kind can be had
+    /// without losing the others from the vocabulary.
+    #[test]
+    fn a_kind_asked_for_is_the_only_kind_drawn() {
+        let only_decisions = GraphSlice {
+            kinds: vec![RecordType::Decision],
+            ..whole()
+        };
+
+        assert_eq!(
+            map_of(&mut a_task_and_a_decision(), &only_decisions),
+            vec!["decision.rule"]
+        );
+    }
+
+    /// One Task and one Decision: the smallest notebook that can tell a
+    /// graph of the work from a graph of the notebook.
+    fn a_task_and_a_decision() -> MemoryStorage {
+        storage_with(&[
             ("tasks/task.open.md", &task("task.open", "open", &[], "")),
             (
                 "decisions/decision.rule.md",
                 &record_file("decision.rule", "decision", "active", &["kind: rule"], ""),
             ),
-        ]);
-
-        assert_eq!(map_of(&mut storage, &whole()), vec!["task.open"]);
+        ])
     }
 
     /// The reader asks for history when they want it.
@@ -661,19 +685,20 @@ mod task_map {
         assert!(reason.contains("--archive"), "{reason}");
     }
 
-    /// Only Tasks get tiles, so a focus on anything else asks for a graph
-    /// the map does not draw.
+    /// Every record is a node, so every record can be the centre of one.
+    /// A reader asking what a Decision touches is asking the same question
+    /// as a reader asking it of a Task.
     #[test]
-    fn a_focus_on_a_record_that_is_no_task_is_refused() {
+    fn any_record_can_be_the_centre_of_a_neighbourhood() {
         let mut storage = storage_with(&[(
             "decisions/decision.rule.md",
             &record_file("decision.rule", "decision", "active", &["kind: rule"], ""),
         )]);
 
-        assert!(matches!(
-            Notebook::new(&mut storage).graph(&around("decision.rule", 1)),
-            Err(NotebookError::InvalidArgument { .. })
-        ));
+        assert_eq!(
+            map_of(&mut storage, &around("decision.rule", 1)),
+            vec!["decision.rule"]
+        );
     }
 
     /// A hub with one child open and one closed and filed, plus a Task the

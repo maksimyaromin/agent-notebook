@@ -237,12 +237,17 @@ pub struct Epic {
     pub next: Option<String>,
 }
 
-/// One Task on the map: what its tile says, and the record a reader opens
-/// on it.
+/// One record in the graph: what it is, what it relates to, and the record
+/// itself for whoever draws it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphNode {
     pub id: String,
-    /// The state its tile is coloured by, `invalid` for a record its own
+    /// Which kind of record this is. The id carries it too, but a consumer
+    /// that has to split a string to learn what it is drawing has been
+    /// handed a puzzle rather than an answer. `None` is a record whose own
+    /// `type` field is not a word this notebook knows.
+    pub kind: Option<RecordType>,
+    /// The state a reader sorts and colours by, `invalid` for a record its own
     /// findings exclude — the listing's word, so one vocabulary answers
     /// every surface.
     pub state: String,
@@ -250,19 +255,34 @@ pub struct GraphNode {
     pub title: Option<String>,
     /// Where this hub stands, when the Task is one.
     pub epic: Option<Epic>,
+    /// What a Task carries into the queue it waits in: nothing for a record
+    /// that never queues.
+    pub priority: Option<u8>,
+    /// The day the record entered the notebook. The date rather than an age
+    /// in days, because an age is only true on the day it was computed.
+    pub created: String,
+    /// Whether this Task can be started now — nothing blocks it and no hold
+    /// stands. Derived from rules a consumer cannot see, so it travels with
+    /// the node rather than being left to a second call. `None` where the
+    /// question does not arise: a record that never queues, or work already
+    /// filed.
+    pub ready: Option<bool>,
     pub blocked_by: Vec<String>,
     pub origin: Option<String>,
     /// The envelope in file order and the body, for the record a reader
-    /// opens on a tile rather than for the tile.
+    /// reads rather than for the node.
     pub fields: Vec<(String, String)>,
     pub body: String,
     pub mentions: Vec<String>,
 }
 
-/// Which Tasks a map is asked for. Every narrowing is a predicate over the
+/// Which records a graph is asked for. Every narrowing is a predicate over the
 /// same notebook, so asking for two asks for the intersection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GraphSlice {
+    /// Which kinds of record the graph holds; empty asks for all of them,
+    /// the records with no readable kind among them.
+    pub kinds: Vec<RecordType>,
     /// One epic's scope: the hub, what it waits on, and what was born
     /// inside it.
     pub hub: Option<String>,
@@ -270,61 +290,71 @@ pub struct GraphSlice {
     pub ready_only: bool,
     /// One record and the graph around it.
     pub focus: Option<Focus>,
-    /// Whether archived Tasks are on the map. Most of what a long-lived
+    /// Whether filed work is in the graph. Most of what a long-lived
     /// notebook holds is finished, and drawing all of it buries the work in
     /// flight, so the archive stays off until it is asked for.
     pub archive: bool,
 }
 
-/// A record and how far around it the map reaches, counted in edges.
+/// A record and how far around it the graph reaches, counted in edges.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Focus {
     pub id: String,
     pub depth: usize,
 }
 
-/// The map one call asked for: every Task the slice reaches, each with the
+/// The graph one call asked for: every record the slice reaches, each with the
 /// edges it draws.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Graph {
-    /// What was asked for, carried back so a map says which slice it is.
+    /// What was asked for, carried back so a graph says which slice it is.
     pub slice: GraphSlice,
     pub nodes: Vec<GraphNode>,
 }
 
 impl Graph {
-    /// The edges the map draws, each running the way work becomes possible:
-    /// out of what must settle first, into what waits on it or was born
-    /// from it. An edge whose far end is off the map is not one, since a
-    /// line has to land on a tile.
+    /// The edges between the records this graph holds. A declared relation
+    /// runs the way work becomes possible — out of what must settle first,
+    /// into what waits on it or was born from it — while a mention runs the
+    /// way it was written, out of the record that names another. An edge
+    /// with an end outside this slice is not one, since both ends have to
+    /// be somewhere a reader can see.
     #[must_use]
-    pub fn edges(&self) -> Vec<GraphEdge<'_>> {
+    pub fn edges<'a>(&'a self) -> Vec<GraphEdge<'a>> {
         let on_the_map: BTreeSet<&str> = self.nodes.iter().map(|node| node.id.as_str()).collect();
+        // One pair of records is one line however many times the notebook
+        // says so: a `blocked-by` listed twice, or a body naming the record
+        // its envelope already points at, is one relation stated twice. Two
+        // edges between the same pair would also weigh it twice in every
+        // degree computed from this.
+        let mut drawn = BTreeSet::new();
         let mut edges = Vec::new();
+        let mut draw =
+            |from: &'a str, to: &'a str, kind: EdgeKind, edges: &mut Vec<GraphEdge<'a>>| {
+                if on_the_map.contains(from) && on_the_map.contains(to) && drawn.insert((from, to))
+                {
+                    edges.push(GraphEdge { from, to, kind });
+                }
+            };
+        // Declared relations first, so a mention of the same pair finds it
+        // taken and the stronger word is the one that survives.
         for node in &self.nodes {
             for blocker in &node.blocked_by {
-                if on_the_map.contains(blocker.as_str()) {
-                    edges.push(GraphEdge {
-                        from: blocker,
-                        to: &node.id,
-                        kind: EdgeKind::BlockedBy,
-                    });
-                }
+                draw(blocker, &node.id, EdgeKind::BlockedBy, &mut edges);
             }
-            if let Some(origin) = node.origin.as_deref()
-                && on_the_map.contains(origin)
-            {
-                edges.push(GraphEdge {
-                    from: origin,
-                    to: &node.id,
-                    kind: EdgeKind::Origin,
-                });
+            if let Some(origin) = node.origin.as_deref() {
+                draw(origin, &node.id, EdgeKind::Origin, &mut edges);
+            }
+        }
+        for node in &self.nodes {
+            for mentioned in &node.mentions {
+                draw(&node.id, mentioned, EdgeKind::Mentions, &mut edges);
             }
         }
         edges
     }
 
-    /// How many lines meet at each tile. A web reads by weight, and weight
+    /// How many edges meet at each record. A graph reads by weight, and weight
     /// is how much of the slice a Task holds together.
     #[must_use]
     pub fn degrees(&self) -> BTreeMap<&str, usize> {
@@ -341,7 +371,8 @@ impl Graph {
     }
 }
 
-/// One line on the map, from what must settle first to what waits on it.
+/// One edge between two records the graph holds. Which way it runs depends
+/// on its kind, so the kind is read before the direction is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphEdge<'a> {
     pub from: &'a str,
@@ -349,12 +380,15 @@ pub struct GraphEdge<'a> {
     pub kind: EdgeKind,
 }
 
-/// Which of the two edges a record draws: what it waits on, and what it was
-/// born from.
+/// How two records are related: by what one waits on, by what it was born
+/// from, or by one naming the other in its prose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeKind {
     BlockedBy,
     Origin,
+    /// One record naming another in its body: the web a notebook weaves
+    /// beside the work it tracks.
+    Mentions,
 }
 
 /// One type's slice of the overview page.

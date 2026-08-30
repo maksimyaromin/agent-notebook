@@ -4,6 +4,7 @@
 //! Core, so their refusals arrive as structured recovery payloads; clap
 //! keeps only the structural surface — positionals and flag spelling.
 
+use anb_core::RecordType;
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -152,7 +153,7 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// The task graph: printed as data, or drawn into one HTML file.
+    /// The notebook as records and the edges between them.
     Graph(GraphArgs),
     /// The whole notebook as one page, grouped by type.
     Overview {
@@ -279,17 +280,13 @@ pub struct CloseArgs {
 pub struct GraphArgs {
     #[command(flatten)]
     pub slice: SliceArgs,
-    /// Each record's envelope and body as well. The picture carries them
-    /// whatever this says: a tile there opens its record.
+    /// Each record's envelope and body as well.
     #[arg(long)]
     pub full: bool,
-    /// Every row; each block is bounded by default. Nothing to lift under
-    /// `--out`: a drawing bounds nothing.
+    /// Every row the plain text bounds. JSON is never bounded: a graph
+    /// missing edges is not a smaller graph, it is a wrong one.
     #[arg(long)]
     pub all: bool,
-    /// Draw the map into this file instead of printing it.
-    #[arg(long, value_name = "PATH")]
-    pub out: Option<std::path::PathBuf>,
 }
 
 /// Which Tasks the graph holds. They travel together because a narrowing
@@ -300,10 +297,14 @@ pub struct SliceArgs {
     /// Only the work this record's scope reaches: one epic's branch.
     #[arg(long = "for", value_name = "ID")]
     pub scope: Option<String>,
+    /// Only records of these kinds. Every kind by default, including one
+    /// whose own `type` field no notebook word matches
+    #[arg(long = "type", value_name = "KIND", value_delimiter = ',', value_parser = a_record_kind)]
+    pub kinds: Vec<RecordType>,
     /// Only what can be started now: the ready lens.
     #[arg(long)]
     pub ready: bool,
-    /// Only this Task and the graph around it.
+    /// Only this record and the graph around it.
     #[arg(long, value_name = "ID")]
     pub focus: Option<String>,
     /// How many edges out from `--focus` the graph reaches; 1 by default.
@@ -312,4 +313,16 @@ pub struct SliceArgs {
     /// The archive too; by default only the work still in play.
     #[arg(long)]
     pub archive: bool,
+}
+
+/// One `--type` word as the kind it names. The kinds are asked of the Core
+/// rather than retyped here, so a fifth one is offered by this flag the day
+/// it exists.
+fn a_record_kind(word: &str) -> Result<RecordType, String> {
+    RecordType::from_word(word).ok_or_else(|| {
+        format!(
+            "`{word}` is no kind of record — try {}",
+            RecordType::ALL.map(RecordType::word).join(", ")
+        )
+    })
 }

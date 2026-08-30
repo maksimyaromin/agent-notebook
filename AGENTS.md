@@ -69,9 +69,9 @@ No formal task closure, no commit, and no push ever happens before the review pa
 
 - `./scripts/check.sh` — the local gate: `cargo fmt --check`, `cargo clippy -D warnings`, all tests, doctests.
 
-## The map
+## The graph
 
-`crates/anb-graph/assets/` holds the look and behaviour of the emitted map as plain files — edit them there, never as strings in Rust. `cargo` compiles those files without ever running them, so what they do is proved by opening an emitted page in a browser: `cargo test -p anb-graph --test labels` does that for the two properties a machine can settle — no two names share a patch of screen, and every tile is big enough to point at — and skips when no browser is installed (`ANB_BROWSER` names one).
+`anb graph` answers with the notebook as records and the edges between them — every kind of record, on any slice (`--type`, `--for`, `--ready`, `--focus`/`--depth`, `--archive`, `--full`). Drawing is nobody's business here: whoever wants a picture builds one from this. The plain text is bounded like every listing; `--json` never is, because a drawing made from some of the edges is a picture of a notebook that does not exist.
 
 ## Markdown authoring
 

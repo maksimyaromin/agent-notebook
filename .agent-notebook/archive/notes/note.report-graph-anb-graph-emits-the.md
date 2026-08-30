@@ -1,7 +1,7 @@
 ---
 id: note.report-graph-anb-graph-emits-the
 type: note
-state: active
+state: retired
 title: Report: Graph: anb graph emits the artifact
 by: Maksim Yaromin
 from: task.graph-emit-html

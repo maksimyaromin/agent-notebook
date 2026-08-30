@@ -130,7 +130,6 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     let host = Host {
         git_by: anb::git::user_name,
         read_report: &read_report,
-        write_artifact: &write_artifact,
         lost_proofs: &lost,
         user_notebook: user.as_ref().map(|user| user as &dyn anb_core::Storage),
         today: &today,
@@ -160,25 +159,6 @@ fn terminated(mut output: String) -> String {
         output.push('\n');
     }
     output
-}
-
-/// The map put where the caller asked for it, which is wherever they want
-/// to open it from — outside the notebook root as often as in it, so this
-/// is the shell's write, not Storage's.
-fn write_artifact(path: &str, content: &str) -> Result<(), StorageError> {
-    let failed = |error: &std::io::Error| StorageError::Io {
-        path: path.to_owned(),
-        detail: error.to_string(),
-    };
-    // The caller named where they want to open the file from, and a
-    // directory that is not there yet is a place, not a refusal — the same
-    // answer the notebook's own writes give.
-    if let Some(directory) = std::path::Path::new(path).parent()
-        && !directory.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(directory).map_err(|error| failed(&error))?;
-    }
-    std::fs::write(path, content).map_err(|error| failed(&error))
 }
 
 /// A report the caller named by path, read from wherever the work left it:
