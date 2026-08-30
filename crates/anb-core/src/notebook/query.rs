@@ -11,7 +11,7 @@ use crate::grammar::{self, Residence};
 use crate::graph::{TaskGraph, TaskNode};
 use crate::mention;
 use crate::record::{REF_KEYS, Record, RecordType, TaskState, linked_record};
-use crate::reply::{Blocker, Cited, CitedProof, Counts, Epic, ListedRecord, ReadyTask};
+use crate::reply::{Blocker, Cited, CitedProof, Counts, Epic, GraphNode, ListedRecord, ReadyTask};
 use crate::request::Draft;
 use crate::resolve::{Resolver, is_archived, path_stem, type_of};
 use crate::status::{ActiveTask, StatusRule};
@@ -160,6 +160,87 @@ pub(super) fn listed_row(record: &Record, resolvable: &Resolver<'_>) -> ListedRe
             .field("title")
             .map(str::to_owned)
             .map(encode::bounded_text),
+    }
+}
+
+/// Every id within `depth` edges of `from`, `from` itself included: what it
+/// waits on and was born from, however far back, and what waits on it and
+/// was born inside it, however far forward.
+///
+/// The walk is what lets a map answer for a notebook of thousands. Both
+/// directions are walked because a reader asking about one Task asks the
+/// same question twice — what has to settle before it, and what it releases.
+pub(super) fn neighbourhood<'a>(
+    records: &[&'a Record],
+    from: &str,
+    depth: usize,
+) -> BTreeSet<&'a str> {
+    let drawn: BTreeSet<&str> = records
+        .iter()
+        .map(|record| path_stem(record.path()))
+        .collect();
+    let mut ahead: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut behind: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for &record in records {
+        let id = path_stem(record.path());
+        for target in kin_of(record).filter(|target| drawn.contains(target)) {
+            ahead.entry(id).or_default().push(target);
+            behind.entry(target).or_default().push(id);
+        }
+    }
+    let root = drawn.get(from).copied();
+    let mut reached: BTreeSet<&str> = root.into_iter().collect();
+    for edges in [&ahead, &behind] {
+        reached.extend(walked(edges, root, depth));
+    }
+    reached
+}
+
+/// The ids `depth` steps out from `root` along `edges`, breadth first. Each
+/// direction keeps its own visits, so a Task reached one way is still walked
+/// through the other.
+fn walked<'a>(
+    edges: &BTreeMap<&'a str, Vec<&'a str>>,
+    root: Option<&'a str>,
+    depth: usize,
+) -> BTreeSet<&'a str> {
+    let mut visited: BTreeSet<&str> = root.into_iter().collect();
+    let mut frontier: Vec<&str> = visited.iter().copied().collect();
+    for _ in 0..depth {
+        frontier = frontier
+            .iter()
+            .filter_map(|at| edges.get(at))
+            .flatten()
+            .copied()
+            .filter(|target| visited.insert(target))
+            .collect();
+    }
+    visited
+}
+
+/// One Task as the map draws it: the tile's word, the edges it declares,
+/// and the record a reader opens on it.
+pub(super) fn graph_node(record: &Record, resolvable: &Resolver<'_>, epics: &[Epic]) -> GraphNode {
+    let row = listed_row(record, resolvable);
+    let file = record.file();
+    GraphNode {
+        epic: epics.iter().find(|epic| epic.id == row.id).cloned(),
+        archived: is_archived(record.path()),
+        blocked_by: file.field_values("blocked-by").map(str::to_owned).collect(),
+        origin: record.origin().map(str::to_owned),
+        fields: file
+            .fields()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect(),
+        body: file.body().to_owned(),
+        mentions: mention::mentions(file.body())
+            .into_iter()
+            .filter(|target| *target != row.id)
+            .map(str::to_owned)
+            .collect(),
+        id: row.id,
+        state: row.state,
+        title: row.title,
     }
 }
 

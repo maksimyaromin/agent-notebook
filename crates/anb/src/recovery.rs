@@ -44,6 +44,7 @@ pub fn subject(command: &Command) -> Subject {
         Command::Expunge { id } => ("expunge", Some(id)),
         Command::Edit(args) => ("edit", Some(&args.id)),
         Command::Search { .. } => ("search", None),
+        Command::Graph(_) => ("graph", None),
         Command::Overview { .. } => ("overview", None),
     };
     Subject {

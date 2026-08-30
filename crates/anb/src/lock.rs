@@ -116,6 +116,7 @@ fn writes(command: &Command) -> bool {
         | Command::List { .. }
         | Command::View { .. }
         | Command::Status { .. }
+        | Command::Graph(_)
         | Command::Check { .. }
         | Command::Search { .. }
         | Command::Overview { .. } => false,

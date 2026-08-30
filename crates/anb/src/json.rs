@@ -5,8 +5,9 @@
 use crate::recovery::{Recovery, Subject};
 use crate::reply::{Reply, repair_command, shown};
 use anb_core::{
-    Cited, Counts, DebtSignal, FileFinding, ListedRecord, NotebookError, Overview, ReadyTask,
-    SECTION_ROWS, Status, View, debt_classes, encode,
+    Cited, Counts, DebtSignal, EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, GraphSlice,
+    ListedRecord, NotebookError, Overview, ReadyTask, SECTION_ROWS, Status, View, debt_classes,
+    encode,
 };
 use serde_json::{Map, Value, json};
 
@@ -102,6 +103,10 @@ pub fn render(reply: &Reply) -> String {
                 .collect::<Vec<Value>>(),
         }),
         Reply::Overviewed { overview, all } => overview_value(overview, *all),
+        Reply::Graphed { graph, full, all } => graph_value(graph, *full, *all),
+        Reply::Mapped { path, tasks, edges } => json!({
+            "ok": "graph", "path": path, "tasks": tasks, "edges": edges,
+        }),
         Reply::Silence => return String::new(),
     };
     value.to_string()
@@ -294,6 +299,76 @@ fn overview_value(overview: &Overview, all: bool) -> Value {
     }
     object.insert("archive".into(), counts_value(&overview.archived));
     Value::Object(object)
+}
+
+/// Which reading of the graph document this is. A caller builds against a
+/// shape, and a shape that could change without saying so is one nobody can
+/// build against.
+const GRAPH_CONTRACT: u8 = 1;
+
+/// The graph as data: the slice it answers, the tiles, and the lines
+/// between them. Bounded like every other listing, with the whole count
+/// beside each block so a truncated one still says how much it stands for.
+fn graph_value(graph: &Graph, full: bool, all: bool) -> Value {
+    let degrees = graph.degrees();
+    let edges = graph.edges();
+    json!({
+        "v": GRAPH_CONTRACT,
+        "slice": slice_value(&graph.slice),
+        "nodes": section(&graph.nodes, shown(graph.nodes.len(), all), |node| {
+            graph_node_value(node, degrees.get(node.id.as_str()).copied().unwrap_or_default(), full, all)
+        }),
+        "edges": section(&edges, shown(edges.len(), all), graph_edge_value),
+    })
+}
+
+fn slice_value(slice: &GraphSlice) -> Value {
+    Value::Object(fields([
+        ("for", json!(slice.hub)),
+        ("ready", json!(slice.ready_only)),
+        ("focus", json!(slice.focus.as_ref().map(|focus| &focus.id))),
+        (
+            "depth",
+            json!(slice.focus.as_ref().map(|focus| focus.depth)),
+        ),
+        ("archive", json!(slice.archive)),
+    ]))
+}
+
+fn graph_node_value(node: &GraphNode, degree: usize, full: bool, all: bool) -> Value {
+    let mut object = fields([
+        ("id", json!(node.id)),
+        ("state", json!(node.state)),
+        ("archived", json!(node.archived)),
+        ("degree", json!(degree)),
+        ("epic", node.epic.as_ref().map_or(Value::Null, epic_value)),
+        ("title", json!(node.title)),
+    ]);
+    if full {
+        object.extend(fields([
+            (
+                "fields",
+                section(
+                    &node.fields,
+                    shown(node.fields.len(), all),
+                    |(key, value)| json!([key, field_value(value, all)]),
+                ),
+            ),
+            ("body", body_value(&node.body, all)),
+        ]));
+    }
+    Value::Object(object)
+}
+
+fn graph_edge_value(edge: &GraphEdge<'_>) -> Value {
+    json!({
+        "from": edge.from,
+        "to": edge.to,
+        "kind": match edge.kind {
+            EdgeKind::BlockedBy => "waits",
+            EdgeKind::Origin => "born",
+        },
+    })
 }
 
 fn counts_value(counts: &Counts) -> Value {

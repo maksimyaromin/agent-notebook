@@ -46,6 +46,27 @@ fn run_with_reports(
     line: &[&str],
     read_report: &dyn Fn(&str) -> Result<String, StorageError>,
 ) -> Result<String, String> {
+    run_with(storage, line, read_report, &no_artifact)
+}
+
+/// [`run`] with the shell's own writer, so a test can read the file a
+/// command left as well as pose the ways a write fails.
+fn run_writing(
+    storage: &mut MemoryStorage,
+    line: &[&str],
+    write_artifact: &dyn Fn(&str, &str) -> Result<(), StorageError>,
+) -> Result<String, String> {
+    run_with(storage, line, &missing_report, write_artifact)
+}
+
+/// One command line against a host whose two reaches outside the notebook —
+/// the report it reads and the artifact it writes — the case chooses.
+fn run_with(
+    storage: &mut MemoryStorage,
+    line: &[&str],
+    read_report: &dyn Fn(&str) -> Result<String, StorageError>,
+    write_artifact: &dyn Fn(&str, &str) -> Result<(), StorageError>,
+) -> Result<String, String> {
     let mut args = vec!["anb"];
     args.extend_from_slice(line);
     let cli = Cli::try_parse_from(args).expect("the test drives a well-formed command line");
@@ -54,6 +75,7 @@ fn run_with_reports(
     let host = Host {
         git_by: || Some(GIT_IDENTITY.to_owned()),
         read_report,
+        write_artifact,
         lost_proofs: &nothing_lost,
         user_notebook: None,
         today: TODAY,
@@ -78,10 +100,19 @@ fn undated_host() -> Host<'static> {
     Host {
         git_by: || None,
         read_report: &missing_report,
+        write_artifact: &no_artifact,
         lost_proofs: &nothing_lost,
         user_notebook: None,
         today: "not-a-date",
     }
+}
+
+/// The host of a case that emits no artifact: a path nothing put a file
+/// at is the same failure as a directory that is not there.
+fn no_artifact(path: &str, _content: &str) -> Result<(), StorageError> {
+    Err(StorageError::NotFound {
+        path: path.to_owned(),
+    })
 }
 
 /// The world of a case that is not about reconciliation: it still holds
@@ -1616,6 +1647,16 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "list", "--notebook", "elsewhere"],
         vec!["anb", "--global", "list"],
         vec!["anb", "list", "--global"],
+        vec!["anb", "graph"],
+        vec![
+            "anb",
+            "graph",
+            "--for",
+            "task.epic",
+            "--ready",
+            "--out",
+            "map.html",
+        ],
         vec![
             "anb",
             "edit",
@@ -1896,6 +1937,7 @@ mod maintenance_replies {
             Host {
                 git_by: || None,
                 read_report: &missing_report,
+                write_artifact: &no_artifact,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
                 today: TODAY,
@@ -1925,6 +1967,7 @@ mod maintenance_replies {
             Host {
                 git_by: || None,
                 read_report: &missing_report,
+                write_artifact: &no_artifact,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
                 today: TODAY,
@@ -2396,6 +2439,229 @@ mod overview_reply {
         archive: 1 tasks, 0 decisions, 0 notes, 0 questions
         "
         );
+    }
+}
+
+/// The graph: the rows a caller reads, the slice they name, and the file
+/// the shell leaves when they ask for a picture instead.
+mod task_graph {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// A host that keeps what a call wrote instead of putting it on a disk,
+    /// so a case reads the file the reply claims to have left.
+    fn capturing(
+        written: &RefCell<Vec<(String, String)>>,
+    ) -> impl Fn(&str, &str) -> Result<(), StorageError> {
+        |path, content| {
+            written
+                .borrow_mut()
+                .push((path.to_owned(), content.to_owned()));
+            Ok(())
+        }
+    }
+
+    /// A chain of two beside a Task of its own: three tiles, one line, and
+    /// only two of them startable now.
+    fn a_chain() -> MemoryStorage {
+        storage_with(&[
+            open_task("task.first", "The blocker", &[]),
+            open_task("task.second", "The waiter", &["blocked-by: task.first"]),
+            open_task("task.stray", "Another line of work", &[]),
+        ])
+    }
+
+    /// Every other verb answers an agent, and a picture answers nobody
+    /// without a browser. So the graph itself is what the verb prints.
+    #[test]
+    fn the_verb_prints_the_graph_itself() {
+        assert_snapshot!(ok(&mut a_chain(), &["graph"]), @r"
+        nodes[3]{id,state,archived,degree,epic,title}:
+          task.first,open,no,1,-,The blocker
+          task.second,open,no,1,-,The waiter
+          task.stray,open,no,0,-,Another line of work
+        edges[1]{from,to,kind}:
+          task.first,task.second,waits
+        ");
+    }
+
+    /// A caller builds against a shape, so the document says which shape it
+    /// is and which slice it answers.
+    #[test]
+    fn the_data_names_its_reading_and_the_slice_it_answers() {
+        let payload = ok(&mut a_chain(), &["--json", "graph", "--ready"]);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).unwrap_or_else(|_| panic!("not JSON: {payload}"));
+
+        assert_eq!(parsed["v"], 1);
+        assert_eq!(parsed["slice"]["ready"], true);
+        assert_eq!(parsed["slice"]["archive"], false);
+        assert_eq!(parsed["nodes"]["count"], 2);
+        assert_eq!(parsed["nodes"]["rows"][0]["id"], "task.first");
+        assert_eq!(parsed["nodes"]["rows"][0]["degree"], 0);
+        assert_eq!(
+            parsed["edges"]["count"], 0,
+            "the ready lens holds only what waits on nothing live"
+        );
+    }
+
+    /// A record's envelope and body are most of its bytes and none of the
+    /// graph, so they travel only when a caller asks for them.
+    #[test]
+    fn a_record_travels_whole_only_when_it_is_asked_for() {
+        let bare = ok(&mut a_chain(), &["--json", "graph"]);
+        let bare: serde_json::Value = serde_json::from_str(&bare).unwrap();
+        assert!(bare["nodes"]["rows"][0].get("body").is_none(), "{bare}");
+
+        let whole = ok(&mut a_chain(), &["--json", "graph", "--full"]);
+        let whole: serde_json::Value = serde_json::from_str(&whole).unwrap();
+        let carried = &whole["nodes"]["rows"][0];
+        assert!(carried.get("body").is_some(), "{whole}");
+        assert_eq!(
+            carried["fields"]["rows"][0],
+            serde_json::json!(["id", "task.first"])
+        );
+    }
+
+    /// The same ask, printed: the envelope and the body under the tiles
+    /// they belong to.
+    #[test]
+    fn the_printed_graph_carries_the_records_under_the_tiles() {
+        let printed = ok(
+            &mut a_chain(),
+            &["graph", "--focus", "task.stray", "--full"],
+        );
+        assert_snapshot!(printed, @r#"
+        nodes[1]{id,state,archived,degree,epic,title}:
+          task.stray,open,no,0,-,Another line of work
+        edges[0]{from,to,kind}:
+        fields[6]{id,key,value}:
+          task.stray,id,task.stray
+          task.stray,type,task
+          task.stray,state,open
+          task.stray,title,Another line of work
+          task.stray,created,2026-08-24
+          task.stray,updated,2026-08-25
+        bodies[0]{id,text}:
+        "#);
+    }
+
+    /// A slice narrows the graph itself, so the same flags answer the same
+    /// tiles whether the caller reads them or looks at them.
+    #[test]
+    fn every_slice_flag_narrows_what_the_verb_answers() {
+        let mut storage = a_chain();
+        assert_snapshot!(ok(&mut storage, &["graph", "--ready"]), @r"
+        nodes[2]{id,state,archived,degree,epic,title}:
+          task.first,open,no,0,-,The blocker
+          task.stray,open,no,0,-,Another line of work
+        edges[0]{from,to,kind}:
+        ");
+        assert_snapshot!(ok(&mut storage, &["graph", "--for", "task.second"]), @r"
+        nodes[2]{id,state,archived,degree,epic,title}:
+          task.first,open,no,1,-,The blocker
+          task.second,open,no,1,-,The waiter
+        edges[1]{from,to,kind}:
+          task.first,task.second,waits
+        ");
+        assert_snapshot!(ok(&mut storage, &["graph", "--focus", "task.first"]), @r"
+        nodes[2]{id,state,archived,degree,epic,title}:
+          task.first,open,no,1,-,The blocker
+          task.second,open,no,1,-,The waiter
+        edges[1]{from,to,kind}:
+          task.first,task.second,waits
+        ");
+    }
+
+    /// A hint that cut a slice has to lift that same slice, or it names a
+    /// different graph than the one the reader is looking at.
+    #[test]
+    fn the_truncation_hint_lifts_the_slice_it_cut() {
+        let mut storage = many_open_tasks(anb_core::encode::ROW_BOUND + 1);
+        let printed = ok(&mut storage, &["graph", "--archive"]);
+        assert!(
+            printed.contains("anb graph --archive --all"),
+            "the hint carries the slice: {printed}"
+        );
+    }
+
+    /// The drawing is what `--out` asks for, and the reply says where the
+    /// shell left it and what it holds.
+    #[test]
+    fn the_picture_lands_at_the_path_the_caller_named() {
+        let mut storage = a_chain();
+        let written = RefCell::new(Vec::new());
+
+        assert_snapshot!(
+            run_writing(
+                &mut storage,
+                &["graph", "--out", "maps/today.html"],
+                &capturing(&written)
+            )
+            .expect("the command must succeed"),
+            @"ok: graph maps/today.html — 3 tasks, 1 edges"
+        );
+
+        let files = written.borrow();
+        let [(path, page)] = files.as_slice() else {
+            panic!("a map is one file: {files:?}")
+        };
+        assert_eq!(path, "maps/today.html");
+        assert!(
+            page.contains("data-id=\"task.second\""),
+            "and the file is the map of this notebook"
+        );
+    }
+
+    /// A slice honoured when the graph is printed and ignored when it is
+    /// drawn would hand the reader a picture of another notebook.
+    #[test]
+    fn the_picture_holds_the_slice_the_flags_asked_for() {
+        let written = RefCell::new(Vec::new());
+
+        run_writing(
+            &mut a_chain(),
+            &["graph", "--ready", "--out", "map.html"],
+            &capturing(&written),
+        )
+        .expect("the command must succeed");
+
+        let files = written.borrow();
+        let page = &files[0].1;
+        assert!(!page.contains("data-id=\"task.second\""), "{page}");
+        assert_eq!(
+            page.matches("data-id=").count(),
+            2,
+            "the ready lens draws what it printed"
+        );
+    }
+
+    /// A path the host will not take is the caller's to retype, whatever
+    /// the host's reason was: a map the reply called written and nobody can
+    /// open is the one outcome to prevent.
+    #[test]
+    fn a_write_the_host_refused_names_the_path_and_what_it_said() {
+        let failing = |path: &str, _: &str| {
+            Err(StorageError::Io {
+                path: path.to_owned(),
+                detail: "no space left on device".to_owned(),
+            })
+        };
+        assert_snapshot!(
+            refused_write(&failing),
+            @"error[invalid-argument]: graph: cannot write `map.html` — no space left on device"
+        );
+    }
+
+    /// The payload a `graph --out` call comes to when the host will not put
+    /// the file where the caller asked for it.
+    fn refused_write(write_artifact: &dyn Fn(&str, &str) -> Result<(), StorageError>) -> String {
+        run_writing(
+            &mut a_chain(),
+            &["graph", "--out", "map.html"],
+            write_artifact,
+        )
+        .expect_err("a map that was not written is no map")
     }
 }
 
@@ -2936,6 +3202,7 @@ mod the_global_scope {
         &["overview"],
         &["status"],
         &["ready"],
+        &["graph"],
     ];
 
     /// Every verb that creates or moves a task or a question.

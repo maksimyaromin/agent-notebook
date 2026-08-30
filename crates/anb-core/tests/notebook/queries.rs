@@ -308,3 +308,427 @@ mod search_query {
         ));
     }
 }
+
+/// The map: every Task a slice reaches, with the edges it draws.
+mod task_map {
+    use crate::*;
+    use anb_core::{EdgeKind, Focus, GraphSlice};
+
+    fn task(id: &str, state: &str, extra: &[&str], body: &str) -> String {
+        record_file(id, "task", state, extra, body)
+    }
+
+    fn whole() -> GraphSlice {
+        GraphSlice::default()
+    }
+
+    fn with_archive() -> GraphSlice {
+        GraphSlice {
+            archive: true,
+            ..GraphSlice::default()
+        }
+    }
+
+    fn inside(hub: &str) -> GraphSlice {
+        GraphSlice {
+            hub: Some(hub.to_owned()),
+            ..GraphSlice::default()
+        }
+    }
+
+    fn around(id: &str, depth: usize) -> GraphSlice {
+        GraphSlice {
+            focus: Some(Focus {
+                id: id.to_owned(),
+                depth,
+            }),
+            ..GraphSlice::default()
+        }
+    }
+
+    fn map_of(storage: &mut MemoryStorage, slice: &GraphSlice) -> Vec<String> {
+        Notebook::new(storage)
+            .graph(slice)
+            .unwrap()
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect()
+    }
+
+    /// A map draws Tasks; a Decision is knowledge, not work in a queue.
+    #[test]
+    fn the_map_draws_tasks_and_nothing_else() {
+        let mut storage = storage_with(&[
+            ("tasks/task.open.md", &task("task.open", "open", &[], "")),
+            (
+                "decisions/decision.rule.md",
+                &record_file("decision.rule", "decision", "active", &["kind: rule"], ""),
+            ),
+        ]);
+
+        assert_eq!(map_of(&mut storage, &whole()), vec!["task.open"]);
+    }
+
+    /// The reader asks for history when they want it.
+    #[test]
+    fn finished_work_stays_off_the_map_until_it_is_asked_for() {
+        let mut storage = storage_with(&[
+            ("tasks/task.open.md", &task("task.open", "open", &[], "")),
+            (
+                "archive/tasks/task.done.md",
+                &task("task.done", "closed", &[], ""),
+            ),
+        ]);
+
+        assert_eq!(map_of(&mut storage, &whole()), vec!["task.open"]);
+        assert_eq!(
+            map_of(&mut storage, &with_archive()),
+            vec!["task.open", "task.done"]
+        );
+    }
+
+    /// A filed tile is history, and a reader has to be able to see which
+    /// tiles are.
+    #[test]
+    fn a_filed_task_says_so_and_keeps_the_state_it_settled_in() {
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.done.md",
+            &task("task.done", "closed", &[], ""),
+        )]);
+
+        let node = Notebook::new(&mut storage)
+            .graph(&with_archive())
+            .unwrap()
+            .nodes
+            .pop()
+            .unwrap();
+        assert!(node.archived);
+        assert_eq!(node.state, "closed");
+    }
+
+    /// An interrupted archive move leaves one id claiming two files. The
+    /// map draws one tile for it, the live file's, as every other query
+    /// reads it.
+    #[test]
+    fn an_id_claiming_two_files_is_one_tile_and_the_live_one_wins() {
+        let mut storage = storage_with(&[
+            ("tasks/task.torn.md", &task("task.torn", "active", &[], "")),
+            (
+                "archive/tasks/task.torn.md",
+                &task("task.torn", "closed", &[], ""),
+            ),
+        ]);
+
+        let nodes = Notebook::new(&mut storage)
+            .graph(&with_archive())
+            .unwrap()
+            .nodes;
+        assert_eq!(nodes.len(), 1, "one id is one tile: {nodes:?}");
+        assert_eq!(nodes[0].state, "active");
+        assert!(!nodes[0].archived);
+    }
+
+    /// A record its own findings exclude is out of every derived query, and
+    /// a map that dropped it would be the one surface where a reader could
+    /// not see that something is wrong.
+    #[test]
+    fn an_invalid_task_keeps_its_tile_and_says_it_is_invalid() {
+        let mut storage =
+            storage_with(&[("tasks/task.demo.md", &task("task.demo", "bogus", &[], ""))]);
+
+        let node = Notebook::new(&mut storage)
+            .graph(&whole())
+            .unwrap()
+            .nodes
+            .pop()
+            .unwrap();
+        assert_eq!(node.state, "invalid");
+    }
+
+    /// The epic branch: the hub, what it waits on however far down that
+    /// goes, and what was born inside it — the closed children included,
+    /// since the hub's counter is over all of them.
+    #[test]
+    fn the_epic_branch_holds_the_hub_its_children_and_the_closed_ones() {
+        let mut storage = an_epic();
+        let branch = GraphSlice {
+            hub: Some("task.hub".to_owned()),
+            ..with_archive()
+        };
+
+        let mut drawn = map_of(&mut storage, &branch);
+        drawn.sort();
+        assert_eq!(drawn, vec!["task.done", "task.hub", "task.open"]);
+        assert!(
+            !drawn.contains(&"task.outside".to_owned()),
+            "a Task the epic never reached is another epic's"
+        );
+    }
+
+    /// Narrowing changes what a map shows, never what it counts: a hub's
+    /// progress is settled against the whole notebook, so leaving the
+    /// closed children off the picture does not undo them.
+    #[test]
+    fn a_hub_counts_children_the_slice_left_off_the_map() {
+        let mut storage = an_epic();
+        let nodes = Notebook::new(&mut storage)
+            .graph(&inside("task.hub"))
+            .unwrap()
+            .nodes;
+
+        assert_eq!(
+            nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["task.hub", "task.open"],
+            "the closed child is filed, and the archive was not asked for"
+        );
+        let hub = nodes.iter().find(|node| node.id == "task.hub").unwrap();
+        let epic = hub.epic.as_ref().expect("the hub is an epic");
+        assert_eq!((epic.closed, epic.total), (1, 2));
+        assert!(
+            nodes
+                .iter()
+                .filter(|node| node.id != "task.hub")
+                .all(|node| node.epic.is_none()),
+            "a plain Task carries no counter"
+        );
+    }
+
+    #[test]
+    fn the_ready_lens_holds_what_can_be_started_now() {
+        let mut storage = an_epic();
+        let ready = GraphSlice {
+            ready_only: true,
+            ..GraphSlice::default()
+        };
+        assert_eq!(
+            map_of(&mut storage, &ready),
+            vec!["task.open", "task.outside"],
+            "a hub waiting on a live child is not dispatchable, and a closed Task is done"
+        );
+    }
+
+    /// Every narrowing is a predicate over the same notebook, so asking for
+    /// two asks for the intersection.
+    #[test]
+    fn the_ready_lens_narrows_inside_an_epic_branch() {
+        let mut storage = an_epic();
+        let ready_inside = GraphSlice {
+            ready_only: true,
+            ..inside("task.hub")
+        };
+        assert_eq!(map_of(&mut storage, &ready_inside), vec!["task.open"]);
+    }
+
+    /// A line has to land on a tile, so an edge whose far end the slice
+    /// left off the map is not one.
+    #[test]
+    fn an_edge_off_the_map_is_not_drawn() {
+        let mut storage = an_epic();
+        let ready = GraphSlice {
+            ready_only: true,
+            ..GraphSlice::default()
+        };
+        let graph = Notebook::new(&mut storage).graph(&ready).unwrap();
+        assert_eq!(
+            graph.edges().len(),
+            0,
+            "the ready lens holds only what waits on nothing live"
+        );
+    }
+
+    /// A reader learns two strokes once: what a Task waits on, and what it
+    /// was born from. Both run the way work becomes possible — out of what
+    /// settles first, into what the settling releases.
+    #[test]
+    fn the_two_edges_a_record_declares_are_told_apart_and_run_one_way() {
+        let mut storage = an_epic();
+        let graph = Notebook::new(&mut storage)
+            .graph(&inside("task.hub"))
+            .unwrap();
+
+        let drawn: Vec<(&str, &str, EdgeKind)> = graph
+            .edges()
+            .iter()
+            .map(|edge| (edge.from, edge.to, edge.kind))
+            .collect();
+        assert!(drawn.contains(&("task.open", "task.hub", EdgeKind::BlockedBy)));
+        assert!(drawn.contains(&("task.hub", "task.open", EdgeKind::Origin)));
+    }
+
+    /// A web reads by weight, and weight is how much of the slice meets at
+    /// a tile.
+    #[test]
+    fn a_tile_carries_how_many_lines_meet_at_it() {
+        let mut storage = an_epic();
+        let graph = Notebook::new(&mut storage)
+            .graph(&inside("task.hub"))
+            .unwrap();
+
+        let degrees = graph.degrees();
+        assert_eq!(degrees.get("task.hub"), Some(&2));
+        assert_eq!(degrees.get("task.open"), Some(&2));
+    }
+
+    #[test]
+    fn a_hub_the_notebook_does_not_hold_is_refused() {
+        let mut storage = an_epic();
+        assert!(matches!(
+            Notebook::new(&mut storage).graph(&inside("task.absent")),
+            Err(NotebookError::UnknownId { .. })
+        ));
+    }
+
+    /// The focus is what lets a map answer for a notebook of thousands:
+    /// one record, and the graph reaching out from it as far as asked.
+    #[test]
+    fn a_focus_holds_what_reaches_the_record_within_the_depth_asked_for() {
+        let mut storage = a_chain();
+
+        assert_eq!(
+            map_of(&mut storage, &around("task.c", 1)),
+            vec!["task.b", "task.c", "task.d"]
+        );
+        assert_eq!(
+            map_of(&mut storage, &around("task.c", 2)),
+            vec!["task.a", "task.b", "task.c", "task.d", "task.e"]
+        );
+    }
+
+    /// A focus asks what has to settle before a Task and what its settling
+    /// releases. Another Task hanging off the same blocker answers neither.
+    #[test]
+    fn a_focus_walks_the_line_of_work_and_not_across_it() {
+        let mut storage = a_chain();
+        assert!(
+            !map_of(&mut storage, &around("task.b", 2)).contains(&"task.sibling".to_owned()),
+            "a Task waiting on the same blocker is beside this line of work, not on it"
+        );
+    }
+
+    /// A depth of nothing is the record alone, which is the honest answer
+    /// to asking for no hops.
+    #[test]
+    fn a_focus_with_no_depth_is_the_record_alone() {
+        let mut storage = a_chain();
+        assert_eq!(map_of(&mut storage, &around("task.c", 0)), vec!["task.c"]);
+    }
+
+    /// A focus and another narrowing are two predicates over one notebook.
+    #[test]
+    fn a_focus_narrows_with_the_lens_beside_it() {
+        let mut storage = a_chain();
+        let ready_around = GraphSlice {
+            ready_only: true,
+            ..around("task.c", 2)
+        };
+        assert_eq!(
+            map_of(&mut storage, &ready_around),
+            vec!["task.a"],
+            "only the head of the chain waits on nothing"
+        );
+    }
+
+    #[test]
+    fn a_focus_the_notebook_does_not_hold_is_refused() {
+        let mut storage = a_chain();
+        assert!(matches!(
+            Notebook::new(&mut storage).graph(&around("task.absent", 1)),
+            Err(NotebookError::UnknownId { .. })
+        ));
+    }
+
+    /// A focus the slice itself leaves off the map would answer an empty
+    /// picture, which reads exactly like a notebook with nothing in it. The
+    /// refusal names the flag that puts the record back.
+    #[test]
+    fn a_focus_on_filed_work_names_the_flag_that_draws_it() {
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.done.md",
+            &task("task.done", "closed", &[], ""),
+        )]);
+
+        let refused = Notebook::new(&mut storage)
+            .graph(&around("task.done", 1))
+            .expect_err("a focus off its own map draws nothing");
+
+        let NotebookError::InvalidArgument { reason } = &refused else {
+            panic!("a focus off the map is a refused argument: {refused:?}")
+        };
+        assert!(reason.contains("--archive"), "{reason}");
+    }
+
+    /// Only Tasks get tiles, so a focus on anything else asks for a graph
+    /// the map does not draw.
+    #[test]
+    fn a_focus_on_a_record_that_is_no_task_is_refused() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.rule.md",
+            &record_file("decision.rule", "decision", "active", &["kind: rule"], ""),
+        )]);
+
+        assert!(matches!(
+            Notebook::new(&mut storage).graph(&around("decision.rule", 1)),
+            Err(NotebookError::InvalidArgument { .. })
+        ));
+    }
+
+    /// A hub with one child open and one closed and filed, plus a Task the
+    /// epic never reached.
+    fn an_epic() -> MemoryStorage {
+        storage_with(&[
+            (
+                "tasks/task.hub.md",
+                &task(
+                    "task.hub",
+                    "open",
+                    &["blocked-by: task.open", "blocked-by: task.done"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.open.md",
+                &task("task.open", "open", &["from: task.hub"], ""),
+            ),
+            (
+                "archive/tasks/task.done.md",
+                &task("task.done", "closed", &["from: task.hub"], ""),
+            ),
+            (
+                "tasks/task.outside.md",
+                &task("task.outside", "open", &[], ""),
+            ),
+        ])
+    }
+
+    /// A line of work four deep, a Task hanging off the same blocker as the
+    /// second link, and one the chain never touches.
+    fn a_chain() -> MemoryStorage {
+        storage_with(&[
+            ("tasks/task.a.md", &task("task.a", "open", &[], "")),
+            (
+                "tasks/task.b.md",
+                &task("task.b", "open", &["blocked-by: task.a"], ""),
+            ),
+            (
+                "tasks/task.c.md",
+                &task("task.c", "open", &["blocked-by: task.b"], ""),
+            ),
+            (
+                "tasks/task.d.md",
+                &task("task.d", "open", &["blocked-by: task.c"], ""),
+            ),
+            (
+                "tasks/task.e.md",
+                &task("task.e", "open", &["blocked-by: task.d"], ""),
+            ),
+            (
+                "tasks/task.sibling.md",
+                &task("task.sibling", "open", &["blocked-by: task.a"], ""),
+            ),
+        ])
+    }
+}

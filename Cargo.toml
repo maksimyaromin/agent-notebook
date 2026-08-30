@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/anb-core", "crates/anb"]
+members = ["crates/anb-core", "crates/anb-graph", "crates/anb"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ rust-version = "1.98"
 
 [workspace.dependencies]
 anb-core = { path = "crates/anb-core" }
+anb-graph = { path = "crates/anb-graph" }
 clap = { version = "4.6", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "suggestions"] }
 jiff = "0.2"
 # preserve_order lands reply keys in insertion order, so `ok` leads every object.

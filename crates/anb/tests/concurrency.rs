@@ -16,11 +16,14 @@ fn anb(root: &Path, line: &[&str]) -> std::process::Output {
 
 /// `HOME` is pointed at the notebook's own root: a Status reads the user's
 /// notebook behind the project's, and the developer's own must not decide
-/// what a case proves.
+/// what a case proves. The run stands beside the notebook rather than in
+/// the crate, so a verb that emits an artifact beside its caller leaves it
+/// in the case's own directory.
 fn spawn(root: &Path, line: &[&str]) -> Child {
     Command::new(env!("CARGO_BIN_EXE_anb"))
         .args(["--notebook", root.to_str().unwrap()])
         .args(line)
+        .current_dir(root.parent().unwrap_or(root))
         .env("HOME", root)
         .env_remove("ANB_NOTEBOOK")
         .stdout(Stdio::piped())
@@ -216,6 +219,7 @@ fn the_lock_is_taken_by_every_writing_verb_and_by_no_reading_one() {
         &["check"],
         &["search", "anything"],
         &["overview"],
+        &["graph"],
     ];
     every_verb_is_classified(&writes, &reads);
 
