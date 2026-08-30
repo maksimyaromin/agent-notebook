@@ -46,7 +46,7 @@ fn emitted(stream: &mut impl Write, payload: &str, exit: ExitCode) -> ExitCode {
 /// An unknown verb joins the recovery-payload contract; everything else
 /// clap refuses (or serves, like `--help`) keeps clap's rendering.
 fn parse_refused(error: &clap::Error) -> ExitCode {
-    let Some(recovery) = anb::cli::unknown_command_recovery(error) else {
+    let Some(recovery) = anb::recovery::unknown_command_recovery(error) else {
         error.exit();
     };
     // The command line failed to parse, so the `--json` flag is read raw —
@@ -62,7 +62,7 @@ fn parse_refused(error: &clap::Error) -> ExitCode {
 /// `Ok` is stdout with the reply's exit; `Err` is the rendered recovery
 /// payload for stderr.
 fn run(cli: Cli) -> Result<(String, ExitCode), String> {
-    let subject = anb::cli::subject(&cli.command);
+    let subject = anb::recovery::subject(&cli.command);
     let hook = matches!(cli.command, Command::Status { hook: true, .. });
     let render_failure = |error: &NotebookError| {
         if cli.json {

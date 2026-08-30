@@ -4,8 +4,6 @@
 //! Core, so their refusals arrive as structured recovery payloads; clap
 //! keeps only the structural surface — positionals and flag spelling.
 
-use crate::reply::Recovery;
-use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -137,86 +135,6 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-}
-
-/// The recovery payload for a verb clap does not know — an agent typing an
-/// unknown or not-yet-built command gets a next step, not raw usage. `None`
-/// for everything else clap refuses (or serves, like `--help`), which keeps
-/// clap's rendering.
-#[must_use]
-pub fn unknown_command_recovery(error: &clap::Error) -> Option<Recovery> {
-    if error.kind() != ErrorKind::InvalidSubcommand {
-        return None;
-    }
-    let verb = context_strings(error, ContextKind::InvalidSubcommand)
-        .into_iter()
-        .next()
-        .unwrap_or_default();
-    // `--help` keeps every suggestion runnable whatever arguments the
-    // suggested verb requires.
-    let mut tries: Vec<String> = context_strings(error, ContextKind::SuggestedSubcommand)
-        .into_iter()
-        .map(|nearest| format!("anb {nearest} --help"))
-        .collect();
-    tries.push("anb --help".to_owned());
-    Some(Recovery {
-        code: "unknown-command",
-        message: format!("`{verb}` is not an anb command"),
-        details: Vec::new(),
-        tries,
-    })
-}
-
-/// The strings clap recorded under `kind`, however it wrapped them.
-fn context_strings(error: &clap::Error, kind: ContextKind) -> Vec<String> {
-    match error.get(kind) {
-        Some(ContextValue::String(value)) => vec![value.clone()],
-        Some(ContextValue::Strings(values)) => values.clone(),
-        _ => Vec::new(),
-    }
-}
-
-/// What a refusal can point back at: the verb and the record it named.
-pub struct Subject {
-    pub verb: &'static str,
-    pub id: Option<String>,
-}
-
-/// The command's subject, taken before dispatch consumes the command.
-#[must_use]
-pub fn subject(command: &Command) -> Subject {
-    let (verb, id) = match command {
-        Command::Add(_) => ("add", None),
-        Command::Start { id } => ("start", Some(id)),
-        Command::Submit { id } => ("submit", Some(id)),
-        Command::Close(args) => ("close", Some(&args.id)),
-        Command::Return { id } => ("return", Some(id)),
-        Command::Reopen { id } => ("reopen", Some(id)),
-        Command::Hold { id, .. } => ("hold", Some(id)),
-        Command::Unhold { id } => ("unhold", Some(id)),
-        Command::Block { id, .. } => ("block", Some(id)),
-        Command::Unblock { id, .. } => ("unblock", Some(id)),
-        Command::Comment { id, .. } => ("comment", Some(id)),
-        Command::Decide(_) => ("decide", None),
-        Command::Note(_) => ("note", None),
-        Command::Ask(_) => ("ask", None),
-        Command::Answer { id, .. } => ("answer", Some(id)),
-        Command::Retire { id } => ("retire", Some(id)),
-        Command::View { id } => ("view", Some(id)),
-        Command::Ready { .. } => ("ready", None),
-        Command::List { .. } => ("list", None),
-        Command::Status { .. } => ("status", None),
-        Command::Check { .. } => ("check", None),
-        Command::Archive { id } => ("archive", Some(id)),
-        Command::Expunge { id } => ("expunge", Some(id)),
-        Command::Edit(args) => ("edit", Some(&args.id)),
-        Command::Search { .. } => ("search", None),
-        Command::Overview { .. } => ("overview", None),
-    };
-    Subject {
-        verb,
-        id: id.cloned(),
-    }
 }
 
 /// The envelope flags every create shares; each command adds its type's

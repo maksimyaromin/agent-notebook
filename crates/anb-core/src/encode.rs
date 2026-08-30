@@ -3,7 +3,7 @@
 //! value differently.
 
 use crate::grammar;
-use crate::notebook::ReadyTask;
+use crate::reply::ReadyTask;
 use std::fmt::Write as _;
 
 /// How many rows a reply carries before it names the rest as a count.

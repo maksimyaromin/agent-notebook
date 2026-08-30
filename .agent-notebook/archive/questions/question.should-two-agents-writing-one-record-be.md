@@ -1,10 +1,11 @@
 ---
 id: question.should-two-agents-writing-one-record-be
 type: question
-state: open
+state: routed
 title: Should two agents writing one record be serialized?
 by: Maksim Yaromin
 via: claude-code
+routed-to: decision.concurrent-mutations-serialize-on-a
 created: 2026-08-30
 updated: 2026-08-30
 ---

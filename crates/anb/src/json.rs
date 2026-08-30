@@ -2,8 +2,8 @@
 //! the same kebab-case vocabulary, for a caller confirming effects
 //! programmatically. Pretty JSON is never emitted.
 
-use crate::cli::Subject;
-use crate::reply::{Recovery, Reply, shown};
+use crate::recovery::{Recovery, Subject};
+use crate::reply::{Reply, shown};
 use anb_core::{
     Cited, Counts, DebtSignal, FileFinding, Held, ListedRecord, NotebookError, Overview, ReadyTask,
     SECTION_ROWS, Status, View, debt_classes,

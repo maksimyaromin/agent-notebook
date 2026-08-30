@@ -803,10 +803,22 @@ fn tag_list_error(value: &str) -> Option<String> {
 }
 
 fn link_error(value: &str) -> Option<String> {
-    let well_formed = value
-        .split_once(char::is_whitespace)
-        .is_some_and(|(kind, target)| is_token(kind) && !target.trim().is_empty());
+    let well_formed = split_link(value).is_some_and(|(kind, target)| is_link(kind, target));
     (!well_formed).then(|| format!("`{value}` is not `<kind> <target>`"))
+}
+
+/// A link line split into its kind and its target: a token, then the rest
+/// of the line.
+pub(crate) fn split_link(link: &str) -> Option<(&str, &str)> {
+    let (kind, target) = link.split_once(char::is_whitespace)?;
+    Some((kind, target.trim()))
+}
+
+/// Whether a split link is well formed. The halves are judged apart from
+/// the line they came from, so a caller holding them already — a draft's
+/// `--link` — asks the same question the field table asks.
+pub(crate) fn is_link(kind: &str, target: &str) -> bool {
+    is_token(kind) && !target.trim().is_empty()
 }
 
 pub(crate) fn date_error(value: &str) -> Option<String> {

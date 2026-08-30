@@ -1,0 +1,548 @@
+//! The folds a verb derives its answer from: the listing and dispatch
+//! rows, the membership edges, the consequences a close or an expunge must
+//! not bury.
+//!
+//! Nothing here reaches Storage — a fold runs over a corpus the Notebook
+//! handed it, which is what keeps a verb to one pass over the notebook.
+
+use crate::debt;
+use crate::finding::Finding;
+use crate::grammar::{self, Residence};
+use crate::graph::{TaskGraph, TaskNode};
+use crate::mention;
+use crate::record::{REF_KEYS, Record, RecordType, TaskState, linked_record};
+use crate::reply::{Blocker, Cited, CitedProof, Counts, Epic, ListedRecord, ReadyTask};
+use crate::request::Draft;
+use crate::resolve::{Resolver, is_archived, path_stem, type_of};
+use crate::status::{ActiveTask, StatusRule};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Every proof these records cite that names something outside the
+/// notebook — a commit, or a file — so the host can ask git and the
+/// filesystem which of them are still there. A link naming another record
+/// resolves inside the notebook and is `check`'s to judge, not the world's.
+pub(super) fn cited_proofs(records: &[Record]) -> Vec<CitedProof> {
+    records
+        .iter()
+        .flat_map(|record| {
+            let id = path_stem(record.path());
+            record.file().field_values("link").filter_map(move |link| {
+                let (kind, target) = grammar::split_link(link)?;
+                ["sha", "report"].contains(&kind).then(|| CitedProof {
+                    record: id.to_owned(),
+                    kind: kind.to_owned(),
+                    target: target.to_owned(),
+                })
+            })
+        })
+        .collect()
+}
+
+/// The Notes a record links, each once, in the order it names them. A
+/// target that is not a Note id names no record — a link is free text
+/// until the grammar says otherwise, and nothing may turn one into a path.
+pub(super) fn note_links(record: &Record) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    record
+        .file()
+        .field_values("link")
+        .filter_map(|link| match grammar::split_link(link)? {
+            ("note", target) => Some(target.to_owned()),
+            _ => None,
+        })
+        .filter(|target| type_of(target) == Some(RecordType::Note))
+        .filter(|target| seen.insert(target.clone()))
+        .collect()
+}
+
+/// The order records were laid down: `created`, then id.
+fn oldest_first(left: &Record, right: &Record) -> std::cmp::Ordering {
+    created(left)
+        .cmp(created(right))
+        .then_with(|| path_stem(left.path()).cmp(path_stem(right.path())))
+}
+
+fn created(record: &Record) -> &str {
+    record.file().field("created").unwrap_or_default()
+}
+
+/// The standing Decisions among `records` that a draft may conflict with.
+/// Computed at write time because the writing agent, holding full context,
+/// is the cheapest judge that will ever see the pair; the tool prints it
+/// and stops.
+pub(super) fn conflict_candidates(
+    draft: &Draft,
+    records: &[Record],
+    resolvable: &Resolver<'_>,
+) -> Vec<Cited> {
+    if draft.record_type != RecordType::Decision || draft.supersedes.is_some() {
+        return Vec::new();
+    }
+    let draft_tags: BTreeSet<&str> = draft.tags.iter().map(String::as_str).collect();
+    let cited_ids = mention::mentions(&draft.body);
+    let mut hits: Vec<&Record> = records
+        .iter()
+        .filter(|record| {
+            is_standing_decision(record, resolvable)
+                && looks_related(record, &draft_tags, &cited_ids)
+        })
+        .collect();
+    hits.sort_by(|left, right| oldest_first(left, right));
+    hits.into_iter().map(Cited::of).collect()
+}
+fn is_standing_decision(record: &Record, resolvable: &Resolver<'_>) -> bool {
+    record.record_type() == Some(RecordType::Decision)
+        && !is_archived(record.path())
+        && record.is_live()
+        && !debt::is_excluded(record, resolvable)
+}
+fn looks_related(record: &Record, draft_tags: &BTreeSet<&str>, cited_ids: &[&str]) -> bool {
+    shared_tag_count(record, draft_tags) >= 2 || cited_ids.contains(&path_stem(record.path()))
+}
+fn shared_tag_count(record: &Record, draft_tags: &BTreeSet<&str>) -> usize {
+    let Some(tags) = record.file().field("tags") else {
+        return 0;
+    };
+    tags.split(',')
+        .map(str::trim)
+        .collect::<BTreeSet<&str>>()
+        .intersection(draft_tags)
+        .count()
+}
+
+/// The records this one names as a blocker or as its Origin: the edges a
+/// scope walk follows, from the end that carries them.
+pub(super) fn kin_of(record: &Record) -> impl Iterator<Item = &str> {
+    record
+        .file()
+        .field_values("blocked-by")
+        .chain(record.origin())
+}
+
+pub(super) fn edge_exists(record: &Record, target: &str) -> bool {
+    record
+        .file()
+        .field_values("blocked-by")
+        .any(|value| value == target)
+}
+
+/// An error finding sitting on one of the record's own `blocked-by` lines:
+/// the class `unblock` exists to erase.
+pub(super) fn edge_borne(record: &Record, finding: &Finding) -> bool {
+    finding.line.is_some()
+        && record
+            .file()
+            .field_entries("blocked-by")
+            .any(|(_, line)| line == finding.line)
+}
+
+/// The same edges [`task_edges`] draws, each node carrying whether its
+/// Task has closed — the flag the ready gate and the unblock consequences
+/// read, and the reason this owns its ids rather than borrowing them.
+fn task_graph(records: &[Record]) -> TaskGraph {
+    let mut nodes = BTreeMap::new();
+    for record in records {
+        if record.record_type() != Some(RecordType::Task) {
+            continue;
+        }
+        let blocked_by = record.blocked_by().map(str::to_owned).collect();
+        nodes
+            .entry(path_stem(record.path()).to_owned())
+            .or_insert(TaskNode {
+                closed: record.state() == Some("closed"),
+                blocked_by,
+            });
+    }
+    TaskGraph::new(nodes)
+}
+
+pub(super) fn listed_row(record: &Record, resolvable: &Resolver<'_>) -> ListedRecord {
+    let file = record.file();
+    let state = if debt::is_excluded(record, resolvable) {
+        "invalid".to_owned()
+    } else {
+        record.state().unwrap_or_default().to_owned()
+    };
+    ListedRecord {
+        id: path_stem(record.path()).to_owned(),
+        state,
+        priority: file.field("priority").and_then(|value| value.parse().ok()),
+        title: file.field("title").map(str::to_owned),
+    }
+}
+
+pub(super) fn matches_query(record: &Record, needle: &str) -> bool {
+    let file = record.file();
+    [
+        Some(path_stem(record.path())),
+        file.field("title"),
+        file.field("tags"),
+        Some(file.body()),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|surface| surface.to_lowercase().contains(needle))
+}
+
+/// Whether the record's file sits in `record_type`'s live or archive
+/// directory — residence, the axis a reader browsing the tree sees.
+pub(super) fn sits_in(record: &Record, record_type: RecordType, home: Residence) -> bool {
+    grammar::residence(record.path(), record_type.word()) == Some(home)
+}
+
+/// The dispatch queue's rows: live, open, valid, unblocked, unheld Tasks
+/// in ready order.
+pub(super) fn ready_rows(records: &[Record], resolvable: &Resolver<'_>) -> Vec<ReadyTask> {
+    let graph = task_graph(records);
+    let keep =
+        |record: &Record| record.hold().is_none() && !graph.is_blocked(path_stem(record.path()));
+    open_rows(records, resolvable, keep)
+}
+
+/// The open Tasks a close of `id` released, in ready order: their last live
+/// blocker was that Task. A held one is named too — the hold gates
+/// `ready`, not the fact.
+pub(super) fn unblocked_by_close(
+    records: &[Record],
+    resolvable: &Resolver<'_>,
+    id: &str,
+) -> Vec<String> {
+    let freed = task_graph(records).unblocked_by(id);
+    let keep = |record: &Record| {
+        freed
+            .iter()
+            .any(|freed_id| freed_id == path_stem(record.path()))
+    };
+    open_rows(records, resolvable, keep)
+        .into_iter()
+        .map(|row| row.id)
+        .collect()
+}
+
+/// The live, open, valid Tasks passing `keep`, in ready order.
+fn ready_row(record: &Record) -> ReadyTask {
+    let file = record.file();
+    ReadyTask {
+        id: path_stem(record.path()).to_owned(),
+        priority: file.field("priority").and_then(|value| value.parse().ok()),
+        created: file.field("created").unwrap_or_default().to_owned(),
+        title: file.field("title").unwrap_or_default().to_owned(),
+    }
+}
+
+/// Ready order: the most urgent priority first (0 is the most urgent; none
+/// ranks at the neutral middle — priority is an override, not a promotion
+/// over the untriaged), then oldest first, then id. The ISO date orders as
+/// text.
+fn ready_rank(row: &ReadyTask) -> (u8, &str, &str) {
+    (row.priority.unwrap_or(2), &row.created, &row.id)
+}
+
+fn open_rows(
+    records: &[Record],
+    resolvable: &Resolver<'_>,
+    keep: impl Fn(&Record) -> bool,
+) -> Vec<ReadyTask> {
+    let mut rows: Vec<ReadyTask> = records
+        .iter()
+        .filter(|record| {
+            record.record_type() == Some(RecordType::Task)
+                && !is_archived(record.path())
+                && record.state() == Some("open")
+                && keep(record)
+                && !debt::is_excluded(record, resolvable)
+        })
+        .map(ready_row)
+        .collect();
+    rows.sort_by(|left, right| ready_rank(left).cmp(&ready_rank(right)));
+    rows
+}
+
+/// The membership edges of the notebook, indexed once. Both are read from
+/// one end and followed from the other, so answering them by scanning every
+/// record per hub would cost the notebook squared.
+pub(super) struct MembershipIndex<'a> {
+    /// What each record waits on, by id.
+    waits_on: BTreeMap<&'a str, Vec<&'a str>>,
+    /// What was born inside each record, by the origin's id.
+    born_inside: BTreeMap<&'a str, Vec<&'a str>>,
+    /// The ids of the Tasks that have closed.
+    closed: BTreeSet<&'a str>,
+}
+
+impl<'a> MembershipIndex<'a> {
+    pub(super) fn of(live: &'a [Record], archived: &'a [Record]) -> Self {
+        let mut index = MembershipIndex {
+            waits_on: BTreeMap::new(),
+            born_inside: BTreeMap::new(),
+            closed: BTreeSet::new(),
+        };
+        // Live before archived, so the duplicate-id corruption an
+        // interrupted archive move leaves reads as the live file's edges
+        // and not as the union of two.
+        for record in live.iter().chain(archived) {
+            let id = path_stem(record.path());
+            let waits: Vec<&str> = record.file().field_values("blocked-by").collect();
+            if !waits.is_empty() {
+                index.waits_on.entry(id).or_insert(waits);
+            }
+            if let Some(origin) = record.origin() {
+                index.born_inside.entry(origin).or_default().push(id);
+            }
+            if record.state() == Some(TaskState::Closed.word()) {
+                index.closed.insert(id);
+            }
+        }
+        index
+    }
+
+    fn edges_from(&self, id: &str) -> impl Iterator<Item = &'a str> + '_ {
+        let waits_on = self.waits_on.get(id).map_or(&[][..], Vec::as_slice);
+        let born_inside = self.born_inside.get(id).map_or(&[][..], Vec::as_slice);
+        waits_on.iter().chain(born_inside).copied()
+    }
+
+    /// An epic is a hub Task, distinguished by its edges: it is blocked by
+    /// at least one record that also carries it as Origin — one edge
+    /// written from each end. The pairing is the discriminator. A Task
+    /// blocked by a plain dependency did not give birth to it, and a Task
+    /// that spawned a Question does not wait on it, so neither becomes an
+    /// epic by accident.
+    ///
+    /// A hub that no longer binds is not an epic in flight: its acceptance
+    /// close has happened, and a dashboard that still asked for it would be
+    /// asking for work already done.
+    fn is_hub(&self, record: &Record, resolvable: &Resolver<'_>) -> bool {
+        if record.record_type() != Some(RecordType::Task)
+            || !record.is_live()
+            || is_archived(record.path())
+            || debt::is_excluded(record, resolvable)
+        {
+            return false;
+        }
+        let hub = path_stem(record.path());
+        let children = self.born_inside.get(hub).map_or(&[][..], Vec::as_slice);
+        self.waits_on
+            .get(hub)
+            .is_some_and(|waits| waits.iter().any(|target| children.contains(target)))
+    }
+
+    /// Every record inside `hub`'s scope, the hub among them: what the epic
+    /// waits on, and what was born inside it, each followed as far as it
+    /// goes.
+    ///
+    /// Both edges mean membership, written from opposite ends, and both
+    /// carry through depth. A blocker of a child must close before the
+    /// child, which must close before the hub, so it is work this epic
+    /// waits on however far down it sits — and following it only to the
+    /// first tier would blind the queue to a hub whose children were
+    /// themselves assembled from the hub side, which is how an epic older
+    /// than the edit surface is built.
+    pub(super) fn scope_of(&self, hub: &'a str) -> BTreeSet<&'a str> {
+        let mut scope = BTreeSet::from([hub]);
+        let mut frontier = vec![hub];
+        while let Some(id) = frontier.pop() {
+            for reached in self.edges_from(id) {
+                if scope.insert(reached) {
+                    frontier.push(reached);
+                }
+            }
+        }
+        scope
+    }
+}
+
+/// The hubs and where each stands, in notebook order. Progress counts the
+/// hub's own `blocked-by` children, which are its statement of what it
+/// waits on, while `next` reads the whole scope, since anything the epic
+/// waits on is work it still owes. A hub never nominates itself: one that
+/// reaches `ready` is asking for its acceptance close, not for work.
+pub(super) fn epic_rows(
+    records: &[Record],
+    archived: &[Record],
+    resolvable: &Resolver<'_>,
+    queue: &[ReadyTask],
+) -> Vec<Epic> {
+    let index = MembershipIndex::of(records, archived);
+    records
+        .iter()
+        .filter(|record| index.is_hub(record, resolvable))
+        .map(|hub| {
+            let id = path_stem(hub.path());
+            let children: Vec<&str> = hub.file().field_values("blocked-by").collect();
+            let scope = index.scope_of(id);
+            Epic {
+                id: id.to_owned(),
+                closed: children
+                    .iter()
+                    .filter(|child| index.closed.contains(*child))
+                    .count(),
+                total: children.len(),
+                next: queue
+                    .iter()
+                    .find(|row| row.id != id && scope.contains(row.id.as_str()))
+                    .map(|row| row.id.clone()),
+            }
+        })
+        .collect()
+}
+
+/// The still-open, valid Questions whose Origin is this Task; an invalid
+/// one is `check`'s to name, as everywhere.
+pub(super) fn open_questions_from(
+    records: &[Record],
+    resolvable: &Resolver<'_>,
+    task_id: &str,
+) -> Vec<String> {
+    records
+        .iter()
+        .filter(|record| {
+            record.record_type() == Some(RecordType::Question)
+                && !is_archived(record.path())
+                && record.origin() == Some(task_id)
+                && record.state() == Some("open")
+                && !debt::is_excluded(record, resolvable)
+        })
+        .map(|record| path_stem(record.path()).to_owned())
+        .collect()
+}
+
+pub(super) fn live_counts(records: &[Record]) -> Counts {
+    let of = |record_type| {
+        records
+            .iter()
+            .filter(|record| {
+                !is_archived(record.path()) && record.record_type() == Some(record_type)
+            })
+            .count()
+    };
+    Counts {
+        tasks: of(RecordType::Task),
+        decisions: of(RecordType::Decision),
+        notes: of(RecordType::Note),
+        questions: of(RecordType::Question),
+    }
+}
+
+/// The active Tasks, the most recently touched first: the dashboard's
+/// in-flight lines, the first carrying the last log line — the mechanical
+/// "where I stopped".
+pub(super) fn in_flight_tasks(live_valid: &[&Record]) -> Vec<ActiveTask> {
+    let mut active: Vec<&Record> = live_valid
+        .iter()
+        .copied()
+        .filter(|record| {
+            record.record_type() == Some(RecordType::Task) && record.state() == Some("active")
+        })
+        .collect();
+    active.sort_by(|left, right| {
+        touched(right)
+            .cmp(touched(left))
+            .then_with(|| path_stem(left.path()).cmp(path_stem(right.path())))
+    });
+    active
+        .iter()
+        .enumerate()
+        .map(|(position, record)| ActiveTask {
+            id: path_stem(record.path()).to_owned(),
+            title: record.file().field("title").unwrap_or_default().to_owned(),
+            log: (position == 0).then(|| last_log_line(record)).flatten(),
+        })
+        .collect()
+}
+
+/// The last non-empty body line; the log convention makes it meaningful,
+/// nothing parses it.
+pub(super) fn last_log_line(record: &Record) -> Option<String> {
+    record
+        .file()
+        .body()
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(str::to_owned)
+}
+
+/// The Tasks waiting on a human for acceptance.
+pub(super) fn review_tasks(live_valid: &[&Record]) -> Vec<String> {
+    let mut ids: Vec<String> = live_valid
+        .iter()
+        .filter(|record| {
+            record.record_type() == Some(RecordType::Task) && record.state() == Some("review")
+        })
+        .map(|record| path_stem(record.path()).to_owned())
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// When the record last moved: `updated`, else `created` — the same proxy
+/// the Debt clocks subtract from.
+fn touched(record: &Record) -> &str {
+    let file = record.file();
+    file.field("updated")
+        .or_else(|| file.field("created"))
+        .unwrap_or_default()
+}
+
+/// The standing rules: live Decisions of kind `rule`, oldest first —
+/// the order they were laid down.
+pub(super) fn standing_rules(live_valid: &[&Record]) -> Vec<StatusRule> {
+    let mut rules: Vec<&Record> = live_valid
+        .iter()
+        .copied()
+        .filter(|record| {
+            record.record_type() == Some(RecordType::Decision)
+                && record.is_live()
+                && record.file().field("kind") == Some("rule")
+        })
+        .collect();
+    rules.sort_by(|left, right| oldest_first(left, right));
+    rules
+        .iter()
+        .map(|record| StatusRule {
+            id: path_stem(record.path()).to_owned(),
+            title: record.file().field("title").unwrap_or_default().to_owned(),
+        })
+        .collect()
+}
+
+/// Every edge pointing at `target` from somewhere else, in file order.
+///
+/// An envelope key and a body citation both count, and an invalid record's
+/// edges count too: what makes an edge a blocker is that removing the
+/// target would leave it pointing at nothing, and a file the tool refuses
+/// to mutate is the worst place to leave that. The target's own edges are
+/// not blockers — they leave with it.
+pub(super) fn inbound_edges(records: &[Record], target: &str) -> Vec<Blocker> {
+    let mut blockers = Vec::new();
+    for record in records {
+        let carrier = path_stem(record.path());
+        if carrier == target {
+            continue;
+        }
+        let mut held_by = |through| {
+            blockers.push(Blocker {
+                carrier: carrier.to_owned(),
+                through,
+            });
+        };
+        for key in REF_KEYS {
+            if record.file().field_values(key).any(|value| value == target) {
+                held_by(key);
+            }
+        }
+        if record
+            .file()
+            .field_values("link")
+            .filter_map(linked_record)
+            .any(|linked| linked == target)
+        {
+            held_by("link");
+        }
+        if mention::mentions(record.file().body()).contains(&target) {
+            held_by("body");
+        }
+    }
+    blockers
+}

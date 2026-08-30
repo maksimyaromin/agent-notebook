@@ -16,7 +16,7 @@
 
 use crate::debt::DebtSignal;
 use crate::encode::{self, json_quoted};
-use crate::notebook::{Epic, ReadyTask};
+use crate::reply::{Counts, Epic, ReadyTask};
 use crate::tokens::estimate_tokens;
 use std::fmt::Write as _;
 
@@ -54,15 +54,6 @@ impl Budget {
             Budget::Unbounded => true,
         }
     }
-}
-
-/// Live records per type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Counts {
-    pub tasks: usize,
-    pub decisions: usize,
-    pub notes: usize,
-    pub questions: usize,
 }
 
 /// An active Task on the dashboard: the `in-flight:` line, plus the last

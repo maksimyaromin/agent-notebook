@@ -12,23 +12,29 @@ mod graph;
 mod mention;
 pub mod notebook;
 pub mod record;
+pub mod reply;
+pub mod request;
+mod resolve;
 pub mod status;
 pub mod storage;
 pub mod tokens;
 
 pub use config::Config;
-pub use debt::{Cited, DebtSignal, DebtThresholds};
+pub use debt::{DebtSignal, DebtThresholds};
 pub use finding::{Finding, FindingCode, Severity};
 pub use grammar::RecordFile;
-pub use notebook::{
-    Archived, Blocker, CitedProof, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited,
-    Epic, Expunged, FileFinding, Held, Link, ListedRecord, Notebook, NotebookError, Overview,
-    Proof, ReadyTask, Transitioned, TypeSection, View, carriers_of,
-};
+pub use notebook::{Notebook, NotebookError};
 pub use record::{Record, RecordType, TaskState};
+pub use reply::{
+    Archived, Blocker, Cited, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged,
+    Edited, Epic, Expunged, FileFinding, Held, ListedRecord, Overview, ReadyTask, Transitioned,
+    TypeSection, View, carriers_of,
+};
+pub use request::{Draft, Edit, Link, Proof};
+pub use resolve::path_stem;
 pub use status::{
-    ActiveTask, Budget, Counts, DebtClass, SECTION_ROWS, Status, StatusRule, counts_phrase,
-    debt_classes, epic_line,
+    ActiveTask, Budget, DebtClass, SECTION_ROWS, Status, StatusRule, counts_phrase, debt_classes,
+    epic_line,
 };
 pub use storage::{MemoryStorage, Storage, StorageError};
 pub use tokens::estimate_tokens;
