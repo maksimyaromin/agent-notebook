@@ -1147,12 +1147,9 @@ impl<'a> Notebook<'a> {
     ///
     /// The guard is the whole verb: every inbound edge is named and the
     /// call refuses, since the only alternative to repairing them first is
-    /// a notebook pointing at nothing.
-    ///
-    /// A second call finds nothing and says so: with the record gone there
-    /// is nothing left to tell an expunge already done from an id that
-    /// never existed, and reporting a typo as success would be worse than
-    /// refusing a replay.
+    /// a notebook pointing at nothing. Alone among the verbs it does not
+    /// replay — with the record gone, nothing tells an expunge already
+    /// done from an id that never existed.
     ///
     /// # Errors
     /// [`NotebookError::StillReferenced`] naming every blocker,

@@ -2,17 +2,15 @@
 //! records.
 //!
 //! Only synthesized, uninferable state enters — never prose, never
-//! instructions: counts,
-//! the in-flight Task with its last log line, review Tasks waiting on a
-//! human, standing rules, the ready top rows, where each epic stands, Debt.
-//! The gate keeps a quiet notebook to one line. Under a Budget the sections
-//! degrade in fixed order — ready rows first, then epics to a count, then
-//! Debt to a count, then rules to a count, then the log and review lines —
-//! and the in-flight line is never dropped: at the floor all but the first
-//! collapse to a count, so no notebook, however much it holds in flight,
-//! can make a Status grow without bound.
-//! Every full dashboard ends with the budget line; when something was cut,
-//! it names the cut and carries the command that restores it.
+//! instructions: counts, the in-flight Task with its last log line, review
+//! Tasks waiting on a human, standing rules, the ready top rows, where each
+//! epic stands, Debt. The gate keeps a quiet notebook to one line.
+//!
+//! Over Budget the sections collapse one rung at a time up [`Collapse`],
+//! and the first in-flight line survives every rung: no notebook, however
+//! much it holds in flight, can make a Status grow without bound. Every
+//! dashboard ends with the budget line, which names what was cut and
+//! carries the command that restores it.
 
 use crate::debt::DebtSignal;
 use crate::encode::{self, quoted_line_text};
@@ -133,9 +131,9 @@ enum Collapse {
     Floor,
 }
 
-/// The degradation ladder: each rung buys tokens by collapsing one section,
-/// in the fixed order the module doc states; the floor keeps counts, the
-/// first in-flight line, and the budget line.
+/// The degradation ladder: each rung buys tokens by collapsing one
+/// section, ready rows first and then up [`Collapse`]; the floor keeps
+/// counts, the first in-flight line, and the budget line.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Ladder {
     ready_trimmed: usize,
