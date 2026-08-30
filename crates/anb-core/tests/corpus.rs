@@ -17,7 +17,7 @@
 //!   invalid case must have one.
 //! - `<case>.normalized` — expected canonical form, where one is asserted.
 
-use anb_core::{Finding, Record, RecordFile, Severity};
+use anb_core::{Finding, Record, RecordFile};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -110,10 +110,7 @@ fn every_valid_case_is_accepted_and_round_trips_byte_exact() {
     let root = corpus_dir("valid");
     for path in md_files(&root) {
         let case = load(&path, &root);
-        let rejected = case
-            .findings
-            .iter()
-            .any(|finding| finding.code.severity() == Severity::Error);
+        let rejected = case.findings.iter().any(Finding::is_error);
         assert!(
             !rejected,
             "{}: expected acceptance, got {:?}",
@@ -172,10 +169,7 @@ fn every_invalid_case_is_rejected_with_its_named_findings_and_bytes_untouched() 
             case.rel
         );
 
-        let rejected = case
-            .findings
-            .iter()
-            .any(|finding| finding.code.severity() == Severity::Error);
+        let rejected = case.findings.iter().any(Finding::is_error);
         assert!(
             rejected,
             "{}: an invalid case must carry an error finding",

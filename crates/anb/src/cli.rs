@@ -52,9 +52,19 @@ pub enum Command {
     /// Resume a held Task.
     Unhold { id: String },
     /// Write a dependency edge: this Task waits on another.
-    Block { id: String, on: String },
+    Block {
+        /// The Task that waits.
+        id: String,
+        /// The Task waited on; it closes first.
+        on: String,
+    },
     /// Erase a dependency edge.
-    Unblock { id: String, on: String },
+    Unblock {
+        /// The Task that was waiting.
+        id: String,
+        /// The Task no longer waited on.
+        on: String,
+    },
     /// Append one entry to a Task's log — where the next session resumes.
     Comment {
         id: String,

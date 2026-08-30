@@ -114,9 +114,9 @@ impl Reply {
     #[must_use]
     pub fn failed(&self) -> bool {
         match self {
-            Reply::Checked { findings, .. } => findings
-                .iter()
-                .any(|located| located.finding.code.severity() == anb_core::Severity::Error),
+            Reply::Checked { findings, .. } => {
+                findings.iter().any(|located| located.finding.is_error())
+            }
             _ => false,
         }
     }
@@ -135,6 +135,9 @@ impl Reply {
 #[derive(Clone, Copy)]
 pub struct Host<'a> {
     pub git_by: fn() -> Option<String>,
+    /// Borrowed rather than a plain `fn`, because a caller may need to
+    /// close over where it reads from — the tests hand in a table of
+    /// reports, the shell reads the filesystem.
     pub read_report: &'a dyn Fn(&str) -> Result<String, StorageError>,
     /// Which of the proofs a notebook cites the world no longer holds. The
     /// Core holds neither git nor a filesystem, so the question is asked

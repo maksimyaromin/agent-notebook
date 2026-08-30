@@ -42,10 +42,10 @@ impl std::error::Error for StorageError {}
 /// The object handed to the Core, and the only path to data.
 ///
 /// No command may bypass it: tests feed strings in and assert strings and
-/// returned models out at exactly this seam. Every path is relative to the
-/// notebook root, `/`-separated, never absolute and never carrying a `.` or
-/// `..` component — e.g. `tasks/parser-fences.md`; mapping one onto its
-/// medium is the adapter's job.
+/// returned models out at exactly this seam. The Core passes paths relative
+/// to the notebook root, `/`-separated, never absolute and never carrying a
+/// `.` or `..` component — e.g. `tasks/parser-fences.md`; mapping one onto
+/// its medium is the adapter's job.
 pub trait Storage {
     /// List the paths directly under `dir` (non-recursive), sorted, each
     /// keeping its `dir/` prefix. A missing directory is an empty listing,

@@ -46,11 +46,17 @@ mod status_dashboard {
             let seen = Notebook::new(&mut storage)
                 .status(TODAY, Budget::Unbounded, no_lost_proofs)
                 .unwrap();
-            let lines = seen.in_flight.len() + seen.review.len() + seen.rules.len();
-            assert_eq!(lines, 1, "{case}: a sound record is one line");
+            let named: Vec<&str> = seen
+                .in_flight
+                .iter()
+                .map(|task| task.id.as_str())
+                .chain(seen.review.iter().map(String::as_str))
+                .chain(seen.rules.iter().map(|rule| rule.id.as_str()))
+                .collect();
+            assert_eq!(named, vec![id], "{case}: a sound record is on its line");
 
-            // A reference no record answers is what excludes the record;
-            // its state is untouched, so only the gate can drop the line.
+            // A reference no record answers excludes the record, and its
+            // state is untouched, so only the gate can drop the line.
             let mut broken_lines = extra.to_vec();
             broken_lines.push("from: task.ghost");
             let broken = record_file(id, type_word, state, &broken_lines, "");
@@ -404,74 +410,106 @@ mod debt_signals {
         }
     }
 
-    /// The thresholds a notebook with no config file runs on, read from
-    /// both sides: silent the day before, speaking on the day it is owed.
+    /// Every threshold a notebook with no config file runs on, read from
+    /// both sides: silent the day before it is owed, speaking on the day.
     /// A default quietly shortened passes every one-sided test there is.
+    ///
+    /// `days` is the threshold itself, and the two dates are derived from
+    /// it against `TODAY`, so a row states its rule rather than hiding it
+    /// in two hand-computed calendar dates. Every fixture also holds a
+    /// fresh open `task.origin` — the record a task-born Question needs to
+    /// point at, and silent on every clock itself.
     #[test]
     fn every_default_clock_speaks_on_the_day_it_is_owed_and_not_before() {
-        for (case, path, id, type_word, state, extra, quiet, owed, signal) in [
+        for (case, path, id, type_word, state, extra, days, signal) in [
             (
-                "task-stale at 7",
+                "task-stale",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
                 "active",
                 &[][..],
-                "2026-08-21",
-                "2026-08-20",
+                7,
                 DebtSignal::TaskStale {
                     id: "task.demo".into(),
                     days: 7,
                 },
             ),
             (
-                "question-age at 14",
+                "question-age",
                 "questions/question.demo.md",
                 "question.demo",
                 "question",
                 "open",
                 &[][..],
-                "2026-08-14",
-                "2026-08-13",
+                14,
                 DebtSignal::QuestionAge {
                     id: "question.demo".into(),
                     days: 14,
                 },
             ),
             (
-                "hold-quiet at 14",
+                "question-age-task-born",
+                "questions/question.demo.md",
+                "question.demo",
+                "question",
+                "open",
+                &["from: task.origin"][..],
+                7,
+                DebtSignal::QuestionAge {
+                    id: "question.demo".into(),
+                    days: 7,
+                },
+            ),
+            (
+                "hold-quiet",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
                 "open",
                 &["hold: waiting on the owner"][..],
-                "2026-08-14",
-                "2026-08-13",
+                14,
                 DebtSignal::HoldQuiet {
                     id: "task.demo".into(),
                     days: 14,
                 },
             ),
             (
-                "review-wait at 7",
+                "review-wait",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
                 "review",
                 &[][..],
-                "2026-08-21",
-                "2026-08-20",
+                7,
                 DebtSignal::ReviewWait {
                     id: "task.demo".into(),
                     days: 7,
                 },
             ),
         ] {
-            let mut before = storage_with(&[(path, &aged(id, type_word, state, quiet, extra))]);
+            let origin = (
+                "tasks/task.origin.md",
+                aged("task.origin", "task", "open", TODAY, &[]),
+            );
+            let fixture = |touched: &str| {
+                storage_with(&[
+                    (origin.0, origin.1.as_str()),
+                    (path, &aged(id, type_word, state, touched, extra)),
+                ])
+            };
+            let mut before = fixture(&days_before(days - 1));
             assert_eq!(debt_of(&mut before), vec![], "{case}, the day before");
-            let mut owed_day = storage_with(&[(path, &aged(id, type_word, state, owed, extra))]);
+            let mut owed_day = fixture(&days_before(days));
             assert_eq!(debt_of(&mut owed_day), vec![signal], "{case}, on the day");
         }
+    }
+
+    /// The date `days` before `TODAY`, so a clock's row states its
+    /// threshold instead of a calendar. Every default is under a fortnight,
+    /// so the arithmetic never leaves the month.
+    fn days_before(days: u32) -> String {
+        format!("2026-08-{:02}", 27 - days)
     }
 
     #[test]

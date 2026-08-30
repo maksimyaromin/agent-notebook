@@ -595,6 +595,107 @@ mod epics {
         );
     }
 
+    /// An epic outlives its children: they are filed as they settle, and
+    /// the hub still has to say how far it has come and what is left. The
+    /// progress is the hub's own `blocked-by` line, so a filed child counts
+    /// exactly as a live one does.
+    #[test]
+    fn a_hub_counts_the_children_the_archive_already_holds() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic.md",
+                &record_file(
+                    "task.epic",
+                    "task",
+                    "open",
+                    &["blocked-by: task.done", "blocked-by: task.doing"],
+                    "",
+                ),
+            ),
+            (
+                "archive/tasks/task.done.md",
+                &record_file("task.done", "task", "closed", &["from: task.epic"], ""),
+            ),
+            (
+                "tasks/task.doing.md",
+                &record_file("task.doing", "task", "open", &["from: task.epic"], ""),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).overview().unwrap().epics,
+            vec![Epic {
+                id: "task.epic".to_owned(),
+                closed: 1,
+                total: 2,
+                next: Some("task.doing".to_owned()),
+            }]
+        );
+    }
+
+    /// A record born inside a child that has since been filed belongs to
+    /// the epic all the same — the lineage that says so is spelled out only
+    /// by the filed record, so the scope is drawn through it.
+    #[test]
+    fn a_live_record_reaches_its_epic_through_filed_lineage() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic.md",
+                &record_file("task.epic", "task", "open", &["blocked-by: task.done"], ""),
+            ),
+            (
+                "archive/tasks/task.done.md",
+                &record_file("task.done", "task", "closed", &["from: task.epic"], ""),
+            ),
+            (
+                "tasks/task.heir.md",
+                &record_file("task.heir", "task", "open", &["from: task.done"], ""),
+            ),
+        ]);
+        let scoped: Vec<String> = Notebook::new(&mut storage)
+            .list_for("task.epic")
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(scoped, vec!["task.epic", "task.heir"]);
+        assert_eq!(
+            Notebook::new(&mut storage).overview().unwrap().epics[0].next,
+            Some("task.heir".to_owned()),
+            "the epic's queue reaches the record its filed lineage carries"
+        );
+    }
+
+    /// An interrupted archive move leaves one id on two files. The live one
+    /// answers for it: a record that waits on nothing is not a hub, whatever
+    /// the copy in the archive still says it waited on.
+    #[test]
+    fn an_archived_twin_does_not_speak_for_the_live_record() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic.md",
+                &record_file("task.epic", "task", "open", &[], ""),
+            ),
+            (
+                "archive/tasks/task.epic.md",
+                &record_file(
+                    "task.epic",
+                    "task",
+                    "closed",
+                    &["blocked-by: task.child"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.child.md",
+                &record_file("task.child", "task", "open", &["from: task.epic"], ""),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).overview().unwrap().epics,
+            vec![]
+        );
+    }
+
     #[test]
     fn a_task_that_merely_spawned_a_question_is_no_hub() {
         let mut storage = storage_with(&[
