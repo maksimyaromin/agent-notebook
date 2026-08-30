@@ -382,6 +382,12 @@ impl RecordFile {
     ///
     /// The value must be one line — multi-line content belongs in the body.
     ///
+    /// Whether the file opens with a `---` fence, and so has an envelope to
+    /// splice at all. The mutating methods below panic without one.
+    pub(crate) fn has_envelope(&self) -> bool {
+        self.envelope.is_some()
+    }
+
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
     pub(crate) fn set_field(&mut self, key: &str, value: &str) -> bool {

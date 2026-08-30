@@ -84,6 +84,10 @@ pub struct Edit {
     pub from: Option<String>,
     pub priority: Option<u32>,
     pub review_by: Option<String>,
+    /// The optional fields to erase, by their envelope key — `review-by`,
+    /// not `review_by`. A record that never carried the field is already
+    /// as asked, so the clear is a no-op.
+    pub clear: Vec<String>,
 }
 
 impl Edit {
@@ -95,5 +99,6 @@ impl Edit {
             && self.from.is_none()
             && self.priority.is_none()
             && self.review_by.is_none()
+            && self.clear.is_empty()
     }
 }

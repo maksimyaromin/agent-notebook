@@ -390,6 +390,259 @@ mod edit_verb {
     }
 
     #[test]
+    fn a_cleared_field_leaves_the_record() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &task_file("open", &["from: task.parent", "priority: 2"]),
+        )]);
+        let edited = Notebook::new(&mut storage)
+            .edit(
+                "task.demo",
+                &Edit {
+                    clear: vec!["from".to_owned(), "priority".to_owned()],
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(edited.changed, vec!["from", "priority"]);
+        assert_eq!(
+            storage.read("tasks/task.demo.md").unwrap(),
+            "---\nid: task.demo\ntype: task\nstate: open\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\n",
+            "a birth that never happened leaves no line behind"
+        );
+    }
+
+    #[test]
+    fn clearing_a_field_the_record_does_not_carry_changes_no_byte() {
+        let text = task_file("open", &[]);
+        let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
+        let edited = Notebook::new(&mut storage)
+            .edit(
+                "task.demo",
+                &Edit {
+                    clear: vec!["review-by".to_owned()],
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(edited.changed, Vec::<&str>::new());
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+    }
+
+    /// A field the record's type does not allow is exactly the field a
+    /// clear is for; only the write of one is refused.
+    #[test]
+    fn a_priority_a_decision_should_never_have_carried_is_cleared() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.demo.md",
+            &record_file("decision.demo", "decision", "active", &["priority: 2"], ""),
+        )]);
+        let edited = Notebook::new(&mut storage)
+            .edit(
+                "decision.demo",
+                &Edit {
+                    clear: vec!["priority".to_owned()],
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(edited.changed, vec!["priority"]);
+        assert!(
+            !storage
+                .read("decisions/decision.demo.md")
+                .unwrap()
+                .contains("priority")
+        );
+    }
+
+    #[test]
+    fn a_clear_is_refused_by_its_field() {
+        let cases = [
+            (
+                Edit {
+                    clear: vec!["state".to_owned()],
+                    ..edit()
+                },
+                "state",
+            ),
+            (
+                Edit {
+                    from: Some("task.parent".to_owned()),
+                    clear: vec!["from".to_owned()],
+                    ..edit()
+                },
+                "from",
+            ),
+        ];
+        for (edit, named) in cases {
+            let mut storage = storage_with(&[
+                ("tasks/task.demo.md", &task_file("open", &[])),
+                (
+                    "tasks/task.parent.md",
+                    &record_file("task.parent", "task", "open", &[], ""),
+                ),
+            ]);
+            let refused = Notebook::new(&mut storage)
+                .edit("task.demo", &edit, TODAY)
+                .unwrap_err();
+            let NotebookError::InvalidArgument { reason } = refused else {
+                panic!("a clear is judged before anything is read: {refused:?}");
+            };
+            assert!(
+                reason.starts_with("clear:") && reason.contains(named),
+                "the refusal names the field it is about: {reason}"
+            );
+        }
+    }
+
+    /// A record whose own bytes `check` condemns is frozen against every
+    /// verb but the one that repairs it, and that verb is judged on what it
+    /// leaves behind.
+    mod a_record_with_an_error_finding {
+        use super::*;
+
+        /// The two repairs for a `from` naming nothing: erase the line, or
+        /// point it somewhere real.
+        #[test]
+        fn is_written_by_an_edit_that_leaves_it_clean() {
+            let repairs = [
+                (
+                    Edit {
+                        clear: vec!["from".to_owned()],
+                        ..edit()
+                    },
+                    "",
+                ),
+                (
+                    Edit {
+                        from: Some("task.parent".to_owned()),
+                        ..edit()
+                    },
+                    "\nfrom: task.parent",
+                ),
+            ];
+            for (repair, expected) in repairs {
+                let mut storage = broken(&["from: task.ghost"]);
+                let edited = Notebook::new(&mut storage)
+                    .edit("task.demo", &repair, TODAY)
+                    .expect("the edit leaves the record clean");
+                assert_eq!(edited.changed, vec!["from"]);
+                assert!(
+                    storage
+                        .read("tasks/task.demo.md")
+                        .unwrap()
+                        .contains(&format!("title: A demo record{expected}\n")),
+                    "the repaired line reads as asked"
+                );
+                assert!(
+                    Notebook::new(&mut storage).check().unwrap().is_empty(),
+                    "and the notebook is clean after it"
+                );
+            }
+        }
+
+        /// The line an edit aims at is not always every line the findings
+        /// are about, and the finding is what decides.
+        #[test]
+        fn is_refused_by_an_edit_that_would_leave_it_standing() {
+            let half_repairs = [
+                (
+                    vec!["from: task.parent", "from: task.other"],
+                    Edit {
+                        from: Some("task.parent".to_owned()),
+                        ..edit()
+                    },
+                ),
+                (
+                    vec!["tags: Not A Tag"],
+                    Edit {
+                        add_tags: vec!["ready".to_owned()],
+                        ..edit()
+                    },
+                ),
+                (
+                    vec!["from: task.ghost"],
+                    Edit {
+                        title: Some("A sharper name".to_owned()),
+                        ..edit()
+                    },
+                ),
+            ];
+            for (lines, half) in half_repairs {
+                let mut storage = broken(&lines);
+                let text = storage.read("tasks/task.demo.md").unwrap();
+                assert!(
+                    matches!(
+                        Notebook::new(&mut storage).edit("task.demo", &half, TODAY),
+                        Err(NotebookError::InvalidRecord { .. })
+                    ),
+                    "a half repair is refused like any other invalid write: {lines:?}"
+                );
+                assert_eq!(
+                    storage.read("tasks/task.demo.md").unwrap(),
+                    text,
+                    "and writes nothing"
+                );
+            }
+        }
+
+        /// A required line missing is not on any line at all, and writing
+        /// it is still the repair.
+        #[test]
+        fn is_written_by_the_edit_that_supplies_a_missing_line() {
+            let mut storage = storage_with(&[(
+                "tasks/task.demo.md",
+                "---\nid: task.demo\ntype: task\nstate: open\ncreated: 2026-08-24\n---\n",
+            )]);
+            let edited = Notebook::new(&mut storage)
+                .edit(
+                    "task.demo",
+                    &Edit {
+                        title: Some("A recovered title".to_owned()),
+                        ..edit()
+                    },
+                    TODAY,
+                )
+                .expect("the title the record lacks is the title the edit writes");
+            assert_eq!(edited.changed, vec!["title"]);
+            assert!(Notebook::new(&mut storage).check().unwrap().is_empty());
+        }
+
+        /// A file with no envelope is not a record to splice: there is no
+        /// line to correct, only a file to write again.
+        #[test]
+        fn is_no_record_at_all_without_an_envelope() {
+            let mut storage = storage_with(&[("tasks/task.demo.md", "just prose\n")]);
+            assert!(matches!(
+                Notebook::new(&mut storage)
+                    .edit(
+                        "task.demo",
+                        &Edit {
+                            title: Some("A sharper name".to_owned()),
+                            ..edit()
+                        },
+                        TODAY,
+                    )
+                    .unwrap_err(),
+                NotebookError::InvalidRecord { .. }
+            ));
+        }
+
+        fn broken(lines: &[&str]) -> MemoryStorage {
+            storage_with(&[
+                ("tasks/task.demo.md", &task_file("open", lines)),
+                (
+                    "tasks/task.parent.md",
+                    &record_file("task.parent", "task", "open", &[], ""),
+                ),
+            ])
+        }
+    }
+
+    #[test]
     fn a_new_body_citing_nothing_carries_the_dangling_mention_nudge() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let edited = Notebook::new(&mut storage)

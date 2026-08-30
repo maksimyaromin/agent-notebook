@@ -306,6 +306,30 @@ mod dependency_graph {
         assert_eq!(storage.read("tasks/task.a.md").unwrap(), text);
     }
 
+    /// `unblock` is let past the findings to erase one edge; the edge it
+    /// erases has to be the one they are about.
+    #[test]
+    fn unblocking_a_sound_edge_beside_a_corrupted_one_is_refused() {
+        let text = task(
+            "task.a",
+            "open",
+            &["blocked-by: task.ghost", "blocked-by: task.b"],
+        );
+        let mut storage = storage_with(&[
+            ("tasks/task.a.md", &text),
+            ("tasks/task.b.md", &task("task.b", "open", &[])),
+        ]);
+        let error = Notebook::new(&mut storage)
+            .unblock("task.a", "task.b", TODAY)
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::InvalidRecord { .. }));
+        assert_eq!(
+            storage.read("tasks/task.a.md").unwrap(),
+            text,
+            "the corrupted edge would have outlived the write"
+        );
+    }
+
     #[test]
     fn a_task_in_a_hand_edited_multi_file_cycle_still_moves() {
         let mut storage = storage_with(&[
