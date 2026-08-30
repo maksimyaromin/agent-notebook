@@ -1,5 +1,5 @@
-//! Check: the verification that reads the whole notebook and names every
-//! file, line, and reason it finds — the cross-record rules no single
+//! Check: the verification that reads the whole notebook and names what
+//! it finds, where, and what erases it — the cross-record rules no single
 //! record can carry, beside each record's own findings.
 
 use super::{Notebook, NotebookError};
@@ -13,14 +13,15 @@ use crate::record::{
 };
 use crate::reply::{FileFinding, Repair};
 use crate::request::CLEARABLE;
-use crate::resolve::{Resolver, path_stem};
+use crate::resolve::{Resolver, path_stem, record_path, type_of};
 use crate::storage::{Storage, StorageError};
 use std::collections::BTreeMap;
 
 impl<S: Storage> Notebook<'_, S> {
     /// Verify the whole notebook: every record's own findings plus the
     /// cross-record rules — duplicate ids, dangling references, supersession
-    /// pairs, routing threads. Errors first, then by file and line.
+    /// pairs, routing threads — each carrying the move that erases it where
+    /// the notebook has one. Errors first, then by file and line.
     ///
     /// # Errors
     /// A storage failure.
@@ -74,13 +75,14 @@ impl<S: Storage> Notebook<'_, S> {
 
 /// Name the move that erases each finding, where the notebook has one.
 ///
-/// It is read off the line the finding sits on, so the same rule covers a
-/// bad value, a dangling reference, a duplicated key and a cycle: whatever
-/// is wrong with the line, erasing it is the repair. A finding on the
-/// config file, or on a line no verb writes, keeps none.
+/// A repair is only ever named on a file a verb can reach: every mutation
+/// resolves an id to the live path its type dictates, so a record in the
+/// archive, in the wrong directory, or under a filename that is no id has
+/// no move at all — whatever is wrong inside it.
 fn name_repairs(located: &mut [FileFinding], records: &[Record]) {
     let by_path: BTreeMap<&str, &Record> = records
         .iter()
+        .filter(|record| reachable_by_id(record.path()))
         .map(|record| (record.path(), record))
         .collect();
     for finding in located {
@@ -90,24 +92,43 @@ fn name_repairs(located: &mut [FileFinding], records: &[Record]) {
     }
 }
 
+/// Whether a verb naming this file's stem would arrive at this very file.
+fn reachable_by_id(path: &str) -> bool {
+    let id = path_stem(path);
+    type_of(id).is_some_and(|record_type| record_path(id, record_type, false) == path)
+}
+
+/// A settled record still in the working set is filed by `archive`; every
+/// other repair is the verb that erases the line the finding sits on.
 fn repair_of(finding: &Finding, record: &Record) -> Option<Repair> {
-    if finding.code == FindingCode::UnarchivedSettledRecord {
-        return Some(Repair::Archive);
+    match finding.code {
+        FindingCode::UnarchivedSettledRecord => Some(Repair::Archive),
+        _ => eraser_of(record, finding.line?),
     }
-    let line = finding.line?;
+}
+
+/// The verb that erases `line`: a dependency edge and a hold are erased by
+/// their own verbs, an optional field the record can lose by `edit`. A line
+/// no verb writes has none.
+fn eraser_of(record: &Record, line: usize) -> Option<Repair> {
     let file = record.file();
-    // `unblock` refuses a record that is not a Task, so the edge on a
-    // record that should carry none is not this verb's to erase.
-    if record.record_type() == Some(RecordType::Task)
-        && let Some((target, _)) = file
+    let sits_on = |key: &str| file.field_entries(key).any(|(_, at)| at == Some(line));
+    // `unblock` and `unhold` refuse a record that is not a Task, so a line
+    // a record should not carry at all is not theirs to erase.
+    if record.record_type() == Some(RecordType::Task) {
+        if let Some((target, _)) = file
             .field_entries("blocked-by")
             .find(|(_, at)| *at == Some(line))
-    {
-        return Some(Repair::Unblock(target.to_owned()));
+        {
+            return Some(Repair::Unblock(target.to_owned()));
+        }
+        if sits_on("hold") || sits_on("hold-until") {
+            return Some(Repair::Unhold);
+        }
     }
     CLEARABLE
         .into_iter()
-        .find(|key| file.field_entries(key).any(|(_, at)| at == Some(line)))
+        .find(|key| sits_on(key))
         .map(Repair::Clear)
 }
 

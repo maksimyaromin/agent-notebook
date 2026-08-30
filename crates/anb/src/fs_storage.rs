@@ -4,17 +4,15 @@
 //! Writes are atomic — a temp file in the target directory, then a rename —
 //! so a reader never sees a half-written record.
 //!
-//! The root is the seam's whole universe. A symlink inside it names a file
-//! the notebook does not own, so it is not a record: following one would
-//! let a file committed to a project decide what a later reader's `view`
-//! prints.
+//! A symlink is never a record, wherever it points: the seam cannot vouch
+//! for a file it did not write, and following one would let a link
+//! committed to a project decide what a later reader's `view` prints.
 
 use anb_core::{Storage, StorageError};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use tempfile::Builder;
 
 /// The project `start` belongs to: the nearest ancestor already holding a
 /// notebook or a repository, else `start` itself. A directory above `.git`
@@ -59,6 +57,19 @@ pub fn notebook_root(start: &Path, named: Option<&Path>, from_env: Option<&OsStr
         Some(chosen) => project_anchor(start).join(chosen),
         None => resolve_root(start),
     }
+}
+
+/// Why `root` cannot hold a notebook, when it cannot. A path that names a
+/// file is not a directory to put records in, and the first write's "File
+/// exists" would be a true error about the wrong thing.
+#[must_use]
+pub fn unusable_root(root: &Path) -> Option<String> {
+    (root.exists() && !root.is_dir()).then(|| {
+        format!(
+            "notebook: {} is a file, not a notebook directory",
+            root.display()
+        )
+    })
 }
 
 /// Name this run's leavings in the notebook's own ignore file: the lock a
@@ -155,24 +166,17 @@ impl Storage for FsStorage {
         })
     }
 
-    /// The notebook root appears here: a write is the first thing that
-    /// needs it to exist, so a command refused before it writes leaves no
-    /// directory behind.
     fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
         let target = self.absolute(path);
+        if is_symlink(&target) {
+            return Err(self.failed(path, &symlink_refused()));
+        }
         let directory = target.parent().expect("a joined path has a parent");
         fs::create_dir_all(directory).map_err(|error| self.failed(path, &error))?;
-        ignore_leavings(&self.root);
-        // A temp file that owns itself: every way out of here but the
-        // rename drops it, so a failed write leaves nothing behind.
-        let temp = Builder::new()
-            .prefix(".")
-            .suffix(".tmp")
-            .tempfile_in(directory)
-            .map_err(|error| self.failed(path, &error))?;
-        fs::write(temp.path(), content).map_err(|error| self.failed(path, &error))?;
-        temp.persist(&target)
-            .map_err(|error| self.failed(path, &error.error))?;
+        let mut pending = Pending::beside(&target);
+        fs::write(&pending.path, content).map_err(|error| self.failed(path, &error))?;
+        fs::rename(&pending.path, &target).map_err(|error| self.failed(path, &error))?;
+        pending.persisted = true;
         Ok(())
     }
 
@@ -197,12 +201,50 @@ impl Storage for FsStorage {
     }
 }
 
-/// Whether the entry names a file to read. The kind arrives with the
-/// listing, so this costs no question to the filesystem.
+/// Whether the entry names a file to read. The kind usually arrives with
+/// the listing, so on most platforms this costs nothing to ask.
 fn names_a_file(entry: &fs::DirEntry) -> bool {
     entry.file_type().is_ok_and(|kind| kind.is_file())
 }
 
 fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|found| found.is_symlink())
+}
+
+fn symlink_refused() -> std::io::Error {
+    std::io::Error::new(ErrorKind::InvalidInput, "a symlink is not a record")
+}
+
+/// The file a write lands in before it is renamed into place. It removes
+/// itself unless the rename claimed it, so no failure — a full disk, a
+/// quota, a killed process mid-call — leaves a stray behind.
+///
+/// The bytes go through `fs::write`, which creates with the umask the user
+/// set, because a notebook is committed to a project and read by whoever
+/// reads the project.
+struct Pending {
+    path: PathBuf,
+    persisted: bool,
+}
+
+impl Pending {
+    /// Beside the target, so the rename stays within one filesystem and
+    /// therefore stays atomic. One writer per process holds one of these at
+    /// a time, so the pid is name enough.
+    fn beside(target: &Path) -> Pending {
+        let directory = target.parent().unwrap_or(Path::new("."));
+        let name = target.file_name().unwrap_or_default().to_string_lossy();
+        Pending {
+            path: directory.join(format!(".{name}.{}.tmp", std::process::id())),
+            persisted: false,
+        }
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if !self.persisted {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }

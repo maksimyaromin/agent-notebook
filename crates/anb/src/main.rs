@@ -2,7 +2,7 @@
 //! shell and print one reply.
 
 use anb::cli::{Cli, Command};
-use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root};
+use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root, unusable_root};
 use anb::lock;
 use anb::reconcile::lost_proofs;
 use anb::reply::{Host, execute};
@@ -90,13 +90,8 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         cli.notebook.as_deref(),
         std::env::var_os(NOTEBOOK_ENV).as_deref(),
     );
-    if root.exists() && !root.is_dir() {
-        return Err(render_failure(&NotebookError::InvalidArgument {
-            reason: format!(
-                "notebook: {} is a file, not a notebook directory",
-                root.display()
-            ),
-        }));
+    if let Some(reason) = unusable_root(&root) {
+        return Err(render_failure(&NotebookError::InvalidArgument { reason }));
     }
     let mut storage = FsStorage::new(root.clone());
     let today = jiff::Zoned::now().date().to_string();

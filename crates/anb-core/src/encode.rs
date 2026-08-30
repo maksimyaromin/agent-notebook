@@ -45,24 +45,60 @@ fn bounded_join(ids: &[String], separator: &str, bound: usize) -> String {
     out
 }
 
-/// A table value carrying the row delimiter, a quote, or a control
-/// character is JSON-quoted; everything else stays bare.
+/// A body cut to its ends: the first and last [`ROW_BOUND`] lines as they
+/// stand, and how many fell out between them. `None` when the body is
+/// short enough that an elision would save nothing.
 ///
-/// A record's text is whatever a hand wrote, and a terminal obeys the
-/// escape sequences in it: an unescaped `\r` or `ESC[2K` rewrites the row
-/// above and forges a line about another record. Quoted, a hostile title
-/// can only ever widen its own cell.
+/// A record is read from both ends — its terms are written at the top and
+/// its log grows at the bottom — so the middle is what a long record can
+/// spare. The two ends are slices of the body, so each keeps its own line
+/// terminator and a CRLF file still reads as one.
+#[must_use]
+pub fn body_ends(body: &str) -> Option<(&str, usize, &str)> {
+    let lines: Vec<&str> = body.split_inclusive('\n').collect();
+    if lines.len() <= 2 * ROW_BOUND + 1 {
+        return None;
+    }
+    let head: usize = lines[..ROW_BOUND].iter().map(|line| line.len()).sum();
+    let tail: usize = lines[lines.len() - ROW_BOUND..]
+        .iter()
+        .map(|line| line.len())
+        .sum();
+    Some((
+        &body[..head],
+        lines.len() - 2 * ROW_BOUND,
+        &body[body.len() - tail..],
+    ))
+}
+
+/// A table value carrying the row delimiter, a quote, or a character a
+/// terminal acts on is JSON-quoted; everything else stays bare.
+///
+/// A record's text is whatever a hand wrote, and a terminal obeys what is
+/// in it: an unescaped `\r` or `ESC[2K` rewrites the row above and forges a
+/// line about another record, and a bidi override reverses what follows it.
+/// Quoted, such a character cannot reach past the cell it sits in.
 #[must_use]
 pub fn quoted_if_delimited(value: &str) -> String {
-    if value.contains(',') || value.contains('"') || value.contains(char::is_control) {
+    if value.contains([',', '"']) || value.contains(acted_on_by_a_terminal) {
         json_quoted(value)
     } else {
         value.to_owned()
     }
 }
 
-/// Quotes the value, escaping the backslash, the quote, and every control
-/// character.
+/// A character a terminal treats as an instruction rather than as text:
+/// the control characters, and the bidirectional and line/paragraph
+/// separators, which `char::is_control` does not count.
+fn acted_on_by_a_terminal(character: char) -> bool {
+    character.is_control()
+        || matches!(character,
+            '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}'
+            | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Quotes the value, escaping the backslash, the quote, and every
+/// character a terminal would act on.
 #[must_use]
 pub(crate) fn json_quoted(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
@@ -74,7 +110,7 @@ pub(crate) fn json_quoted(value: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            other if other.is_control() => {
+            other if acted_on_by_a_terminal(other) => {
                 let _ = write!(out, "\\u{:04x}", other as u32);
             }
             other => out.push(other),

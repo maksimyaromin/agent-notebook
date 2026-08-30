@@ -77,6 +77,28 @@ fn a_symlink_is_no_record_of_the_notebook() {
     assert_eq!(storage.exists("tasks/task.linked.md"), Ok(false));
 }
 
+/// A notebook path that names a file is refused for what it is, rather
+/// than through the first write's "File exists".
+#[test]
+fn a_root_that_names_a_file_is_no_notebook() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("notes.md");
+    std::fs::write(&file, "not a notebook").unwrap();
+    assert_eq!(
+        anb::fs_storage::unusable_root(&file),
+        Some(format!(
+            "notebook: {} is a file, not a notebook directory",
+            file.display()
+        ))
+    );
+    assert_eq!(anb::fs_storage::unusable_root(dir.path()), None);
+    assert_eq!(
+        anb::fs_storage::unusable_root(&dir.path().join("not-yet")),
+        None,
+        "a notebook that does not exist yet is not a file"
+    );
+}
+
 #[test]
 fn a_missing_directory_lists_empty() {
     let dir = TempDir::new().unwrap();

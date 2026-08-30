@@ -102,7 +102,8 @@ pub enum Command {
     /// One record: envelope, body, and its mention blocks.
     View {
         id: String,
-        /// The whole body; a long one prints its ends by default.
+        /// Every line and every mention; a long body and a crowded block
+        /// print bounded by default.
         #[arg(long)]
         all: bool,
     },
@@ -115,7 +116,7 @@ pub enum Command {
         #[arg(long)]
         hook: bool,
     },
-    /// Verify every file: each finding names file, line, and reason.
+    /// Verify every file: each finding names where it is, why, and what repairs it.
     Check {
         /// Every row; the listing is bounded by default.
         #[arg(long)]

@@ -1494,8 +1494,9 @@ mod maintenance_replies {
         );
     }
 
-    /// The repair a finding names is the whole promise: an agent that runs
-    /// them, and nothing else, ends with a clean notebook.
+    /// The promise of the column: every repair it names runs, and running
+    /// them is all it takes. A record broken twice over is repaired one
+    /// verb at a time, so the loop must terminate on that too.
     #[test]
     fn running_the_repair_each_finding_names_clears_the_notebook() {
         let mut storage = storage_with(&[
@@ -1532,6 +1533,17 @@ mod maintenance_replies {
                     "",
                 ),
             ),
+            (
+                "tasks/task.twice.md".to_owned(),
+                record_file(
+                    "task.twice",
+                    "task",
+                    "open",
+                    "A demo record",
+                    &["priority: 9", "review-by: nope", "hold-until: 2026-09-01"],
+                    "",
+                ),
+            ),
         ]);
         let mut repaired = 0;
         while let Some(repair) = first_repair(&mut storage) {
@@ -1541,6 +1553,31 @@ mod maintenance_replies {
             assert!(repaired < 10, "`{repair}` left its own finding standing");
         }
         assert_snapshot!(ok(&mut storage, &["check"]), @"count: 0");
+    }
+
+    /// A verb resolves an id to the one live path its type dictates, so a
+    /// record it could never arrive at is a record it cannot repair — and a
+    /// row that named a command anyway would send an agent in a circle.
+    #[test]
+    fn a_finding_on_a_record_no_verb_can_reach_names_no_repair() {
+        let broken =
+            |id: &str| record_file(id, "task", "open", "A demo record", &["priority: 9"], "");
+        let mut storage = storage_with(&[
+            (
+                "archive/tasks/task.filed.md".to_owned(),
+                broken("task.filed"),
+            ),
+            ("notes/task.stray.md".to_owned(), broken("task.stray")),
+            ("tasks/weird.md".to_owned(), broken("task.nameless")),
+        ]);
+        let report: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["check", "--json", "--all"])).unwrap();
+        for finding in report["findings"].as_array().unwrap() {
+            assert!(
+                finding.get("repair").is_none(),
+                "no verb reaches this file: {finding}"
+            );
+        }
     }
 
     /// The first finding that names a repair, as the command line to run.
@@ -1846,6 +1883,38 @@ mod maintenance_replies {
           task.auth-tokens,-,4d,Token rotation
         "
         );
+    }
+
+    /// A scoped listing answers a narrower question than the bare verb, so
+    /// the command that lifts its bound has to carry the scope — the hint
+    /// is a command a reader runs, not a decoration.
+    #[test]
+    fn a_scoped_listing_lifts_with_the_scope_it_was_asked_with() {
+        let mut files: Vec<(String, String)> = (0..25)
+            .map(|n| {
+                open_task(
+                    &format!("task.m{n:02}"),
+                    "A demo record",
+                    &["from: task.hub"],
+                )
+            })
+            .collect();
+        let waits: Vec<String> = (0..25)
+            .map(|n| format!("blocked-by: task.m{n:02}"))
+            .collect();
+        files.push(open_task(
+            "task.hub",
+            "The hub",
+            &waits.iter().map(String::as_str).collect::<Vec<&str>>(),
+        ));
+        let mut storage = storage_with(&files);
+        for (verb, hint) in [
+            ("list", "  \u{2026} 6 more: anb list --for task.hub --all"),
+            ("ready", "  \u{2026} 5 more: anb ready --for task.hub --all"),
+        ] {
+            let out = ok(&mut storage, &[verb, "--for", "task.hub"]);
+            assert_eq!(out.lines().last().unwrap(), hint, "{out}");
+        }
     }
 
     #[test]
@@ -2179,15 +2248,29 @@ mod bounded_consequences {
     }
 
     #[test]
-    fn a_view_bounds_who_cites_the_record() {
+    fn a_view_bounds_who_cites_the_record_and_says_what_lifts_the_bound() {
         let mut storage = citers_of("note.magnet", MANY);
-        let out = ok(&mut storage, &["view", "note.magnet"]);
-        let line = out
-            .lines()
-            .find(|line| line.starts_with("mentioned-by["))
-            .unwrap_or_else(|| panic!("no mentioned-by line in: {out}"));
+        let line = cited_line(&ok(&mut storage, &["view", "note.magnet"]));
         assert!(line.starts_with("mentioned-by[21]: task.c00, "), "{line}");
-        assert!(line.ends_with("task.c19, … 1 more"), "{line}");
+        assert!(
+            line.ends_with("task.c19, … 1 more: anb view note.magnet --all"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn a_view_all_names_every_record_that_cites_this_one() {
+        let mut storage = citers_of("note.magnet", MANY);
+        let line = cited_line(&ok(&mut storage, &["view", "note.magnet", "--all"]));
+        assert!(line.starts_with("mentioned-by[21]: task.c00, "), "{line}");
+        assert!(line.ends_with("task.c20"), "{line}");
+    }
+
+    fn cited_line(out: &str) -> String {
+        out.lines()
+            .find(|line| line.starts_with("mentioned-by["))
+            .unwrap_or_else(|| panic!("no mentioned-by line in: {out}"))
+            .to_owned()
     }
 
     #[test]

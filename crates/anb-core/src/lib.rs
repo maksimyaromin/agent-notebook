@@ -31,7 +31,7 @@ pub use reply::{
     Edited, Epic, Expunged, FileFinding, Held, ListedRecord, Overview, ReadyTask, Repair,
     Transitioned, TypeSection, View, carriers_of,
 };
-pub use request::{CLEARABLE, Draft, Edit, Link, Proof};
+pub use request::{Draft, Edit, Link, Proof};
 pub use resolve::path_stem;
 pub use status::{
     ActiveTask, Budget, DebtClass, SECTION_ROWS, Status, StatusRule, counts_phrase, debt_classes,

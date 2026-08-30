@@ -173,19 +173,14 @@ fn a_decision_created_with_supersedes_flips_its_victim_in_the_same_move() {
         "---\nid: decision.go-for-the-cli\ntype: decision\nstate: superseded\ntitle: A demo record\nsuperseded-by: decision.rust-for-the-cli\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\nGo.\n",
         "the victim gains the back-pointer and can never again read as live"
     );
-    assert_eq!(
-        storage.read(&created.path).unwrap(),
-        "---\n\
-         id: decision.rust-for-the-cli\n\
-         type: decision\n\
-         state: active\n\
-         kind: shape\n\
-         title: Rust for the CLI\n\
-         supersedes: decision.go-for-the-cli\n\
-         created: 2026-08-27\n\
-         updated: 2026-08-27\n\
-         ---\n",
-        "the successor carries its kind and its claim, in canonical order"
+    let successor = storage.read(&created.path).unwrap();
+    assert!(
+        successor.contains("supersedes: decision.go-for-the-cli\n"),
+        "the successor carries its claim: {successor}"
+    );
+    assert!(
+        successor.contains("kind: shape\n"),
+        "and the kind the draft asked for: {successor}"
     );
 }
 

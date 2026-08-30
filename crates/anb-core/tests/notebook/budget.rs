@@ -257,10 +257,10 @@ mod budget_ladder {
     #[test]
     fn sections_degrade_in_the_fixed_order_as_the_budget_shrinks() {
         let mut stages = Vec::new();
-        // Each ceiling below 130 is a rung this fixture actually steps
-        // down: at 122 the epics collapse, at 118 the debt, at 113 the
-        // rules, and 100 is already the floor. A ceiling between two rungs
-        // renders what the one above it did, and proves nothing.
+        // One ceiling per rung the ladder actually has, found by
+        // bisecting this fixture: a ceiling between two rungs renders what
+        // the one above it did, and proves nothing. The count assertion
+        // below is what keeps that true as the fixture moves.
         for ceiling in [400, 150, 130, 122, 118, 113, 110, 100, 1] {
             let step = rendered(Budget::Tokens(ceiling));
             let ready_rows = rows_under(&step.text, "ready[");
@@ -316,8 +316,14 @@ mod budget_ladder {
             }
             stages.push((ready_rows, debt_itemized, rules_itemized, has_log));
         }
+        let distinct: std::collections::BTreeSet<_> = stages.iter().collect();
+        assert!(
+            distinct.len() >= 5,
+            "the ceilings must step down every rung the ladder has, not repeat one: {stages:?}"
+        );
         let mut previous = stages[0];
-        for stage in stages {
+        for stage in &stages {
+            let stage = *stage;
             assert!(
                 stage.0 <= previous.0
                     && (!stage.1 || previous.1)
@@ -357,7 +363,7 @@ mod budget_ladder {
     }
 
     #[test]
-    fn a_cut_note_never_names_a_log_line_that_did_not_exist() {
+    fn a_cut_note_names_only_what_the_dashboard_had() {
         // Ready work only: the gate opens with no active Task and no log.
         let files: Vec<(String, String)> = (0..6)
             .map(|index| {
