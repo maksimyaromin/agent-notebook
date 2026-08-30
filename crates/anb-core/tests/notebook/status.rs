@@ -26,6 +26,61 @@ mod status_dashboard {
         );
     }
 
+    /// Two Tasks in flight is a session that lost track of one of them, so
+    /// the dashboard leads with the one last touched and spends its log
+    /// line there.
+    #[test]
+    fn the_in_flight_lines_lead_with_the_task_last_touched() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.stale.md",
+                "---\nid: task.stale\ntype: task\nstate: active\ntitle: A demo record\ncreated: 2026-08-20\nupdated: 2026-08-21\n---\n- 2026-08-21 claude: parked here\n",
+            ),
+            (
+                "tasks/task.fresh.md",
+                "---\nid: task.fresh\ntype: task\nstate: active\ntitle: A demo record\ncreated: 2026-08-20\nupdated: 2026-08-27\n---\n- 2026-08-27 claude: resumed here\n",
+            ),
+        ]);
+        let text = status_text(&mut storage);
+        let in_flight: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with("in-flight: "))
+            .collect();
+        assert_eq!(
+            in_flight,
+            [
+                "in-flight: task.fresh \"A demo record\"",
+                "in-flight: task.stale \"A demo record\""
+            ],
+            "{text}"
+        );
+        let logs: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with("log: "))
+            .collect();
+        assert_eq!(
+            logs,
+            ["log: - 2026-08-27 claude: resumed here"],
+            "one log line, and it belongs to the Task the session is on: {text}"
+        );
+    }
+
+    /// A Task parked at acceptance is a human's turn, and the session must
+    /// open on it even when nothing else in the notebook stirs.
+    #[test]
+    fn the_dashboard_opens_on_a_task_waiting_for_a_human_alone() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("review", &[]))]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .unwrap();
+        assert!(!status.quiet, "{}", status.text);
+        assert!(
+            status.text.contains("review[1]: task.demo"),
+            "{}",
+            status.text
+        );
+    }
+
     #[test]
     fn the_dashboard_opens_on_ready_work_alone() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
@@ -199,20 +254,19 @@ mod debt_signals {
     }
 
     /// Each clock is configurable, and each key moves its own: a threshold
-    /// wired to the wrong clock would leave the record it names silent.
+    /// wired to the wrong clock leaves the record it names silent, and one
+    /// counting a day early speaks before it is owed anything.
     #[test]
-    fn every_debt_key_moves_the_clock_it_names() {
-        let quiet_origin = (
-            "tasks/task.origin.md",
-            aged("task.origin", "task", "open", TODAY, &[]),
-        );
-        for (key, files, expected) in [
+    fn every_debt_key_moves_the_clock_it_names_on_the_day_it_names() {
+        // Against a threshold of two days: due, and one day short of due.
+        for (key, path, id, type_word, state, extra, expected) in [
             (
                 "debt-task-stale",
-                vec![(
-                    "tasks/task.demo.md",
-                    aged("task.demo", "task", "active", "2026-08-25", &[]),
-                )],
+                "tasks/task.demo.md",
+                "task.demo",
+                "task",
+                "active",
+                &[][..],
                 DebtSignal::TaskStale {
                     id: "task.demo".into(),
                     days: 2,
@@ -220,10 +274,11 @@ mod debt_signals {
             ),
             (
                 "debt-question-age",
-                vec![(
-                    "questions/question.demo.md",
-                    aged("question.demo", "question", "open", "2026-08-25", &[]),
-                )],
+                "questions/question.demo.md",
+                "question.demo",
+                "question",
+                "open",
+                &[][..],
                 DebtSignal::QuestionAge {
                     id: "question.demo".into(),
                     days: 2,
@@ -231,19 +286,11 @@ mod debt_signals {
             ),
             (
                 "debt-question-age-task-born",
-                vec![
-                    quiet_origin.clone(),
-                    (
-                        "questions/question.demo.md",
-                        aged(
-                            "question.demo",
-                            "question",
-                            "open",
-                            "2026-08-25",
-                            &["from: task.origin"],
-                        ),
-                    ),
-                ],
+                "questions/question.demo.md",
+                "question.demo",
+                "question",
+                "open",
+                &["from: task.origin"][..],
                 DebtSignal::QuestionAge {
                     id: "question.demo".into(),
                     days: 2,
@@ -251,16 +298,11 @@ mod debt_signals {
             ),
             (
                 "debt-hold-quiet",
-                vec![(
-                    "tasks/task.demo.md",
-                    aged(
-                        "task.demo",
-                        "task",
-                        "open",
-                        "2026-08-25",
-                        &["hold: waiting on the owner"],
-                    ),
-                )],
+                "tasks/task.demo.md",
+                "task.demo",
+                "task",
+                "open",
+                &["hold: waiting on the owner"][..],
                 DebtSignal::HoldQuiet {
                     id: "task.demo".into(),
                     days: 2,
@@ -268,28 +310,41 @@ mod debt_signals {
             ),
             (
                 "debt-review-wait",
-                vec![(
-                    "tasks/task.demo.md",
-                    aged("task.demo", "task", "review", "2026-08-25", &[]),
-                )],
+                "tasks/task.demo.md",
+                "task.demo",
+                "task",
+                "review",
+                &[][..],
                 DebtSignal::ReviewWait {
                     id: "task.demo".into(),
                     days: 2,
                 },
             ),
         ] {
-            let mut named: Vec<(&str, String)> = vec![("config", format!("{key}: 2\n"))];
-            named.extend(files);
-            let mut storage = storage_with(
-                &named
-                    .iter()
-                    .map(|(path, text)| (*path, text.as_str()))
-                    .collect::<Vec<_>>(),
-            );
-            assert!(
-                debt_of(&mut storage).contains(&expected),
-                "`{key}` must move the clock it names"
-            );
+            for (touched, owed) in [("2026-08-25", true), ("2026-08-26", false)] {
+                let mut storage = storage_with(&[
+                    ("config", &format!("{key}: 2\n")),
+                    (
+                        "tasks/task.origin.md",
+                        &aged("task.origin", "task", "open", TODAY, &[]),
+                    ),
+                    (path, &aged(id, type_word, state, touched, extra)),
+                ]);
+                let signals = debt_of(&mut storage);
+                if owed {
+                    assert!(
+                        signals.contains(&expected),
+                        "`{key}` must move the clock it names: {signals:?}"
+                    );
+                } else {
+                    assert!(
+                        !signals
+                            .iter()
+                            .any(|signal| signal.code() == expected.code()),
+                        "`{key}` speaks a day early: {signals:?}"
+                    );
+                }
+            }
         }
     }
 
@@ -306,15 +361,6 @@ mod debt_signals {
                 days: 7
             }]
         );
-    }
-
-    #[test]
-    fn six_quiet_days_are_not_yet_stale() {
-        let mut storage = storage_with(&[(
-            "tasks/task.demo.md",
-            &aged("task.demo", "task", "active", "2026-08-21", &[]),
-        )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
     }
 
     #[test]
@@ -605,15 +651,6 @@ mod debt_signals {
                 errors: 1
             }]
         );
-    }
-
-    #[test]
-    fn a_review_task_six_days_in_is_not_yet_debt() {
-        let mut storage = storage_with(&[(
-            "tasks/task.demo.md",
-            &aged("task.demo", "task", "review", "2026-08-21", &[]),
-        )]);
-        assert_eq!(debt_of(&mut storage), vec![]);
     }
 
     #[test]

@@ -12,6 +12,7 @@
 //! whose write-time invariants bind whoever writes — so the splicing
 //! methods stay inside the crate and a record is changed through a verb.
 
+use crate::date;
 use crate::finding::{Finding, FindingCode, Severity};
 
 const FENCE: &str = "---";
@@ -828,7 +829,7 @@ pub(crate) fn is_link(kind: &str, target: &str) -> bool {
 }
 
 pub(crate) fn date_error(value: &str) -> Option<String> {
-    let valid = is_date(value) || is_timestamp(value);
+    let valid = date::is_date(value) || date::is_timestamp(value);
     (!valid).then(|| format!("`{value}` is not `YYYY-MM-DD` or an RFC 3339 timestamp"))
 }
 
@@ -870,106 +871,6 @@ fn is_slug(slug: &str) -> bool {
         && alphanumeric(bytes[0])
         && alphanumeric(bytes[bytes.len() - 1])
         && bytes.iter().all(|&byte| alphanumeric(byte) || byte == b'-')
-}
-
-pub(crate) fn is_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    let shaped = bytes.len() == 10
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_digit() || *byte == b'-');
-    if !shaped {
-        return false;
-    }
-    let Ok(year) = value[0..4].parse::<u16>() else {
-        return false;
-    };
-    let Ok(month) = value[5..7].parse::<u8>() else {
-        return false;
-    };
-    let Ok(day) = value[8..10].parse::<u8>() else {
-        return false;
-    };
-    (1..=12).contains(&month) && (1..=days_in_month(year, month)).contains(&day)
-}
-
-/// The date's civil day number (days since 1970-01-01, Howard Hinnant's
-/// days-from-civil), taking the date part of a timestamp; `None` when the
-/// value is not a valid date. Day arithmetic on notebook dates is a
-/// subtraction of two of these — a host derives ages the same way the
-/// Status clocks do.
-#[must_use]
-pub fn day_number(value: &str) -> Option<i64> {
-    let date = match value.split_once('T') {
-        Some(_) if !is_timestamp(value) => return None,
-        Some((date, _)) => date,
-        None => value,
-    };
-    if !is_date(date) {
-        return None;
-    }
-    let year: i64 = date[0..4].parse().ok()?;
-    let month: i64 = date[5..7].parse().ok()?;
-    let day: i64 = date[8..10].parse().ok()?;
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    Some(era * 146_097 + day_of_era - 719_468)
-}
-
-fn days_in_month(year: u16, month: u8) -> u8 {
-    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
-    match month {
-        2 if leap => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    }
-}
-
-/// RFC 3339: `<date>T<HH:MM:SS>[.fraction](Z|±HH:MM)`.
-fn is_timestamp(value: &str) -> bool {
-    let Some((date, time)) = value.split_once('T') else {
-        return false;
-    };
-    if !is_date(date) {
-        return false;
-    }
-    let Some(offset_start) = time.find(['Z', '+', '-']) else {
-        return false;
-    };
-    let (clock, offset) = time.split_at(offset_start);
-    let clock_ok = match clock.split_once('.') {
-        Some((base, fraction)) => {
-            is_clock(base) && !fraction.is_empty() && fraction.bytes().all(|b| b.is_ascii_digit())
-        }
-        None => is_clock(clock),
-    };
-    let offset_ok = offset == "Z"
-        || offset
-            .strip_prefix(['+', '-'])
-            .and_then(|hhmm| hhmm.split_once(':'))
-            .is_some_and(|(hours, minutes)| {
-                hours.len() == 2
-                    && minutes.len() == 2
-                    && hours.parse::<u8>().is_ok_and(|h| h <= 23)
-                    && minutes.parse::<u8>().is_ok_and(|m| m <= 59)
-            });
-    clock_ok && offset_ok
-}
-
-fn is_clock(clock: &str) -> bool {
-    let bytes = clock.as_bytes();
-    bytes.len() == 8
-        && bytes[2] == b':'
-        && bytes[5] == b':'
-        && clock[0..2].parse::<u8>().is_ok_and(|hours| hours <= 23)
-        && clock[3..5].parse::<u8>().is_ok_and(|minutes| minutes <= 59)
-        && clock[6..8].parse::<u8>().is_ok_and(|seconds| seconds <= 59)
 }
 
 #[cfg(test)]

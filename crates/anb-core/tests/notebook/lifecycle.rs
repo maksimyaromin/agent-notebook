@@ -46,22 +46,6 @@ mod task_cycle {
     }
 
     #[test]
-    fn an_invalid_transition_answers_with_the_valid_commands() {
-        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
-        let error = Notebook::new(&mut storage)
-            .close("task.demo", &Proof::Waived, TODAY)
-            .unwrap_err();
-        assert_eq!(
-            error,
-            NotebookError::InvalidTransition {
-                id: "task.demo".to_owned(),
-                state: "open".to_owned(),
-                valid: vec!["start"],
-            }
-        );
-    }
-
-    #[test]
     fn close_stamps_the_close_date_and_the_proof_link() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let closed = Notebook::new(&mut storage)

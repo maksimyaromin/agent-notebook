@@ -7,6 +7,7 @@
 //! meant is not something anything here can know.
 
 use crate::fs_storage::project_anchor;
+use crate::git;
 use anb_core::CitedProof;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -44,21 +45,26 @@ pub fn lost_proofs(root: &Path, cited: &[CitedProof]) -> Vec<CitedProof> {
 /// divergence, and git runs in the notebook's own directory, since that is
 /// the repository whose history these proofs are about.
 fn absent_commits(root: &Path, cited: &[CitedProof]) -> BTreeSet<String> {
-    let shas: Vec<&str> = cited
+    let shas: Vec<String> = cited
         .iter()
         .filter(|proof| proof.kind == "sha")
-        .map(|proof| proof.target.as_str())
+        .map(|proof| proof.target.clone())
         .collect();
     if shas.is_empty() {
         return BTreeSet::new();
     }
+    let asked_in = ask_in(root);
+    git::answered(git::DEADLINE, move || missing_of(&asked_in, &shas)).unwrap_or_default()
+}
+
+fn missing_of(asked_in: &Path, shas: &[String]) -> BTreeSet<String> {
     let mut query = String::new();
-    for sha in &shas {
+    for sha in shas {
         let _ = writeln!(query, "{sha}^{{commit}}");
     }
     let Ok(mut child) = Command::new("git")
         .arg("-C")
-        .arg(ask_in(root))
+        .arg(asked_in)
         .args(["cat-file", "--batch-check"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -81,9 +87,9 @@ fn absent_commits(root: &Path, cited: &[CitedProof]) -> BTreeSet<String> {
     };
     answers
         .lines()
-        .zip(&shas)
+        .zip(shas)
         .filter(|(answer, _)| answer.ends_with("missing"))
-        .map(|(_, sha)| (*sha).to_owned())
+        .map(|(_, sha)| sha.clone())
         .collect()
 }
 

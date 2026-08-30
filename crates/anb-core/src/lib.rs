@@ -4,6 +4,7 @@
 //! through the [`storage::Storage`] seam, fed by the host.
 
 pub mod config;
+pub mod date;
 pub mod debt;
 pub mod encode;
 pub mod finding;
@@ -27,10 +28,10 @@ pub use notebook::{Notebook, NotebookError};
 pub use record::{Record, RecordType, TaskState};
 pub use reply::{
     Archived, Blocker, Cited, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged,
-    Edited, Epic, Expunged, FileFinding, Held, ListedRecord, Overview, ReadyTask, Transitioned,
-    TypeSection, View, carriers_of,
+    Edited, Epic, Expunged, FileFinding, Held, ListedRecord, Overview, ReadyTask, Repair,
+    Transitioned, TypeSection, View, carriers_of,
 };
-pub use request::{Draft, Edit, Link, Proof};
+pub use request::{CLEARABLE, Draft, Edit, Link, Proof};
 pub use resolve::path_stem;
 pub use status::{
     ActiveTask, Budget, DebtClass, SECTION_ROWS, Status, StatusRule, counts_phrase, debt_classes,

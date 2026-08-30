@@ -28,14 +28,15 @@ pub struct Lock {
 /// The claim `command` needs on the notebook at `root`, or `None` when it
 /// needs none.
 ///
-/// A writer's claim is exclusive, and the root appears here when the
-/// mutation is the call that creates the notebook — so a refused first
-/// command leaves an empty notebook where a successful one would have left
-/// a full one, and later commands typed below that directory resolve to it.
+/// A writer's claim is exclusive. The notebook root appears here when the
+/// mutation is one that could create it, so two first-ever `add`s still
+/// meet on a lock file; a verb that needs a record the notebook does not
+/// hold cannot write whatever its arguments say, so it takes no claim and
+/// leaves no directory behind when it is refused.
 ///
 /// A reader's claim is shared, and it is taken only if the lock file is
-/// already there. Nothing creates it: a notebook no writer has ever touched
-/// has no one to wait for, and a notebook mounted read-only stays readable.
+/// already there. Nothing on a read path creates state, so a notebook
+/// mounted read-only stays readable.
 ///
 /// # Errors
 /// [`StorageError::Io`] when a writer cannot take its claim. A medium that
@@ -44,6 +45,9 @@ pub struct Lock {
 pub fn taken(root: &Path, command: &Command) -> Result<Option<Lock>, StorageError> {
     if !writes(command) {
         return Ok(shared(root));
+    }
+    if !root.is_dir() && !creates(command) {
+        return Ok(None);
     }
     fs::create_dir_all(root).map_err(|error| io_error(&root.display().to_string(), &error))?;
     let file = opened(root).map_err(|error| io_error(LOCK_FILE, &error))?;
@@ -68,6 +72,17 @@ fn opened(root: &Path) -> std::io::Result<File> {
         .create(true)
         .truncate(false)
         .open(root.join(LOCK_FILE))
+}
+
+/// Whether the command could write a record the notebook does not hold —
+/// the only way a notebook comes into being. Every other verb acts on a
+/// record that must already be there, so against a notebook that does not
+/// exist it can only be refused.
+fn creates(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Add(_) | Command::Decide(_) | Command::Note(_) | Command::Ask(_)
+    )
 }
 
 /// Whether the command writes. A writing verb reads the records it needs,

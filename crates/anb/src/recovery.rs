@@ -35,7 +35,7 @@ pub fn subject(command: &Command) -> Subject {
         Command::Ask(_) => ("ask", None),
         Command::Answer { id, .. } => ("answer", Some(id)),
         Command::Retire { id } => ("retire", Some(id)),
-        Command::View { id } => ("view", Some(id)),
+        Command::View { id, .. } => ("view", Some(id)),
         Command::Ready { .. } => ("ready", None),
         Command::List { .. } => ("list", None),
         Command::Status { .. } => ("status", None),
@@ -147,41 +147,43 @@ fn bounded(details: Vec<String>) -> Vec<String> {
     lines
 }
 
-/// A valid command as its runnable shape: the verbs whose bare form clap
-/// would refuse carry their required flag as a placeholder.
-fn transition_retries(action: &str, id: &str) -> Vec<String> {
-    match action {
-        "close" => vec![format!("anb close {id} --note <path>")],
-        "answer" => vec![
-            format!("anb answer {id} --to <id>"),
-            format!("anb answer {id} --drop \"<why>\""),
-        ],
-        action => vec![format!("anb {action} {id}")],
-    }
-}
-
-/// The retry a refused argument points at, keyed by the verb it refused;
-/// the create verbs carry no id and retry as a command shape.
-fn argument_retries(subject: &Subject) -> Vec<String> {
-    match (subject.verb, &subject.id) {
+/// The verbs clap would refuse in their bare form, as the command lines
+/// that run them, with each required flag a placeholder. One home for the
+/// shapes, so a refusal and a retry never offer a caller two different ways
+/// to do the same thing; `None` is a verb whose bare form already runs.
+fn runnable(verb: &str, id: Option<&str>) -> Option<Vec<String>> {
+    let shapes = match (verb, id) {
         ("close", Some(id)) => vec![
             format!("anb close {id} --note <path>"),
             format!("anb close {id} --no-proof"),
         ],
-        ("hold", Some(id)) => vec![format!("anb hold {id} --reason \"<why>\"")],
-        ("comment", Some(id)) => vec![format!("anb comment {id} \"<one line>\"")],
         ("answer", Some(id)) => vec![
             format!("anb answer {id} --to <id>"),
             format!("anb answer {id} --drop \"<why>\""),
         ],
+        ("hold", Some(id)) => vec![format!("anb hold {id} --reason \"<why>\"")],
+        ("comment", Some(id)) => vec![format!("anb comment {id} \"<one line>\"")],
         ("edit", Some(id)) => vec![format!("anb edit {id} --title \"<title>\"")],
         ("add", _) => vec!["anb add \"<title>\"".to_owned()],
         ("decide", _) => vec!["anb decide \"<title>\" --kind rule".to_owned()],
         ("note", _) => vec!["anb note \"<title>\" --kind fact".to_owned()],
         ("ask", _) => vec!["anb ask \"<title>\"".to_owned()],
         ("search", _) => vec!["anb search \"<text>\"".to_owned()],
-        _ => Vec::new(),
-    }
+        _ => return None,
+    };
+    Some(shapes)
+}
+
+/// A valid next state as the command that reaches it.
+fn transition_retries(action: &str, id: &str) -> Vec<String> {
+    runnable(action, Some(id)).unwrap_or_else(|| vec![format!("anb {action} {id}")])
+}
+
+/// The retry a refused argument points at: the same verb in a shape that
+/// carries what it was missing. A verb whose bare form already runs has
+/// nothing to offer — repeating what was just refused is no recovery.
+fn argument_retries(subject: &Subject) -> Vec<String> {
+    runnable(subject.verb, subject.id.as_deref()).unwrap_or_default()
 }
 
 fn finding_line(finding: &Finding) -> String {

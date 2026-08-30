@@ -173,11 +173,19 @@ fn a_decision_created_with_supersedes_flips_its_victim_in_the_same_move() {
         "---\nid: decision.go-for-the-cli\ntype: decision\nstate: superseded\ntitle: A demo record\nsuperseded-by: decision.rust-for-the-cli\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\nGo.\n",
         "the victim gains the back-pointer and can never again read as live"
     );
-    assert!(
-        storage
-            .read(&created.path)
-            .unwrap()
-            .contains("supersedes: decision.go-for-the-cli\n")
+    assert_eq!(
+        storage.read(&created.path).unwrap(),
+        "---\n\
+         id: decision.rust-for-the-cli\n\
+         type: decision\n\
+         state: active\n\
+         kind: shape\n\
+         title: Rust for the CLI\n\
+         supersedes: decision.go-for-the-cli\n\
+         created: 2026-08-27\n\
+         updated: 2026-08-27\n\
+         ---\n",
+        "the successor carries its kind and its claim, in canonical order"
     );
 }
 
@@ -402,34 +410,26 @@ mod conflict_nudge {
         assert_eq!(created.may_conflict[0].id, "decision.first");
     }
 
+    /// One tag in common is not a conflict, however either side counts it:
+    /// a duplicate is one tag, on the draft or on the record standing.
     #[test]
     fn one_shared_tag_is_not_a_conflict_hint() {
-        let (path, text) = standing_decision(&["tags: parser, grammar"]);
-        let mut storage = storage_with(&[(path, &text)]);
-        let created = Notebook::new(&mut storage)
-            .create(&decision_draft(&["parser", "cli"]), TODAY)
-            .unwrap();
-        assert_eq!(created.may_conflict, vec![]);
-    }
-
-    #[test]
-    fn two_copies_of_one_tag_are_one_shared_tag() {
-        let (path, text) = standing_decision(&["tags: parser, grammar"]);
-        let mut storage = storage_with(&[(path, &text)]);
-        let created = Notebook::new(&mut storage)
-            .create(&decision_draft(&["parser", "parser"]), TODAY)
-            .unwrap();
-        assert_eq!(created.may_conflict, vec![]);
-    }
-
-    #[test]
-    fn a_tag_repeated_in_the_standing_list_counts_once() {
-        let (path, text) = standing_decision(&["tags: parser, parser"]);
-        let mut storage = storage_with(&[(path, &text)]);
-        let created = Notebook::new(&mut storage)
-            .create(&decision_draft(&["parser"]), TODAY)
-            .unwrap();
-        assert_eq!(created.may_conflict, vec![]);
+        for (case, standing, drafted) in [
+            ("one each", "parser, grammar", vec!["parser", "cli"]),
+            (
+                "twice on the draft",
+                "parser, grammar",
+                vec!["parser", "parser"],
+            ),
+            ("twice on the record", "parser, parser", vec!["parser"]),
+        ] {
+            let (path, text) = standing_decision(&[&format!("tags: {standing}")]);
+            let mut storage = storage_with(&[(path, &text)]);
+            let created = Notebook::new(&mut storage)
+                .create(&decision_draft(&drafted), TODAY)
+                .unwrap();
+            assert_eq!(created.may_conflict, vec![], "{case}");
+        }
     }
 
     #[test]

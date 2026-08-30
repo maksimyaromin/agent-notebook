@@ -50,11 +50,12 @@ fn list_is_non_recursive_sorted_and_prefixed() {
     );
 }
 
-/// A record kept elsewhere and linked into the notebook is a record; a link
-/// to a directory, or to nothing, is not.
+/// The root is the seam's whole universe, so a link out of it is not a
+/// record however sound its target: a file a project commits could
+/// otherwise decide what a later `view` prints.
 #[cfg(unix)]
 #[test]
-fn a_symlink_is_listed_by_what_it_points_at() {
+fn a_symlink_is_no_record_of_the_notebook() {
     let dir = TempDir::new().unwrap();
     let mut storage = storage_in(&dir);
     storage.write("tasks/task.here.md", "here").unwrap();
@@ -65,14 +66,15 @@ fn a_symlink_is_listed_by_what_it_points_at() {
         tasks.join("task.linked.md"),
     )
     .unwrap();
-    std::os::unix::fs::symlink(dir.path().join("elsewhere"), tasks.join("task.dir.md")).unwrap();
-    std::os::unix::fs::symlink(dir.path().join("gone.md"), tasks.join("task.broken.md")).unwrap();
 
+    assert_eq!(storage.list("tasks").unwrap(), vec!["tasks/task.here.md"]);
     assert_eq!(
-        storage.list("tasks").unwrap(),
-        vec!["tasks/task.here.md", "tasks/task.linked.md"]
+        storage.read("tasks/task.linked.md"),
+        Err(StorageError::NotFound {
+            path: "tasks/task.linked.md".to_owned()
+        })
     );
-    assert_eq!(storage.read("tasks/task.linked.md").unwrap(), "there");
+    assert_eq!(storage.exists("tasks/task.linked.md"), Ok(false));
 }
 
 #[test]

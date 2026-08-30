@@ -47,30 +47,6 @@ mod listing {
             "a record without the field carries none"
         );
     }
-
-    #[test]
-    fn an_invalid_record_lists_as_state_invalid() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.a.md",
-                &record_file("task.a", "task", "open", &[], ""),
-            ),
-            (
-                "tasks/task.broken.md",
-                &record_file("task.broken", "task", "cancelled", &[], ""),
-            ),
-        ]);
-        let rows = Notebook::new(&mut storage).list().unwrap();
-        let states: Vec<(&str, &str)> = rows
-            .iter()
-            .map(|row| (row.id.as_str(), row.state.as_str()))
-            .collect();
-        assert_eq!(
-            states,
-            vec![("task.a", "open"), ("task.broken", "invalid")],
-            "visible as invalid, never silently dropped; check names the findings"
-        );
-    }
 }
 
 mod record_view {

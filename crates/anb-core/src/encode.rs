@@ -2,7 +2,7 @@
 //! quoting rule, and the ready rows — so no two surfaces spell the same
 //! value differently.
 
-use crate::grammar;
+use crate::date;
 use crate::reply::ReadyTask;
 use std::fmt::Write as _;
 
@@ -11,7 +11,9 @@ use std::fmt::Write as _;
 /// What a command derives from the notebook is answered at a fixed size,
 /// whatever the notebook holds; a listing lifts that with `--all`, and a
 /// consequence named in passing has no lift. A record's own bytes are not
-/// derived and are shown whole.
+/// derived, so `view` shows them as they stand — until a body outgrows a
+/// reply on its own, when it too is answered at a fixed size and `--all`
+/// lifts it.
 ///
 /// Its other half, for every block a reply heads with `label[n]`: `n` is
 /// the whole set, and the rows under it are as many as the reply affords,
@@ -43,21 +45,43 @@ fn bounded_join(ids: &[String], separator: &str, bound: usize) -> String {
     out
 }
 
-/// A table value carrying the row delimiter or a quote is JSON-quoted;
-/// everything else stays bare.
+/// A table value carrying the row delimiter, a quote, or a control
+/// character is JSON-quoted; everything else stays bare.
+///
+/// A record's text is whatever a hand wrote, and a terminal obeys the
+/// escape sequences in it: an unescaped `\r` or `ESC[2K` rewrites the row
+/// above and forges a line about another record. Quoted, a hostile title
+/// can only ever widen its own cell.
 #[must_use]
 pub fn quoted_if_delimited(value: &str) -> String {
-    if value.contains(',') || value.contains('"') {
+    if value.contains(',') || value.contains('"') || value.contains(char::is_control) {
         json_quoted(value)
     } else {
         value.to_owned()
     }
 }
 
-/// Quotes the value, escaping the backslash and the quote.
+/// Quotes the value, escaping the backslash, the quote, and every control
+/// character.
 #[must_use]
 pub(crate) fn json_quoted(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for character in value.chars() {
+        match character {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            other if other.is_control() => {
+                let _ = write!(out, "\\u{:04x}", other as u32);
+            }
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// The ready table — header and the first `shown` rows, ages derived from
@@ -83,7 +107,7 @@ pub fn ready_table(rows: &[ReadyTask], shown: usize, today_day: i64) -> String {
 /// Whole days from `created` to `today_day`, floored at zero; an unreadable
 /// date counts as today.
 fn age_days(created: &str, today_day: i64) -> i64 {
-    grammar::day_number(created).map_or(0, |day| (today_day - day).max(0))
+    date::day_number(created).map_or(0, |day| (today_day - day).max(0))
 }
 
 #[cfg(test)]
@@ -129,7 +153,7 @@ mod tests {
             "2026-08-24",
             "Degrades sections, keeps Budget",
         )];
-        let today_day = grammar::day_number("2026-08-28").unwrap();
+        let today_day = date::day_number("2026-08-28").unwrap();
         assert_eq!(
             ready_table(&rows, 1, today_day),
             "ready[1]{id,priority,age,title}:\n  task.demo,-,4d,\"Degrades sections, keeps Budget\"\n"
@@ -142,6 +166,35 @@ mod tests {
         assert_eq!(
             ready_table(&rows, 1, 20_000),
             "ready[1]{id,priority,age,title}:\n  task.demo,1,0d,A demo record\n"
+        );
+    }
+
+    /// A clock behind the notebook's own dates would otherwise age a record
+    /// backwards; nothing is younger than new.
+    #[test]
+    fn a_record_created_after_today_is_no_age_at_all() {
+        let rows = [row("task.demo", None, "2026-08-30", "A demo record")];
+        let today_day = date::day_number("2026-08-28").unwrap();
+        assert_eq!(
+            ready_table(&rows, 1, today_day),
+            "ready[1]{id,priority,age,title}:\n  task.demo,-,0d,A demo record\n"
+        );
+    }
+
+    /// A terminal obeys the escape sequences in a title, so a row must not
+    /// carry one: `\r` alone reprints the line as another record's row.
+    #[test]
+    fn a_control_character_in_a_title_is_escaped_into_its_own_cell() {
+        let rows = [row(
+            "task.demo",
+            None,
+            "2026-08-28",
+            "Harmless\u{1b}[2K\rShipped",
+        )];
+        let today_day = date::day_number("2026-08-28").unwrap();
+        assert_eq!(
+            ready_table(&rows, 1, today_day),
+            "ready[1]{id,priority,age,title}:\n  task.demo,-,0d,\"Harmless\\u001b[2K\\rShipped\"\n"
         );
     }
 }

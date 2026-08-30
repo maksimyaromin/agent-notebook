@@ -5,6 +5,7 @@
 
 pub mod cli;
 pub mod fs_storage;
+pub mod git;
 pub mod json;
 pub mod lock;
 pub mod reconcile;

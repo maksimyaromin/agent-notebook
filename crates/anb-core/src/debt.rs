@@ -6,6 +6,7 @@
 //! for a reader, never Check findings: the body is opaque prose and a
 //! citation in it is a hint, not an invalidity.
 
+use crate::date;
 use crate::grammar;
 use crate::mention;
 use crate::record::{REF_KEYS, Record, RecordType};
@@ -273,7 +274,7 @@ fn collect_clock_signals(
     let quiet_days = days_since_touch(record, sources.today_day);
 
     if let Some(date) = record.file().field("review-by")
-        && grammar::day_number(date).is_some_and(|due| sources.today_day >= due)
+        && date::day_number(date).is_some_and(|due| sources.today_day >= due)
     {
         classes.review_due.push(DebtSignal::ReviewDue {
             id: id.clone(),
@@ -465,7 +466,7 @@ fn days_since_touch(record: &Record, today_day: i64) -> u32 {
         .file()
         .field("updated")
         .or_else(|| record.file().field("created"))
-        .and_then(grammar::day_number);
+        .and_then(date::day_number);
     match touched {
         Some(day) => u32::try_from(today_day - day).unwrap_or(0),
         None => 0,

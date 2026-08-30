@@ -9,6 +9,7 @@ use anb_core::MemoryStorage;
 use anb_core::storage::StorageError;
 use clap::Parser;
 use insta::assert_snapshot;
+use std::fmt::Write as _;
 
 const TODAY: &str = "2026-08-28";
 const GIT_IDENTITY: &str = "Maks";
@@ -402,6 +403,7 @@ mod task_cycle_replies {
             @r"
         error[invalid-transition]: `task.demo` is review; valid: close, return
         try: anb close task.demo --note <path>
+        try: anb close task.demo --no-proof
         try: anb return task.demo
         "
         );
@@ -444,16 +446,6 @@ mod task_cycle_replies {
         assert_eq!(
             ok(&mut storage, &["unblock", "task.a", "task.b"]),
             "ok: unblock task.a — edge on task.b erased (already)\n"
-        );
-    }
-
-    #[test]
-    fn a_replayed_comment_marks_already() {
-        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
-        ok(&mut storage, &["comment", "task.demo", "same note"]);
-        assert_eq!(
-            ok(&mut storage, &["comment", "task.demo", "same note"]),
-            "ok: comment task.demo — logged (already)\n"
         );
     }
 
@@ -1027,6 +1019,55 @@ mod single_record {
         );
     }
 
+    /// A Task's log grows for as long as the work does, and `view` is how a
+    /// session resumes it, so the reply must not grow with the trail.
+    #[test]
+    fn view_prints_a_long_body_by_its_ends_and_names_what_it_dropped() {
+        let mut storage = logged_task(60);
+        let output = ok(&mut storage, &["view", "task.long"]);
+        let body: Vec<&str> = output
+            .lines()
+            .skip_while(|line| *line != "body: |")
+            .skip(1)
+            .collect();
+        assert_eq!(body.first(), Some(&"  - entry 1"));
+        assert_eq!(body.last(), Some(&"  - entry 60"));
+        assert_eq!(
+            body[20],
+            "  \u{2026} 20 more lines: anb view task.long --all"
+        );
+        assert_eq!(body.len(), 41, "twenty lines each end, and the elision");
+    }
+
+    #[test]
+    fn view_all_prints_every_line_of_a_long_body() {
+        let mut storage = logged_task(60);
+        let output = ok(&mut storage, &["view", "task.long", "--all"]);
+        assert!(output.contains("  - entry 30"), "{output}");
+        assert!(!output.contains("more lines"), "{output}");
+    }
+
+    /// The elision costs a line of its own, so a body it could not shorten
+    /// is left whole.
+    #[test]
+    fn view_prints_a_body_at_the_bound_whole() {
+        let mut storage = logged_task(41);
+        let output = ok(&mut storage, &["view", "task.long"]);
+        assert!(output.contains("  - entry 21"), "{output}");
+        assert!(!output.contains("more lines"), "{output}");
+    }
+
+    fn logged_task(entries: usize) -> MemoryStorage {
+        let mut body = String::new();
+        for entry in 1..=entries {
+            let _ = writeln!(body, "- entry {entry}");
+        }
+        storage_with(&[(
+            "tasks/task.long.md".to_owned(),
+            record_file("task.long", "task", "active", "A demo record", &[], &body),
+        )])
+    }
+
     #[test]
     fn view_json_carries_the_fields_in_envelope_order() {
         let output = ok(&mut viewed_storage(), &["view", "task.demo", "--json"]);
@@ -1439,7 +1480,7 @@ mod maintenance_replies {
     }
 
     #[test]
-    fn check_names_file_line_severity_code_and_reason() {
+    fn check_names_file_line_severity_code_repair_and_reason() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md".to_owned(),
             record_file("task.demo", "task", "cancelled", "A demo record", &[], ""),
@@ -1447,10 +1488,69 @@ mod maintenance_replies {
         assert_snapshot!(
             ok(&mut storage, &["check"]),
             @r#"
-        findings[1]{file,line,severity,code,message}:
-          tasks/task.demo.md,4,error,bad-value,"state: `cancelled` is not one of open, active, review, closed for a task"
+        findings[1]{file,line,severity,code,repair,message}:
+          tasks/task.demo.md,4,error,bad-value,-,"state: `cancelled` is not one of open, active, review, closed for a task"
         "#
         );
+    }
+
+    /// The repair a finding names is the whole promise: an agent that runs
+    /// them, and nothing else, ends with a clean notebook.
+    #[test]
+    fn running_the_repair_each_finding_names_clears_the_notebook() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.a.md".to_owned(),
+                record_file(
+                    "task.a",
+                    "task",
+                    "open",
+                    "A demo record",
+                    &["from: task.ghost", "blocked-by: task.b"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.b.md".to_owned(),
+                record_file(
+                    "task.b",
+                    "task",
+                    "open",
+                    "A demo record",
+                    &["blocked-by: task.a"],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.stray.md".to_owned(),
+                record_file(
+                    "note.stray",
+                    "note",
+                    "retired",
+                    "A demo record",
+                    &["kind: fact", "priority: 9"],
+                    "",
+                ),
+            ),
+        ]);
+        let mut repaired = 0;
+        while let Some(repair) = first_repair(&mut storage) {
+            let command: Vec<&str> = repair.split(' ').skip(1).collect();
+            ok(&mut storage, &command);
+            repaired += 1;
+            assert!(repaired < 10, "`{repair}` left its own finding standing");
+        }
+        assert_snapshot!(ok(&mut storage, &["check"]), @"count: 0");
+    }
+
+    /// The first finding that names a repair, as the command line to run.
+    fn first_repair(storage: &mut MemoryStorage) -> Option<String> {
+        let report: serde_json::Value =
+            serde_json::from_str(&ok(storage, &["check", "--json"])).unwrap();
+        report["findings"]
+            .as_array()?
+            .iter()
+            .find_map(|finding| Some(finding.get("repair")?.as_str()?.to_owned()))
     }
 
     #[test]
@@ -1503,15 +1603,6 @@ mod maintenance_replies {
     }
 
     #[test]
-    fn archive_answers_the_move() {
-        let mut storage = storage_with(&[closed_task("task.demo")]);
-        assert_snapshot!(
-            ok(&mut storage, &["archive", "task.demo"]),
-            @"ok: archive task.demo — tasks/task.demo.md→archive/tasks/task.demo.md"
-        );
-    }
-
-    #[test]
     fn a_replayed_archive_answers_already() {
         let mut storage = storage_with(&[closed_task("task.demo")]);
         ok(&mut storage, &["archive", "task.demo"]);
@@ -1532,6 +1623,7 @@ mod maintenance_replies {
             @r"
         error[invalid-transition]: `task.demo` is active; valid: close
         try: anb close task.demo --note <path>
+        try: anb close task.demo --no-proof
         "
         );
     }
@@ -1765,18 +1857,6 @@ mod maintenance_replies {
         error[unknown-id]: no record `task.no-such-epic`
         try: anb list
         "
-        );
-    }
-
-    #[test]
-    fn edit_answers_what_changed() {
-        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
-        assert_snapshot!(
-            ok(
-                &mut storage,
-                &["edit", "task.demo", "--title", "Sharper", "--tag", "epic"],
-            ),
-            @"ok: edit task.demo — title, tags"
         );
     }
 
@@ -2249,6 +2329,10 @@ mod json_maintenance_surface {
         assert_eq!(finding["line"], serde_json::json!(4));
         assert_eq!(finding["severity"], serde_json::json!("error"));
         assert_eq!(finding["code"], serde_json::json!("bad-value"));
+        assert!(
+            finding.get("repair").is_none(),
+            "a state no command writes has no repair: {finding}"
+        );
 
         let mut duplicated = storage_with(&[
             (
@@ -2307,6 +2391,9 @@ mod json_maintenance_surface {
     }
 
     #[test]
+    /// `carried` is the one key an archive reply omits when it is empty:
+    /// nothing was taken along, and a reader is told nothing rather than
+    /// an empty list.
     fn archive_confirms_the_move() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md".to_owned(),

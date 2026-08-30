@@ -425,9 +425,7 @@ fn residence_finding(path: &str, file: &RecordFile) -> Option<Finding> {
         (false, Residence::Live) => Some(Finding::located(
             line,
             FindingCode::UnarchivedSettledRecord,
-            format!(
-                "state: `{state}` is settled, but the file still sits in `{directory}/` — `archive` files it"
-            ),
+            format!("state: `{state}` is settled, but the file still sits in `{directory}/`"),
         )),
         _ => None,
     }

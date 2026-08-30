@@ -7,7 +7,7 @@ use anb_core::encode::ROW_BOUND;
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited,
     Expunged, FileFinding, Held, Link, ListedRecord, Notebook, NotebookError, Overview, Proof,
-    ReadyTask, RecordType, Status, Storage, StorageError, Transitioned, View,
+    ReadyTask, RecordType, Repair, Status, Storage, StorageError, Transitioned, View, path_stem,
 };
 
 /// The first bounded prefix of a flat list; both renderers show the same
@@ -15,6 +15,47 @@ use anb_core::{
 #[must_use]
 pub fn shown(total: usize, all: bool) -> usize {
     if all { total } else { total.min(ROW_BOUND) }
+}
+
+/// The command that lifts a bounded listing: the one the caller ran, with
+/// `--all` on it. A scoped listing answers a different question from the
+/// bare verb, so the scope travels with the hint.
+#[must_use]
+pub fn lifted(verb: &str, scope: Option<&String>) -> String {
+    match scope {
+        Some(scope) => format!("anb {verb} --for {scope} --all"),
+        None => format!("anb {verb} --all"),
+    }
+}
+
+/// A body cut to its ends: the first and last [`ROW_BOUND`] lines, with the
+/// elision naming how many it dropped and how to lift it. A record is read
+/// from both ends — its terms are written at the top and its log grows at
+/// the bottom — so the middle is what a long record can spare.
+#[must_use]
+pub fn bounded_body(body: &str, id: &str, all: bool) -> String {
+    let lines: Vec<&str> = body.lines().collect();
+    if all || lines.len() <= 2 * ROW_BOUND + 1 {
+        return body.to_owned();
+    }
+    let dropped = lines.len() - 2 * ROW_BOUND;
+    format!(
+        "{}\n\u{2026} {dropped} more lines: anb view {id} --all\n{}",
+        lines[..ROW_BOUND].join("\n"),
+        lines[lines.len() - ROW_BOUND..].join("\n"),
+    )
+}
+
+/// The repair a finding names, as the command that runs it. The record is
+/// named by its file, the way every other reply names one.
+#[must_use]
+pub fn repair_command(repair: &Repair, path: &str) -> String {
+    let id = path_stem(path);
+    match repair {
+        Repair::Clear(field) => format!("anb edit {id} --clear {field}"),
+        Repair::Unblock(on) => format!("anb unblock {id} {on}"),
+        Repair::Archive => format!("anb archive {id}"),
+    }
 }
 
 /// What a command came to; the renderers turn one of these into text.
@@ -46,13 +87,18 @@ pub enum Reply {
     Commented(Commented),
     Ready {
         rows: Vec<ReadyTask>,
+        scope: Option<String>,
         all: bool,
     },
     Listing {
         rows: Vec<ListedRecord>,
+        scope: Option<String>,
         all: bool,
     },
-    Viewed(View),
+    Viewed {
+        view: View,
+        all: bool,
+    },
     Status {
         status: Status,
         hook: bool,
@@ -184,13 +230,18 @@ where
         }
         Command::Ready { scope, all } => Ok(Reply::Ready {
             rows: queued(&notebook, scope.as_deref())?,
+            scope,
             all,
         }),
         Command::List { scope, all } => Ok(Reply::Listing {
             rows: listed(&notebook, scope.as_deref())?,
+            scope,
             all,
         }),
-        Command::View { id } => Ok(Reply::Viewed(notebook.view(&id)?)),
+        Command::View { id, all } => Ok(Reply::Viewed {
+            view: notebook.view(&id)?,
+            all,
+        }),
         Command::Check { all } => Ok(Reply::Checked {
             findings: notebook.check()?,
             all,

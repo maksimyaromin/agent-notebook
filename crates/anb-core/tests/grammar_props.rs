@@ -6,12 +6,12 @@ use proptest::prelude::*;
 
 proptest! {
     #[test]
-    fn any_input_renders_back_byte_exact(input in any::<String>()) {
+    fn any_input_renders_back_byte_exact(input in any_file_text()) {
         prop_assert_eq!(RecordFile::parse(&input).render(), input);
     }
 
     #[test]
-    fn normalize_is_idempotent_on_any_input(input in any::<String>()) {
+    fn normalize_is_idempotent_on_any_input(input in any_file_text()) {
         let once = RecordFile::parse(&input).normalize();
         let twice = RecordFile::parse(&once).normalize();
         prop_assert_eq!(twice, once);
@@ -34,6 +34,33 @@ proptest! {
         );
         prop_assert_eq!(RecordFile::parse(&once).normalize(), once);
     }
+}
+
+/// Any text a file could hold, as lines that may be fences, field lines, or
+/// anything at all, under either line terminator.
+///
+/// `any::<String>()` is proptest's `\PC*` and so carries no newline: a file
+/// built from one is a body with no envelope, and a property over it never
+/// reaches the envelope at all.
+fn any_file_text() -> impl Strategy<Value = String> {
+    let line = prop_oneof![
+        Just("---".to_owned()),
+        Just(String::new()),
+        "[a-z-]{1,10}:[ \t]{0,3}[^\n\r]{0,24}",
+        any::<String>(),
+    ];
+    (
+        proptest::collection::vec(line, 0..12),
+        prop_oneof![Just("\n"), Just("\r\n")],
+        any::<bool>(),
+    )
+        .prop_map(|(lines, separator, trailing)| {
+            let mut text = lines.join(separator);
+            if trailing {
+                text.push_str(separator);
+            }
+            text
+        })
 }
 
 #[derive(Debug)]
