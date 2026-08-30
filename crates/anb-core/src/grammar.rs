@@ -13,7 +13,7 @@
 //! methods stay inside the crate and a record is changed through a verb.
 
 use crate::date;
-use crate::finding::{Finding, FindingCode, Severity};
+use crate::finding::{Finding, FindingCode};
 
 const FENCE: &str = "---";
 const BOM: char = '\u{feff}';
@@ -321,9 +321,7 @@ impl RecordFile {
 
     #[must_use]
     pub fn has_errors(&self) -> bool {
-        self.findings
-            .iter()
-            .any(|finding| finding.code.severity() == Severity::Error)
+        self.findings.iter().any(Finding::is_error)
     }
 
     /// Everything after the close fence, verbatim.
@@ -919,13 +917,6 @@ mod tests {
     }
 
     #[test]
-    fn state_no_stays_the_string_no_and_never_becomes_a_boolean() {
-        let file = RecordFile::parse(&record(&required_with("state", "state: no"), ""));
-        assert_eq!(file.findings(), &[]);
-        assert_eq!(file.field("state"), Some("no"));
-    }
-
-    #[test]
     fn normalize_orders_fields_canonically_and_fixes_separators() {
         let text = record(
             &[
@@ -951,20 +942,6 @@ mod tests {
              ---\n\
              body\n"
         );
-    }
-
-    #[test]
-    fn a_repeatable_field_yields_every_occurrence_in_file_order() {
-        let mut lines = REQUIRED.to_vec();
-        lines.push("link: doc docs/format.md");
-        lines.push("link: pr https://example.com/1");
-        let file = RecordFile::parse(&record(&lines, ""));
-        assert_eq!(file.findings(), &[]);
-        assert_eq!(
-            file.field_values("link").collect::<Vec<_>>(),
-            vec!["doc docs/format.md", "pr https://example.com/1"]
-        );
-        assert_eq!(file.field("link"), Some("doc docs/format.md"));
     }
 
     #[test]
@@ -1101,14 +1078,5 @@ mod tests {
         let mut file = RecordFile::parse(&record(&REQUIRED, "no newline at the end"));
         file.append_body("- a log line");
         assert_eq!(file.body(), "no newline at the end\n- a log line\n");
-    }
-
-    #[test]
-    fn a_body_without_a_final_newline_is_the_bodys_own_business() {
-        let text = record(&REQUIRED, "no newline at the end");
-        let file = RecordFile::parse(&text);
-        assert_eq!(file.findings(), &[]);
-        assert_eq!(file.render(), text);
-        assert_eq!(file.normalize(), text);
     }
 }

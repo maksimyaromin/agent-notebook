@@ -41,8 +41,8 @@ use crate::record::{
     not_utf8_finding,
 };
 use crate::reply::{
-    Archived, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged, Edited, Epic,
-    Expunged, Held, ListedRecord, Overview, ReadyTask, Transitioned, TypeSection, View,
+    Archived, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged, Edited, Expunged,
+    Held, ListedRecord, Overview, ReadyTask, Transitioned, TypeSection, View,
 };
 use crate::request::{Draft, Edit, Proof};
 use crate::resolve::{
@@ -59,7 +59,7 @@ struct IngestedReport {
     dangling_mentions: Vec<String>,
 }
 
-pub struct Notebook<'a, S: Storage> {
+pub struct Notebook<'a, S> {
     storage: &'a mut S,
 }
 
@@ -145,19 +145,6 @@ impl<'a, S: Storage> Notebook<'a, S> {
         Ok((corpus, scope))
     }
 
-    /// The hubs of the notebook with their progress: every epic a reader
-    /// might be asked to continue, and where each stands.
-    ///
-    /// # Errors
-    /// A storage failure.
-    pub fn epics(&self) -> Result<Vec<Epic>, NotebookError> {
-        let corpus = self.live_corpus()?;
-        let kin = self.archived_kin(&corpus)?;
-        let resolvable = corpus.resolver();
-        let queue = query::ready_rows(&corpus.records, &resolvable);
-        Ok(query::epic_rows(&corpus.records, &kin, &resolvable, &queue))
-    }
-
     /// The archived records the live ones still name as a blocker or an
     /// Origin, and the ones those name in turn.
     ///
@@ -178,37 +165,86 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// this avoids.
     fn archived_kin(&self, corpus: &Corpus) -> Result<Vec<Record>, NotebookError> {
         let archived = corpus.resolver();
-        let mut wanted: Vec<String> = corpus
-            .records
+        let wanted = archived_among(corpus.records.iter().flat_map(query::kin_of), &archived);
+        self.kin_closure(&archived, Vec::new(), wanted)
+    }
+
+    /// The kin an epic asks for — and, when the notebook keeps no epic,
+    /// only the one hop that establishes there is none.
+    ///
+    /// A hub names its own children on its `blocked-by` lines, so whether
+    /// the notebook holds an epic at all is settled one step into the
+    /// archive. Everything behind those children answers a second question
+    /// — where a live record sits inside an epic — which a notebook without
+    /// one never asks. So a dashboard reads history only once there is an
+    /// epic to spend it on.
+    fn epic_kin(&self, corpus: &Corpus) -> Result<Vec<Record>, NotebookError> {
+        let archived = corpus.resolver();
+        let children = archived_among(
+            corpus
+                .records
+                .iter()
+                .flat_map(|record| record.file().field_values("blocked-by")),
+            &archived,
+        );
+        let mut declared = Vec::new();
+        for id in children {
+            if let Some(record) = self.archived_record(&id)? {
+                declared.push(record);
+            }
+        }
+        if !query::any_hub(&corpus.records, &declared, &archived) {
+            return Ok(declared);
+        }
+        let wanted = archived_among(
+            corpus
+                .records
+                .iter()
+                .chain(declared.iter())
+                .flat_map(query::kin_of),
+            &archived,
+        );
+        self.kin_closure(&archived, declared, wanted)
+    }
+
+    /// Read the archived records `wanted` names, and those they name in
+    /// turn, beside the `kin` already read.
+    fn kin_closure(
+        &self,
+        archived: &Resolver<'_>,
+        mut kin: Vec<Record>,
+        mut wanted: Vec<String>,
+    ) -> Result<Vec<Record>, NotebookError> {
+        let mut seen: BTreeSet<String> = kin
             .iter()
-            .flat_map(query::kin_of)
-            .filter(|target| archived.archived(target))
-            .map(str::to_owned)
+            .map(|record| path_stem(record.path()).to_owned())
             .collect();
-        let mut seen = BTreeSet::new();
-        let mut kin = Vec::new();
         while let Some(id) = wanted.pop() {
             if !seen.insert(id.clone()) {
                 continue;
             }
-            let Ok(record_type) = write::parsed_type(&id) else {
+            let Some(record) = self.archived_record(&id)? else {
                 continue;
             };
-            let path = record_path(&id, record_type, true);
-            let record = match self.storage.read(&path) {
-                Ok(text) => Record::parse(&path, &text),
-                Err(StorageError::NotUtf8 { .. }) => Record::unreadable(&path),
-                Err(StorageError::NotFound { .. }) => continue,
-                Err(error) => return Err(error.into()),
-            };
-            wanted.extend(
-                query::kin_of(&record)
-                    .filter(|target| archived.archived(target))
-                    .map(str::to_owned),
-            );
+            wanted.extend(archived_among(query::kin_of(&record), archived));
             kin.push(record);
         }
         Ok(kin)
+    }
+
+    /// One archived record by id; `None` when the archive holds no such
+    /// file, or the id names no type at all.
+    fn archived_record(&self, id: &str) -> Result<Option<Record>, NotebookError> {
+        let Ok(record_type) = write::parsed_type(id) else {
+            return Ok(None);
+        };
+        let path = record_path(id, record_type, true);
+        match self.storage.read(&path) {
+            Ok(text) => Ok(Some(Record::parse(&path, &text))),
+            Err(StorageError::NotUtf8 { .. }) => Ok(Some(Record::unreadable(&path))),
+            Err(StorageError::NotFound { .. }) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// The session-start dashboard under `budget`, gated: one quiet line
@@ -253,7 +289,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
             in_flight: query::in_flight_tasks(&live_valid),
             review: query::review_tasks(&live_valid),
             rules: query::standing_rules(&live_valid),
-            epics: query::epic_rows(records, &self.archived_kin(&corpus)?, &resolvable, &queue),
+            epics: query::epic_rows(records, &self.epic_kin(&corpus)?, &resolvable, &queue),
             ready: queue,
             debt: debt::signals(&sources, &thresholds),
             today_day,
@@ -325,7 +361,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let queue = query::ready_rows(records, &resolvable);
         Ok(Overview {
             live: query::live_counts(records),
-            epics: query::epic_rows(records, &self.archived_kin(&corpus)?, &resolvable, &queue),
+            epics: query::epic_rows(records, &self.epic_kin(&corpus)?, &resolvable, &queue),
             sections,
             archived: corpus.archive,
         })
@@ -1717,4 +1753,16 @@ struct Victim {
     path: String,
     record: Record,
     dead_state: &'static str,
+}
+
+/// The ids among `targets` the archive holds, each once, in the order the
+/// records name them.
+fn archived_among<'a>(
+    targets: impl Iterator<Item = &'a str>,
+    archived: &Resolver<'_>,
+) -> Vec<String> {
+    targets
+        .filter(|target| archived.archived(target))
+        .map(str::to_owned)
+        .collect()
 }

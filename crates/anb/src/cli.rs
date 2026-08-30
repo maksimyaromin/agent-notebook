@@ -46,7 +46,7 @@ pub enum Command {
         #[arg(long)]
         reason: Option<String>,
         /// Calendar hold: the date to resume on.
-        #[arg(long)]
+        #[arg(long, value_name = "DATE")]
         until: Option<String>,
     },
     /// Resume a held Task.
@@ -154,11 +154,13 @@ pub struct DraftArgs {
     /// Origin: the record this record was born from.
     #[arg(long)]
     pub from: Option<String>,
-    #[arg(long = "tag")]
+    /// A tag; repeatable.
+    #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
     /// `<kind> <target>`, e.g. `pr https://…`; repeatable.
-    #[arg(long = "link")]
+    #[arg(long = "link", value_name = "LINK")]
     pub links: Vec<String>,
+    /// The prose under the envelope; omitted, the record opens empty.
     #[arg(long)]
     pub body: Option<String>,
     /// The accountable identity; omitted, git identity fills it.
@@ -205,16 +207,17 @@ pub struct NoteArgs {
 #[derive(Args)]
 pub struct EditArgs {
     pub id: String,
+    /// The whole title, replaced.
     #[arg(long)]
     pub title: Option<String>,
     /// The whole body, replaced; empty clears it.
     #[arg(long)]
     pub body: Option<String>,
     /// Add a tag; repeatable.
-    #[arg(long = "tag")]
+    #[arg(long = "tag", value_name = "TAG")]
     pub add_tags: Vec<String>,
     /// Remove a tag; repeatable.
-    #[arg(long = "untag")]
+    #[arg(long = "untag", value_name = "TAG")]
     pub remove_tags: Vec<String>,
     /// Origin: the record this record was born from.
     #[arg(long)]
@@ -223,7 +226,7 @@ pub struct EditArgs {
     #[arg(long)]
     pub priority: Option<u32>,
     /// The explicit resurfacing date.
-    #[arg(long)]
+    #[arg(long, value_name = "DATE")]
     pub review_by: Option<String>,
     /// The optional field to erase: `from`, `priority`, or `review-by`;
     /// repeatable.

@@ -123,7 +123,7 @@ fn excluding_errors(record: &Record, resolvable: &Resolver<'_>) -> usize {
     let own = record
         .findings()
         .iter()
-        .filter(|finding| finding.code.severity() == crate::finding::Severity::Error)
+        .filter(|finding| finding.is_error())
         .count();
     let dangling = reference_targets(record)
         .filter(|target| !resolvable.resolves(target))

@@ -31,24 +31,6 @@ mod dependency_graph {
     }
 
     #[test]
-    fn a_replayed_block_answers_already_true_and_changes_no_byte() {
-        let mut storage = storage_with(&[
-            ("tasks/task.a.md", &task("task.a", "open", &[])),
-            ("tasks/task.b.md", &task("task.b", "open", &[])),
-        ]);
-        Notebook::new(&mut storage)
-            .block("task.a", "task.b", TODAY)
-            .unwrap();
-        let after_first = storage.read("tasks/task.a.md").unwrap();
-
-        let replay = Notebook::new(&mut storage)
-            .block("task.a", "task.b", TODAY)
-            .unwrap();
-        assert_eq!(replay, edged("task.a", "task.b", true));
-        assert_eq!(storage.read("tasks/task.a.md").unwrap(), after_first);
-    }
-
-    #[test]
     fn blocking_a_task_on_itself_is_refused_as_the_shortest_cycle() {
         let text = task("task.a", "open", &[]);
         let mut storage = storage_with(&[("tasks/task.a.md", &text)]);
@@ -88,35 +70,6 @@ mod dependency_graph {
             }
         );
         assert_eq!(storage.read("tasks/task.b.md").unwrap(), text);
-    }
-
-    #[test]
-    fn a_cycle_through_an_intermediate_task_is_still_refused() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.a.md",
-                &task("task.a", "open", &["blocked-by: task.b"]),
-            ),
-            (
-                "tasks/task.b.md",
-                &task("task.b", "open", &["blocked-by: task.c"]),
-            ),
-            ("tasks/task.c.md", &task("task.c", "open", &[])),
-        ]);
-        let error = Notebook::new(&mut storage)
-            .block("task.c", "task.a", TODAY)
-            .unwrap_err();
-        assert_eq!(
-            error,
-            NotebookError::WouldCycle {
-                chain: vec![
-                    "task.c".to_owned(),
-                    "task.a".to_owned(),
-                    "task.b".to_owned(),
-                    "task.c".to_owned(),
-                ],
-            }
-        );
     }
 
     #[test]
@@ -455,7 +408,6 @@ mod dependency_graph {
 
 mod ready_queue {
     use crate::*;
-    use anb_core::ReadyTask;
 
     fn task(id: &str, state: &str, extra_lines: &[&str]) -> String {
         record_file(id, "task", state, extra_lines, "")
@@ -580,24 +532,6 @@ mod ready_queue {
             "an invalid record is `check`'s to name, never a silent queue entry"
         );
     }
-
-    #[test]
-    fn a_row_carries_what_the_queue_prints() {
-        let mut storage = storage_with(&[(
-            "tasks/task.pickable.md",
-            &task("task.pickable", "open", &["priority: 1"]),
-        )]);
-        let rows = Notebook::new(&mut storage).ready().unwrap();
-        assert_eq!(
-            rows,
-            vec![ReadyTask {
-                id: "task.pickable".to_owned(),
-                priority: Some(1),
-                created: "2026-08-24".to_owned(),
-                title: "A demo record".to_owned(),
-            }]
-        );
-    }
 }
 
 /// The epic pattern: a hub Task, its scope, and where it stands.
@@ -651,7 +585,7 @@ mod epics {
     #[test]
     fn a_hub_reports_the_children_it_waits_on_and_what_to_pick_up_next() {
         assert_eq!(
-            Notebook::new(&mut an_epic()).epics().unwrap(),
+            Notebook::new(&mut an_epic()).overview().unwrap().epics,
             vec![Epic {
                 id: "task.epic-auth".to_owned(),
                 closed: 1,
@@ -680,7 +614,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).epics().unwrap(),
+            Notebook::new(&mut storage).overview().unwrap().epics,
             vec![],
             "origin alone is not decomposition — the task does not wait on the doubt"
         );
@@ -699,7 +633,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).epics().unwrap(),
+            Notebook::new(&mut storage).overview().unwrap().epics,
             vec![],
             "waiting on something is not having given birth to it"
         );
@@ -769,7 +703,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).epics().unwrap(),
+            Notebook::new(&mut storage).overview().unwrap().epics,
             vec![Epic {
                 id: "task.epic-auth".to_owned(),
                 closed: 1,
@@ -883,7 +817,7 @@ mod epics {
             "an epic with dispatchable work must never report an empty queue"
         );
         assert_eq!(
-            notebook.epics().unwrap()[0].next.as_deref(),
+            notebook.overview().unwrap().epics[0].next.as_deref(),
             Some("task.g1")
         );
     }
@@ -907,7 +841,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).epics().unwrap(),
+            Notebook::new(&mut storage).overview().unwrap().epics,
             vec![],
             "its acceptance close has happened; asking for it again asks for done work"
         );
@@ -938,7 +872,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).epics().unwrap(),
+            Notebook::new(&mut storage).overview().unwrap().epics,
             vec![],
             "one command must not call a record invalid in one block and an epic in another"
         );

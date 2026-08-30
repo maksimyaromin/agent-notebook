@@ -13,7 +13,7 @@
 
 use crate::cli::Command;
 use crate::fs_storage::{LOCK_FILE, ignore_leavings};
-use anb_core::storage::StorageError;
+use anb_core::StorageError;
 use std::fs::{self, File, OpenOptions};
 use std::path::Path;
 

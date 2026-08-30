@@ -125,7 +125,7 @@ pub(crate) fn json_quoted(value: &str) -> String {
 #[must_use]
 pub fn ready_table(rows: &[ReadyTask], shown: usize, today_day: i64) -> String {
     let mut out = format!("ready[{}]{{id,priority,age,title}}:\n", rows.len());
-    for row in &rows[..shown] {
+    for row in rows.iter().take(shown) {
         let priority = row
             .priority
             .map_or_else(|| "-".to_owned(), |priority| priority.to_string());

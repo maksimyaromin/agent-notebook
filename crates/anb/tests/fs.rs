@@ -75,6 +75,29 @@ fn a_symlink_is_no_record_of_the_notebook() {
         })
     );
     assert_eq!(storage.exists("tasks/task.linked.md"), Ok(false));
+    assert!(storage.write("tasks/task.linked.md", "written").is_err());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("elsewhere/task.there.md")).unwrap(),
+        "there",
+        "a write must not travel down a link to a file outside the root"
+    );
+}
+
+/// The temp file is the atomic write's own business: when the rename cannot
+/// land, the failure is the caller's to see and the leftover is not.
+#[test]
+fn a_write_that_cannot_land_leaves_no_temp_file_behind() {
+    let dir = TempDir::new().unwrap();
+    let mut storage = storage_in(&dir);
+    // A directory standing where the record's file belongs: the temp file
+    // is written, and no rename can replace a directory with it.
+    fs::create_dir_all(dir.path().join("tasks/task.demo.md/inside")).unwrap();
+    assert!(storage.write("tasks/task.demo.md", "body").is_err());
+    assert_eq!(
+        storage.list("tasks").unwrap(),
+        Vec::<String>::new(),
+        "the temp file of the failed write must be gone"
+    );
 }
 
 /// A notebook path that names a file is refused for what it is, rather
@@ -150,6 +173,24 @@ mod root_resolution {
         fs::create_dir_all(dir.path().join(".git")).unwrap();
         fs::create_dir_all(dir.path().join("a/.agent-notebook")).unwrap();
         fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        assert_eq!(
+            resolve_root(&dir.path().join("a/b")),
+            dir.path().join("a/.agent-notebook")
+        );
+    }
+
+    /// A git worktree and a submodule carry `.git` as a file naming the
+    /// real directory. It anchors a project exactly as the directory does —
+    /// walking past it would put the notebook in whatever sits above.
+    #[test]
+    fn a_git_file_anchors_the_project_like_a_git_directory() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        fs::write(
+            dir.path().join("a/.git"),
+            "gitdir: /elsewhere/.git/worktrees/a\n",
+        )
+        .unwrap();
         assert_eq!(
             resolve_root(&dir.path().join("a/b")),
             dir.path().join("a/.agent-notebook")

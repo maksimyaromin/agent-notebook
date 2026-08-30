@@ -205,14 +205,65 @@ fn the_widening_opens_each_filed_record_once_when_the_edges_loop() {
         )
         .unwrap();
 
-    Notebook::new(&mut storage)
-        .status(TODAY, Budget::Unbounded, nothing_lost)
-        .unwrap();
+    Notebook::new(&mut storage).list_for("task.live").unwrap();
 
     assert_eq!(
         storage.archived_reads(),
         vec!["archive/tasks/task.a.md", "archive/tasks/task.b.md"],
         "each end of the loop is opened once, and the walk ends"
+    );
+}
+
+/// The archive answers one question for the dashboard: where a record sits
+/// inside an epic. A notebook that keeps no epic never asks it, and so
+/// reads none of the lineage its live records still point at.
+#[test]
+fn a_dashboard_widens_into_the_archive_only_for_an_epic() {
+    let mut storage = watched(0, 0);
+    for (id, origin) in [
+        ("task.child", "from: task.hub\n"),
+        ("task.deeper", "from: task.child\n"),
+    ] {
+        storage
+            .write(
+                &format!("archive/tasks/{id}.md"),
+                &task(id, "closed", origin),
+            )
+            .unwrap();
+    }
+    storage
+        .write(
+            "tasks/task.live.md",
+            &task("task.live", "open", "from: task.deeper\n"),
+        )
+        .unwrap();
+
+    Notebook::new(&mut storage)
+        .status(TODAY, Budget::Unbounded, nothing_lost)
+        .unwrap();
+    assert_eq!(
+        storage.archived_reads(),
+        Vec::<String>::new(),
+        "no live record claims a child, so there is no epic to place anything in"
+    );
+
+    storage
+        .write(
+            "tasks/task.hub.md",
+            &task("task.hub", "open", "blocked-by: task.child\n"),
+        )
+        .unwrap();
+    storage.reads.borrow_mut().clear();
+    Notebook::new(&mut storage)
+        .status(TODAY, Budget::Unbounded, nothing_lost)
+        .unwrap();
+    assert_eq!(
+        storage.archived_reads(),
+        vec![
+            "archive/tasks/task.child.md",
+            "archive/tasks/task.deeper.md"
+        ],
+        "the hub's child, and the lineage that carries the live record to it"
     );
 }
 

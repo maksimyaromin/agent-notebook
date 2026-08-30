@@ -315,6 +315,36 @@ fn an_archived_origin_still_counts_as_existing() {
     assert!(Notebook::new(&mut storage).create(&draft, TODAY).is_ok());
 }
 
+/// An envelope field is one line, and every identity a caller may set goes
+/// onto one: a value carrying a newline would write envelope lines of its
+/// own — a `by` that closes the record and reopens it as something else.
+#[test]
+fn an_identity_field_carrying_a_second_line_is_refused() {
+    for (field, forged) in [
+        ("by", "Maks\nstate: closed"),
+        ("via", "claude-code\nstate: closed"),
+        ("kind", "rule\nstate: closed"),
+    ] {
+        let mut storage = MemoryStorage::new();
+        let mut draft = Draft::new(RecordType::Decision, "A ruling");
+        match field {
+            "by" => draft.by = Some(forged.to_owned()),
+            "via" => draft.via = Some(forged.to_owned()),
+            _ => draft.kind = Some(forged.to_owned()),
+        }
+        assert!(
+            matches!(
+                Notebook::new(&mut storage)
+                    .create(&draft, TODAY)
+                    .unwrap_err(),
+                NotebookError::InvalidArgument { .. }
+            ),
+            "{field}"
+        );
+        assert_eq!(storage.list("decisions").unwrap(), Vec::<String>::new());
+    }
+}
+
 #[test]
 fn a_kind_outside_the_types_enum_is_refused_naming_the_set() {
     let mut storage = MemoryStorage::new();

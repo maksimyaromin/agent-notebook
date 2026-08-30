@@ -138,6 +138,13 @@ pub struct Finding {
 }
 
 impl Finding {
+    /// Whether this finding is the kind that freezes its record: the one
+    /// question every caller of a finding list asks, so it is asked here.
+    #[must_use]
+    pub fn is_error(&self) -> bool {
+        self.code.severity() == Severity::Error
+    }
+
     #[must_use]
     pub fn at(line: usize, code: FindingCode, message: String) -> Self {
         Self {
@@ -165,15 +172,6 @@ impl Finding {
             code,
             line,
             message,
-        }
-    }
-}
-
-impl std::fmt::Display for Finding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.line {
-            Some(line) => write!(f, "line {line}: {}: {}", self.code, self.message),
-            None => write!(f, "{}: {}", self.code, self.message),
         }
     }
 }

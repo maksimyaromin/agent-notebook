@@ -7,8 +7,7 @@ use anb::lock;
 use anb::reconcile::lost_proofs;
 use anb::reply::{Host, execute};
 use anb::{json, text};
-use anb_core::NotebookError;
-use anb_core::storage::StorageError;
+use anb_core::{NotebookError, StorageError};
 use clap::Parser;
 use std::io::{self, ErrorKind, Write};
 use std::process::ExitCode;
@@ -103,10 +102,11 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         Err(error) => return Err(render_failure(&NotebookError::Storage(error))),
     };
 
+    let settled = |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited);
     let host = Host {
         git_by: anb::git::user_name,
-        read_report,
-        lost_proofs: |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited),
+        read_report: &read_report,
+        lost_proofs: &settled,
         today: &today,
     };
     match execute(cli.command, &mut storage, host) {

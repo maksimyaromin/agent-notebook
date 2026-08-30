@@ -7,12 +7,6 @@
 
 use std::collections::BTreeMap;
 
-/// A path relative to the notebook root, e.g. `tasks/parser-fences.md`.
-///
-/// Always `/`-separated, never absolute, never containing `.` or `..`
-/// components. Adapters are responsible for mapping it to their medium.
-pub type RelPath = str;
-
 /// Errors an adapter may report. The Core treats them as opaque outcomes;
 /// it never retries and never inspects platform detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +42,10 @@ impl std::error::Error for StorageError {}
 /// The object handed to the Core, and the only path to data.
 ///
 /// No command may bypass it: tests feed strings in and assert strings and
-/// returned models out at exactly this seam.
+/// returned models out at exactly this seam. Every path is relative to the
+/// notebook root, `/`-separated, never absolute and never carrying a `.` or
+/// `..` component — e.g. `tasks/parser-fences.md`; mapping one onto its
+/// medium is the adapter's job.
 pub trait Storage {
     /// List the paths directly under `dir` (non-recursive), sorted, each
     /// keeping its `dir/` prefix. A missing directory is an empty listing,
@@ -56,7 +53,7 @@ pub trait Storage {
     ///
     /// # Errors
     /// [`StorageError::Io`] when the adapter cannot enumerate `dir`.
-    fn list(&self, dir: &RelPath) -> Result<Vec<String>, StorageError>;
+    fn list(&self, dir: &str) -> Result<Vec<String>, StorageError>;
 
     /// Read the full contents of the file at `path`.
     ///
@@ -64,14 +61,14 @@ pub trait Storage {
     /// [`StorageError::NotFound`] when the adapter holds nothing at `path`
     /// — a name with no file, or one it will not serve as a record —
     /// [`StorageError::Io`] on any other adapter failure.
-    fn read(&self, path: &RelPath) -> Result<String, StorageError>;
+    fn read(&self, path: &str) -> Result<String, StorageError>;
 
     /// Write `content` to `path`, creating parents as needed and replacing
     /// any existing contents atomically from the Core's point of view.
     ///
     /// # Errors
     /// [`StorageError::Io`] when the adapter cannot persist the write.
-    fn write(&mut self, path: &RelPath, content: &str) -> Result<(), StorageError>;
+    fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError>;
 
     /// Remove the file at `path`. Removing a missing path is an error:
     /// the Core moves records (archive), it never blind-deletes.
@@ -79,7 +76,7 @@ pub trait Storage {
     /// # Errors
     /// [`StorageError::NotFound`] when `path` does not exist,
     /// [`StorageError::Io`] on any other adapter failure.
-    fn remove(&mut self, path: &RelPath) -> Result<(), StorageError>;
+    fn remove(&mut self, path: &str) -> Result<(), StorageError>;
 
     /// Whether the adapter holds a record at `path`. Bytes that are not
     /// UTF-8 still occupy it: the question is the name, not what it says —
@@ -91,7 +88,7 @@ pub trait Storage {
     ///
     /// # Errors
     /// [`StorageError::Io`] on an adapter failure other than absence.
-    fn exists(&self, path: &RelPath) -> Result<bool, StorageError> {
+    fn exists(&self, path: &str) -> Result<bool, StorageError> {
         match self.read(path) {
             Ok(_) | Err(StorageError::NotUtf8 { .. }) => Ok(true),
             Err(StorageError::NotFound { .. }) => Ok(false),
@@ -130,7 +127,7 @@ impl MemoryStorage {
 }
 
 impl Storage for MemoryStorage {
-    fn list(&self, dir: &RelPath) -> Result<Vec<String>, StorageError> {
+    fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
         let prefix = if dir.is_empty() {
             String::new()
         } else {
@@ -147,7 +144,7 @@ impl Storage for MemoryStorage {
             .collect())
     }
 
-    fn read(&self, path: &RelPath) -> Result<String, StorageError> {
+    fn read(&self, path: &str) -> Result<String, StorageError> {
         self.files
             .get(path)
             .cloned()
@@ -156,12 +153,12 @@ impl Storage for MemoryStorage {
             })
     }
 
-    fn write(&mut self, path: &RelPath, content: &str) -> Result<(), StorageError> {
+    fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
         self.files.insert(path.to_owned(), content.to_owned());
         Ok(())
     }
 
-    fn remove(&mut self, path: &RelPath) -> Result<(), StorageError> {
+    fn remove(&mut self, path: &str) -> Result<(), StorageError> {
         if self.files.remove(path).is_some() {
             Ok(())
         } else {
@@ -171,7 +168,7 @@ impl Storage for MemoryStorage {
         }
     }
 
-    fn exists(&self, path: &RelPath) -> Result<bool, StorageError> {
+    fn exists(&self, path: &str) -> Result<bool, StorageError> {
         Ok(self.files.contains_key(path))
     }
 }
