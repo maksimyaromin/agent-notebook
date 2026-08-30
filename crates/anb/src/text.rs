@@ -5,7 +5,7 @@
 
 use crate::json;
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, bounded_body, lifted, repair_command, shown};
+use crate::reply::{Reply, lifted, repair_command, shown};
 use anb_core::date;
 use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
@@ -66,13 +66,13 @@ pub fn render(reply: &Reply, today: &str) -> String {
             rows,
             shown(rows.len(), *all),
             today,
-            &lifted("ready", scope.as_ref()),
+            &lifted("ready", scope.as_deref()),
         ),
         Reply::Listing { rows, scope, all } => listing_table(
             rows,
             shown(rows.len(), *all),
             "records",
-            &lifted("list", scope.as_ref()),
+            &lifted("list", scope.as_deref()),
         ),
         Reply::Viewed { view, all } => single_record(view, *all),
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
@@ -142,7 +142,7 @@ fn created_lines(command: &str, created: &anb_core::Created) -> String {
         .iter()
         .map(|cited| format!("{} ({})", cited.id, cited.author()))
         .collect();
-    named_line(&mut out, "may-conflict", &named, ROW_BOUND);
+    named_line(&mut out, "may-conflict", &named, ROW_BOUND, None);
     dangling_mention_line(&mut out, &created.dangling_mentions);
     out
 }
@@ -163,12 +163,13 @@ fn closed_lines(closed: &anb_core::Closed) -> String {
         let _ = writeln!(out, "report: {note}");
     }
     dangling_mention_line(&mut out, &closed.dangling_mentions);
-    named_line(&mut out, "unblocked", &closed.unblocked, ROW_BOUND);
+    named_line(&mut out, "unblocked", &closed.unblocked, ROW_BOUND, None);
     named_line(
         &mut out,
         "open-questions",
         &closed.open_questions,
         ROW_BOUND,
+        None,
     );
     out
 }
@@ -182,19 +183,35 @@ fn archive_lines(moved: &anb_core::Archived) -> String {
             moved.id, moved.from, moved.to
         )
     };
-    named_line(&mut out, "carried", &moved.carried, ROW_BOUND);
+    named_line(&mut out, "carried", &moved.carried, ROW_BOUND, None);
     out
 }
 
+/// Body text under its `body: |` header: every line indented, and an empty
+/// line left empty rather than indented into whitespace.
+fn indented(out: &mut String, text: &str) {
+    for line in text.lines() {
+        if line.is_empty() {
+            out.push('\n');
+        } else {
+            let _ = writeln!(out, "  {line}");
+        }
+    }
+}
+
 /// A reply's inline list: how many there are, then the naming, cut at
-/// `bound`.
-fn named_line(out: &mut String, label: &str, items: &[String], bound: usize) {
+/// `bound` — and, where a flag lifts the cut, the command that does.
+fn named_line(out: &mut String, label: &str, items: &[String], bound: usize, lift: Option<&str>) {
     if items.is_empty() {
         return;
     }
+    let restore = match lift.filter(|_| items.len() > bound) {
+        Some(command) => format!(": {command}"),
+        None => String::new(),
+    };
     let _ = writeln!(
         out,
-        "{label}[{}]: {}",
+        "{label}[{}]: {}{restore}",
         items.len(),
         encode::id_list(items, bound)
     );
@@ -284,12 +301,12 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
             .map_or_else(|| "-".to_owned(), |line| line.to_string());
         let repair = located.repair.as_ref().map_or_else(
             || "-".to_owned(),
-            |repair| repair_command(repair, &located.path),
+            |repair| quoted_if_delimited(&repair_command(repair, &located.path)),
         );
         let _ = writeln!(
             out,
             "  {},{line},{},{},{repair},{}",
-            located.path,
+            quoted_if_delimited(&located.path),
             located.finding.code.severity().as_str(),
             located.finding.code.as_str(),
             quoted_if_delimited(&located.finding.message)
@@ -361,19 +378,30 @@ fn single_record(view: &View, all: bool) -> String {
     }
     if !view.body.is_empty() {
         out.push_str("body: |\n");
-        for line in bounded_body(&view.body, &view.id, all).lines() {
-            if line.is_empty() {
-                out.push('\n');
-            } else {
-                let _ = writeln!(out, "  {line}");
+        match encode::body_ends(&view.body).filter(|_| !all) {
+            Some((head, dropped, tail)) => {
+                indented(&mut out, head);
+                let _ = writeln!(
+                    out,
+                    "  \u{2026} {dropped} more lines: anb view {} --all",
+                    view.id
+                );
+                indented(&mut out, tail);
             }
+            None => indented(&mut out, &view.body),
         }
     }
     for (label, ids) in [
         ("mentions", &view.mentions),
         ("mentioned-by", &view.mentioned_by),
     ] {
-        named_line(&mut out, label, ids, shown(ids.len(), all));
+        named_line(
+            &mut out,
+            label,
+            ids,
+            shown(ids.len(), all),
+            Some(&format!("anb view {} --all", view.id)),
+        );
     }
     out
 }

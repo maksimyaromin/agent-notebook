@@ -285,16 +285,18 @@ impl FileFinding {
 /// The move that erases a finding: a verb the notebook already has,
 /// aimed at the record the finding sits on.
 ///
-/// The host spells it as a command. Most findings carry none — a hand
-/// edit can break a line no verb writes, and repairing that is a hand
-/// edit too. A record broken in more ways than one refuses the move
-/// until the findings no verb reaches are repaired by hand.
+/// The host spells it as a command. A finding on a line no verb writes
+/// carries none, and neither does one on a file no verb can reach by id —
+/// a record in the archive, in the wrong directory, or under a filename
+/// that is no id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Repair {
     /// Erase the optional field on the finding's line.
     Clear(&'static str),
     /// Erase the dependency edge on the finding's line.
     Unblock(String),
+    /// Erase the hold the finding's line is half of.
+    Unhold,
     /// File the settled record where it belongs.
     Archive,
 }

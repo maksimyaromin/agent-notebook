@@ -656,22 +656,36 @@ impl<'a, S: Storage> Notebook<'a, S> {
 
     /// Resume a held Task: clears `hold` and `hold-until`.
     ///
+    /// It repairs as well as resumes, because it erases those two lines by
+    /// name: a hand-broken hold has no other way out of the notebook.
+    ///
     /// # Errors
     /// The resolution errors of [`Notebook::close`].
     pub fn unhold(&mut self, id: &str, today: &str) -> Result<Held, NotebookError> {
         write::guard_today(today)?;
-        let loaded = self.load_live(id, &[RecordType::Task])?;
-        if loaded.record.hold().is_none() && loaded.record.hold_until().is_none() {
+        let LoadedLive {
+            path,
+            record,
+            carried_errors,
+        } = self.load_live_repairing(id, &[RecordType::Task])?;
+        let held = record.hold().is_some() || record.hold_until().is_some();
+        let before = self.errors_carried(carried_errors, &record)?;
+        let mut file = record.into_file();
+        if held {
+            file.remove_field("hold");
+            file.remove_field("hold-until");
+            file.set_field("updated", today);
+        }
+        if carried_errors {
+            self.guard_repaired(&path, &before, &file)?;
+        }
+        if !held {
             return Ok(Held {
                 id: id.to_owned(),
                 already: true,
             });
         }
-        let mut file = loaded.record.into_file();
-        file.remove_field("hold");
-        file.remove_field("hold-until");
-        file.set_field("updated", today);
-        self.storage.write(&loaded.path, &file.render())?;
+        self.storage.write(&path, &file.render())?;
         Ok(Held {
             id: id.to_owned(),
             already: false,
@@ -792,13 +806,14 @@ impl<'a, S: Storage> Notebook<'a, S> {
             carried_errors,
         } = self.load_live_repairing(id, &[RecordType::Task])?;
         let erases = query::edge_exists(&record, on);
+        let before = self.errors_carried(carried_errors, &record)?;
         let mut file = record.into_file();
         if erases {
             file.remove_field_value("blocked-by", on);
             file.set_field("updated", today);
         }
         if carried_errors {
-            self.guard_repaired(&path, &file)?;
+            self.guard_repaired(&path, &before, &file)?;
         }
         if !erases {
             return Ok(Edged {
@@ -1182,13 +1197,14 @@ impl<'a, S: Storage> Notebook<'a, S> {
             Some(body) => self.dangling_mentions(body)?,
             None => Vec::new(),
         };
+        let before = self.errors_carried(carried_errors, &record)?;
         let mut file = record.into_file();
         let changed = write::spliced(&mut file, edit);
         if !changed.is_empty() {
             file.set_field("updated", today);
         }
         if carried_errors {
-            self.guard_repaired(&path, &file)?;
+            self.guard_repaired(&path, &before, &file)?;
         }
         if changed.is_empty() {
             return Ok(Edited {
@@ -1338,24 +1354,37 @@ impl<'a, S: Storage> Notebook<'a, S> {
     }
 
     /// The repair's other half: a verb let past a record's error findings
-    /// must leave none behind, or the call is refused and nothing is
-    /// written. The proof is the bytes the splice produced — a line that
+    /// must leave it better than it found it — fewer of them, and none it
+    /// did not already carry — or the call is refused and nothing is
+    /// written. The proof is the bytes the splice produced: a line that
     /// carries a finding is not always the line a splice rewrites, and a
     /// splice that reaches the right line may still leave a duplicate of it
     /// standing.
     ///
-    /// A call that changes nothing is judged too, which is why it runs
-    /// before the replay answers: a record that came in invalid must not
-    /// be told `already` while it still is.
-    fn guard_repaired(&self, path: &str, file: &RecordFile) -> Result<(), NotebookError> {
+    /// Progress, not perfection, because a record broken several ways is
+    /// repaired one verb at a time, and each verb erases only what it
+    /// names. A call that erases nothing is refused all the same, which is
+    /// why this runs before the replay answers: a record that came in
+    /// invalid must not be told `already` while it still is.
+    fn guard_repaired(
+        &self,
+        path: &str,
+        before: &[Finding],
+        file: &RecordFile,
+    ) -> Result<(), NotebookError> {
         let repaired = Record::parse(path, &file.render());
-        let errors = self.exclusion_errors(&repaired)?;
-        if errors.is_empty() {
+        let after = self.exclusion_errors(&repaired)?;
+        let already_carried = |finding: &Finding| {
+            before
+                .iter()
+                .any(|had| had.code == finding.code && had.message == finding.message)
+        };
+        if after.len() < before.len() && after.iter().all(already_carried) {
             return Ok(());
         }
         Err(NotebookError::InvalidRecord {
             path: path.to_owned(),
-            findings: errors,
+            findings: after,
         })
     }
 
@@ -1433,6 +1462,22 @@ impl<'a, S: Storage> Notebook<'a, S> {
             return Ok(record.blocked_by().map(str::to_owned).collect());
         }
         Ok(Vec::new())
+    }
+
+    /// What the record was refused for on the way in, for the guard that
+    /// must find fewer of them on the way out. A record that came in clean
+    /// carries none, and asking storage for that would be a read no verb
+    /// needs.
+    fn errors_carried(
+        &self,
+        carried_errors: bool,
+        record: &Record,
+    ) -> Result<Vec<Finding>, NotebookError> {
+        if carried_errors {
+            self.exclusion_errors(record)
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     /// The error findings that exclude a record from mutation: its own,

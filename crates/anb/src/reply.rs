@@ -1,6 +1,7 @@
 //! One command in, one reply out: the dispatch from the parsed surface to
-//! the Core, with nothing rendered yet — both output formats read the same
-//! reply.
+//! the Core, and the few decisions both renderings must make the same way —
+//! how many rows a bounded list shows, and how a command line is spelled
+//! when a reply names one.
 
 use crate::cli::{AddArgs, CloseArgs, Command, DecideArgs, DraftArgs, EditArgs, NoteArgs};
 use anb_core::encode::ROW_BOUND;
@@ -11,7 +12,7 @@ use anb_core::{
 };
 
 /// The first bounded prefix of a flat list; both renderers show the same
-/// rows. `--all` is the one lift, and only a listing offers it.
+/// rows, and `--all` is the one lift.
 #[must_use]
 pub fn shown(total: usize, all: bool) -> usize {
     if all { total } else { total.min(ROW_BOUND) }
@@ -21,39 +22,22 @@ pub fn shown(total: usize, all: bool) -> usize {
 /// `--all` on it. A scoped listing answers a different question from the
 /// bare verb, so the scope travels with the hint.
 #[must_use]
-pub fn lifted(verb: &str, scope: Option<&String>) -> String {
+pub fn lifted(verb: &str, scope: Option<&str>) -> String {
     match scope {
         Some(scope) => format!("anb {verb} --for {scope} --all"),
         None => format!("anb {verb} --all"),
     }
 }
 
-/// A body cut to its ends: the first and last [`ROW_BOUND`] lines, with the
-/// elision naming how many it dropped and how to lift it. A record is read
-/// from both ends — its terms are written at the top and its log grows at
-/// the bottom — so the middle is what a long record can spare.
-#[must_use]
-pub fn bounded_body(body: &str, id: &str, all: bool) -> String {
-    let lines: Vec<&str> = body.lines().collect();
-    if all || lines.len() <= 2 * ROW_BOUND + 1 {
-        return body.to_owned();
-    }
-    let dropped = lines.len() - 2 * ROW_BOUND;
-    format!(
-        "{}\n\u{2026} {dropped} more lines: anb view {id} --all\n{}",
-        lines[..ROW_BOUND].join("\n"),
-        lines[lines.len() - ROW_BOUND..].join("\n"),
-    )
-}
-
-/// The repair a finding names, as the command that runs it. The record is
-/// named by its file, the way every other reply names one.
+/// The repair a finding names, as the command that runs it. A finding is
+/// located by file, and the id a verb takes is that file's stem.
 #[must_use]
 pub fn repair_command(repair: &Repair, path: &str) -> String {
     let id = path_stem(path);
     match repair {
         Repair::Clear(field) => format!("anb edit {id} --clear {field}"),
         Repair::Unblock(on) => format!("anb unblock {id} {on}"),
+        Repair::Unhold => format!("anb unhold {id}"),
         Repair::Archive => format!("anb archive {id}"),
     }
 }

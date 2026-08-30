@@ -94,7 +94,7 @@ pub struct Edit {
 /// those with an eraser of their own — a body through an empty `--body`, a
 /// tag through `--untag`. A field the record's type does not allow is
 /// erasable all the same; erasing it is the repair.
-pub const CLEARABLE: [&str; 3] = ["from", PRIORITY, "review-by"];
+pub(crate) const CLEARABLE: [&str; 3] = ["from", PRIORITY, "review-by"];
 
 pub(crate) const PRIORITY: &str = "priority";
 

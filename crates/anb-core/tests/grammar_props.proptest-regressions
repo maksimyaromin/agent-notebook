@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 4f81a7987703583d100322fdb4cc726dbb189f65c52c6f62f80dceae14e495a6 # shrinks to input = "---\na:\n-:"
-cc 9d29e1557d02320047e32faec5f3fbd6d9fb9b46da7d3fa1008c4ad9df17552e # shrinks to input = "---\na:"
-cc 4f3b5b5c8116c2db1972356d722bda22e0da34a12bd9fe8e16882b0ca751c252 # shrinks to record = GeneratedRecord { text: "---\nid: task.a\ntype: task\nstate: a\ntitle: 0A\ncreated: 1990-01-01\n---\n", body: "" }

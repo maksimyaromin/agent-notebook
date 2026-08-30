@@ -61,7 +61,8 @@ pub trait Storage {
     /// Read the full contents of the file at `path`.
     ///
     /// # Errors
-    /// [`StorageError::NotFound`] when `path` does not exist,
+    /// [`StorageError::NotFound`] when the adapter holds nothing at `path`
+    /// — a name with no file, or one it will not serve as a record —
     /// [`StorageError::Io`] on any other adapter failure.
     fn read(&self, path: &RelPath) -> Result<String, StorageError>;
 
@@ -80,8 +81,9 @@ pub trait Storage {
     /// [`StorageError::Io`] on any other adapter failure.
     fn remove(&mut self, path: &RelPath) -> Result<(), StorageError>;
 
-    /// Whether a file sits at `path`. Bytes that are not UTF-8 still
-    /// occupy it: the question is the name, not what it says.
+    /// Whether the adapter holds a record at `path`. Bytes that are not
+    /// UTF-8 still occupy it: the question is the name, not what it says —
+    /// and a name the adapter will not serve is a name with nothing at it.
     ///
     /// The Core asks this of every reference a write guards and every id a
     /// body cites, so an adapter whose medium answers it without reading —

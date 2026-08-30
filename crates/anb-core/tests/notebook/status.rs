@@ -348,6 +348,54 @@ mod debt_signals {
         }
     }
 
+    /// The thresholds a notebook with no config file runs on, checked the
+    /// day before each is owed: a default quietly shortened would otherwise
+    /// have every "it fires on day N" test still passing.
+    #[test]
+    fn no_default_clock_speaks_the_day_before_it_is_owed() {
+        for (case, path, id, type_word, state, extra, touched) in [
+            (
+                "task-stale at 7",
+                "tasks/task.demo.md",
+                "task.demo",
+                "task",
+                "active",
+                &[][..],
+                "2026-08-21",
+            ),
+            (
+                "question-age at 14",
+                "questions/question.demo.md",
+                "question.demo",
+                "question",
+                "open",
+                &[][..],
+                "2026-08-14",
+            ),
+            (
+                "hold-quiet at 14",
+                "tasks/task.demo.md",
+                "task.demo",
+                "task",
+                "open",
+                &["hold: waiting on the owner"][..],
+                "2026-08-14",
+            ),
+            (
+                "review-wait at 7",
+                "tasks/task.demo.md",
+                "task.demo",
+                "task",
+                "review",
+                &[][..],
+                "2026-08-21",
+            ),
+        ] {
+            let mut storage = storage_with(&[(path, &aged(id, type_word, state, touched, extra))]);
+            assert_eq!(debt_of(&mut storage), vec![], "{case}");
+        }
+    }
+
     #[test]
     fn an_active_task_untouched_for_seven_days_is_stale() {
         let mut storage = storage_with(&[(

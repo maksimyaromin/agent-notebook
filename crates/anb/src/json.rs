@@ -3,10 +3,10 @@
 //! programmatically. Pretty JSON is never emitted.
 
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, bounded_body, repair_command, shown};
+use crate::reply::{Reply, repair_command, shown};
 use anb_core::{
     Cited, Counts, DebtSignal, FileFinding, Held, ListedRecord, NotebookError, Overview, ReadyTask,
-    SECTION_ROWS, Status, View, debt_classes,
+    SECTION_ROWS, Status, View, debt_classes, encode,
 };
 use serde_json::{Map, Value, json};
 
@@ -323,13 +323,25 @@ fn counts_value(counts: &Counts) -> Value {
     })
 }
 
+/// A record's body as data: how many lines it holds, and the text shown —
+/// both ends when a long one is cut, and `tail` absent when it is not. The
+/// text renderer marks the gap inline; a data reply names the two pieces
+/// instead of splicing a sentence into the record's own bytes.
+fn body_value(body: &str, all: bool) -> Value {
+    let lines = body.lines().count();
+    match encode::body_ends(body).filter(|_| !all) {
+        Some((head, _, tail)) => json!({"lines": lines, "head": head, "tail": tail}),
+        None => json!({"lines": lines, "head": body}),
+    }
+}
+
 fn view_value(view: &View, all: bool) -> Value {
     json!({
         "id": view.id,
         "path": view.path,
         "archived": view.archived,
         "fields": view.fields.iter().map(|(key, value)| json!([key, value])).collect::<Vec<Value>>(),
-        "body": bounded_body(&view.body, &view.id, all),
+        "body": body_value(&view.body, all),
         "mentions": section(&view.mentions, shown(view.mentions.len(), all), |id| json!(id)),
         "mentioned-by": section(&view.mentioned_by, shown(view.mentioned_by.len(), all), |id| json!(id)),
     })

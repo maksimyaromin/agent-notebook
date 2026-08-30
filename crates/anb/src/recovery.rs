@@ -147,10 +147,10 @@ fn bounded(details: Vec<String>) -> Vec<String> {
     lines
 }
 
-/// The verbs clap would refuse in their bare form, as the command lines
-/// that run them, with each required flag a placeholder. One home for the
-/// shapes, so a refusal and a retry never offer a caller two different ways
-/// to do the same thing; `None` is a verb whose bare form already runs.
+/// The verbs that need a flag to run, as the command lines that supply
+/// one. Both retry paths read this table, so a refusal and a retry never
+/// offer a caller two different ways to do the same thing; `None` is a verb
+/// this table has no shape for, and each caller falls back its own way.
 fn runnable(verb: &str, id: Option<&str>) -> Option<Vec<String>> {
     let shapes = match (verb, id) {
         ("close", Some(id)) => vec![
