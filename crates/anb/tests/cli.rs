@@ -1612,6 +1612,8 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "ready", "--for", "task.epic"],
         vec!["anb", "list", "--for", "task.epic"],
         vec!["anb", "list", "--notebook", "elsewhere"],
+        vec!["anb", "--global", "list"],
+        vec!["anb", "list", "--global"],
         vec![
             "anb",
             "edit",
@@ -2896,5 +2898,128 @@ mod json_maintenance_surface {
         assert_eq!(value["tasks"]["rows"][0]["id"], serde_json::json!("task.a"));
         assert_eq!(value["decisions"]["count"], serde_json::json!(0));
         assert_eq!(value["archive"]["tasks"], serde_json::json!(1));
+    }
+}
+
+/// Which verbs the user's notebook accepts. It holds knowledge that
+/// outlives a repository, so it holds decisions and notes and nothing to
+/// work on.
+mod the_global_scope {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// The verbs the Global Notebook exists for: recording knowledge and
+    /// reading it back.
+    const NAMED: &[&[&str]] = &[
+        &["decide", "A rule"],
+        &["note", "A fact"],
+        &["retire", "note.demo"],
+        &["view", "note.demo"],
+        &["list"],
+        &["search", "rule"],
+    ];
+
+    /// The verbs the rule admits beyond those, each for a reason the
+    /// Global Notebook would be crippled without: knowledge corrected in
+    /// place and verified, settled knowledge filed and mistakes erased, and
+    /// the two whole-notebook reads. Their rows are empty of tasks and
+    /// questions rather than absent, so the output contract is one contract.
+    const ALSO_ADMITTED: &[&[&str]] = &[
+        &["edit", "note.demo", "--title", "A sharper fact"],
+        &["check"],
+        &["archive", "note.demo"],
+        &["expunge", "note.demo"],
+        &["overview"],
+        &["status"],
+        &["ready"],
+    ];
+
+    /// Every verb that creates or moves a task or a question.
+    const WORK: &[&[&str]] = &[
+        &["add", "A task"],
+        &["start", "task.demo"],
+        &["submit", "task.demo"],
+        &["close", "task.demo", "--no-proof"],
+        &["return", "task.demo"],
+        &["reopen", "task.demo"],
+        &["hold", "task.demo", "--reason", "waiting"],
+        &["unhold", "task.demo"],
+        &["block", "task.demo", "task.other"],
+        &["unblock", "task.demo", "task.other"],
+        &["comment", "task.demo", "a line"],
+        &["ask", "A doubt"],
+        &["answer", "question.demo", "--drop", "moot"],
+    ];
+
+    fn parsed(line: &[&str]) -> Command {
+        let mut args = vec!["anb"];
+        args.extend_from_slice(line);
+        Cli::try_parse_from(args)
+            .unwrap_or_else(|_| panic!("the test drives a well-formed command line: {line:?}"))
+            .command
+    }
+
+    fn accepts(lines: &[&[&str]]) {
+        for line in lines {
+            assert!(
+                anb::scope::refused_globally(&parsed(line), true).is_none(),
+                "`anb {} --global` carries knowledge and belongs in either scope",
+                line.join(" ")
+            );
+        }
+    }
+
+    #[test]
+    fn the_six_verbs_the_scope_was_asked_for_reach_the_users_notebook() {
+        accepts(NAMED);
+    }
+
+    #[test]
+    fn the_verbs_the_rule_admits_beyond_them_reach_it_too() {
+        accepts(ALSO_ADMITTED);
+    }
+
+    #[test]
+    fn a_verb_that_writes_work_is_refused_the_users_notebook() {
+        for line in WORK {
+            let refused = anb::scope::refused_globally(&parsed(line), true)
+                .unwrap_or_else(|| panic!("`anb {} --global` must be refused", line.join(" ")));
+            assert_eq!(refused.code(), "invalid-argument");
+            assert!(
+                refused.to_string().starts_with(line[0]),
+                "the refusal names the verb that was refused: {refused}"
+            );
+        }
+    }
+
+    /// The refusal is the scope's, never the verb's: without the flag the
+    /// same command line is the project's to serve.
+    #[test]
+    fn no_verb_is_refused_the_project() {
+        for line in WORK.iter().chain(NAMED).chain(ALSO_ADMITTED) {
+            assert!(
+                anb::scope::refused_globally(&parsed(line), false).is_none(),
+                "`anb {}` names no scope and must not be refused one",
+                line.join(" ")
+            );
+        }
+    }
+
+    /// A verb missing from the tables above would be judged by neither, so
+    /// the three are held against the whole command surface.
+    #[test]
+    fn every_verb_is_placed_on_one_side_of_the_rule() {
+        let placed: BTreeSet<&str> = NAMED
+            .iter()
+            .chain(ALSO_ADMITTED)
+            .chain(WORK)
+            .map(|line| line[0])
+            .collect();
+        let surface = Cli::command();
+        let surface: BTreeSet<&str> = surface
+            .get_subcommands()
+            .map(clap::Command::get_name)
+            .collect();
+        assert_eq!(placed, surface);
     }
 }

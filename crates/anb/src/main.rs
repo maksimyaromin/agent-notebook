@@ -6,6 +6,7 @@ use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root, unusable_root};
 use anb::lock;
 use anb::reconcile::lost_proofs;
 use anb::reply::{Host, execute};
+use anb::scope::refused_globally;
 use anb::{json, text};
 use anb_core::{NotebookError, StorageError};
 use clap::Parser;
@@ -91,11 +92,19 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
             }));
         }
     };
-    let root = notebook_root(
+    let root = match notebook_root(
         &cwd,
         cli.notebook.as_deref(),
+        cli.global,
+        std::env::home_dir().as_deref(),
         std::env::var_os(NOTEBOOK_ENV).as_deref(),
-    );
+    ) {
+        Ok(root) => root,
+        Err(reason) => return stopped(&NotebookError::InvalidArgument { reason }),
+    };
+    if let Some(refusal) = refused_globally(&cli.command, cli.global) {
+        return stopped(&refusal);
+    }
     if let Some(reason) = unusable_root(&root) {
         return stopped(&NotebookError::InvalidArgument { reason });
     }

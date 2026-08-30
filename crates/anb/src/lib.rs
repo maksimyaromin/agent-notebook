@@ -11,4 +11,5 @@ pub mod lock;
 pub mod reconcile;
 pub mod recovery;
 pub mod reply;
+pub mod scope;
 pub mod text;

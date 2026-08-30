@@ -23,6 +23,13 @@ pub struct Cli {
     /// nearest `.agent-notebook` at or above the working directory.
     #[arg(long, global = true, value_name = "PATH")]
     pub notebook: Option<std::path::PathBuf>,
+    /// The user's notebook — `.agent-notebook` in the home directory —
+    /// instead of the project's, outranking `ANB_NOTEBOOK` like
+    /// `--notebook` and refused beside it. It holds knowledge that outlives
+    /// one repository, so the verbs that create or move a task or a
+    /// question refuse it.
+    #[arg(long, global = true)]
+    pub global: bool,
 }
 
 #[derive(Subcommand)]

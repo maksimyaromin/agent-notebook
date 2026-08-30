@@ -13,6 +13,14 @@ fn storage_in(dir: &TempDir) -> FsStorage {
     FsStorage::new(dir.path().to_owned())
 }
 
+/// A repository with no notebook yet: what the root rules resolve against,
+/// and what the binary is run from.
+fn a_project() -> TempDir {
+    let project = TempDir::new().unwrap();
+    fs::create_dir_all(project.path().join(".git")).unwrap();
+    project
+}
+
 #[test]
 fn write_then_read_round_trips_bytes() {
     let dir = TempDir::new().unwrap();
@@ -285,7 +293,14 @@ mod root_resolution {
     fn an_empty_flag_still_outranks_the_environment() {
         let dir = TempDir::new().unwrap();
         assert_eq!(
-            notebook_root(dir.path(), Some(Path::new("")), Some(OsStr::new("ignored"))),
+            notebook_root(
+                dir.path(),
+                Some(Path::new("")),
+                false,
+                None,
+                Some(OsStr::new("ignored"))
+            )
+            .unwrap(),
             dir.path(),
             "a named root is the caller's word, however little of it there is"
         );
@@ -299,8 +314,11 @@ mod root_resolution {
             notebook_root(
                 dir.path(),
                 Some(Path::new("elsewhere/notes")),
+                false,
+                None,
                 Some(OsStr::new("ignored")),
-            ),
+            )
+            .unwrap(),
             dir.path().join("elsewhere/notes")
         );
     }
@@ -314,8 +332,11 @@ mod root_resolution {
             notebook_root(
                 &dir.path().join("a/b"),
                 None,
+                false,
+                None,
                 Some(OsStr::new(".tmp/private"))
-            ),
+            )
+            .unwrap(),
             dir.path().join(".tmp/private"),
             "one export names one notebook, wherever it is read from"
         );
@@ -326,7 +347,14 @@ mod root_resolution {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-notebook")).unwrap();
         assert_eq!(
-            notebook_root(dir.path(), None, Some(OsStr::new(".tmp/private"))),
+            notebook_root(
+                dir.path(),
+                None,
+                false,
+                None,
+                Some(OsStr::new(".tmp/private"))
+            )
+            .unwrap(),
             dir.path().join(".tmp/private")
         );
     }
@@ -336,7 +364,7 @@ mod root_resolution {
         let dir = TempDir::new().unwrap();
         let away = TempDir::new().unwrap();
         assert_eq!(
-            notebook_root(dir.path(), Some(away.path()), None),
+            notebook_root(dir.path(), Some(away.path()), false, None, None).unwrap(),
             away.path(),
             "a notebook may live outside the project entirely"
         );
@@ -347,9 +375,264 @@ mod root_resolution {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".git")).unwrap();
         assert_eq!(
-            notebook_root(dir.path(), None, Some(OsStr::new(""))),
+            notebook_root(dir.path(), None, false, None, Some(OsStr::new(""))).unwrap(),
             dir.path().join(".agent-notebook"),
             "an unset variable often arrives as an empty one"
+        );
+    }
+}
+
+/// The user's notebook: a second root in the home directory, holding the
+/// knowledge that outlives any one repository.
+///
+/// `HOME` is what `--global` resolves against on this platform, so every
+/// case here poses it directly.
+#[cfg(unix)]
+mod the_users_notebook {
+    use super::*;
+    use std::process::Command;
+
+    /// One command run from `project`, against `home` as the user's.
+    /// `ANB_NOTEBOOK` is passed explicitly, so no case here can be decided
+    /// by whatever the developer running the suite exported.
+    fn anb_at_home(
+        home: &TempDir,
+        project: &Path,
+        exported: Option<&str>,
+        line: &[&str],
+    ) -> std::process::Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_anb"));
+        command
+            .args(line)
+            .current_dir(project)
+            .env("HOME", home.path());
+        match exported {
+            Some(root) => command.env("ANB_NOTEBOOK", root),
+            None => command.env_remove("ANB_NOTEBOOK"),
+        };
+        command.output().expect("the binary runs")
+    }
+
+    /// [`anb_at_home`] for a case the command must succeed in; the reply is
+    /// what the case reads.
+    fn served(home: &TempDir, project: &Path, exported: Option<&str>, line: &[&str]) -> String {
+        let output = anb_at_home(home, project, exported, line);
+        assert!(
+            output.status.success(),
+            "`anb {}` failed: {}",
+            line.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("output is UTF-8")
+    }
+
+    #[test]
+    fn the_global_scope_names_the_notebook_in_the_users_home() {
+        let home = Path::new("/home/reader");
+        assert_eq!(
+            notebook_root(Path::new("/work/project"), None, true, Some(home), None),
+            Ok(home.join(".agent-notebook"))
+        );
+    }
+
+    /// The flag rung outranks the environment, and `--global` shares it.
+    #[test]
+    fn the_global_scope_outranks_an_exported_root() {
+        let home = Path::new("/home/reader");
+        assert_eq!(
+            notebook_root(
+                Path::new("/work/project"),
+                None,
+                true,
+                Some(home),
+                Some(OsStr::new(".tmp/private")),
+            ),
+            Ok(home.join(".agent-notebook"))
+        );
+    }
+
+    #[test]
+    fn without_the_flag_the_home_decides_nothing() {
+        let project = Path::new("/work/project");
+        assert_eq!(
+            notebook_root(project, None, false, Some(Path::new("/home/reader")), None),
+            Ok(project.join(".agent-notebook")),
+            "a home is where --global points, not a rung of its own"
+        );
+    }
+
+    /// Two ways to name one root are one choice made twice, and a caller
+    /// who made both is told which two collided rather than given a silent
+    /// winner.
+    #[test]
+    fn naming_a_path_and_the_global_scope_at_once_is_refused() {
+        let refused = notebook_root(
+            Path::new("/work/project"),
+            Some(Path::new("elsewhere")),
+            true,
+            Some(Path::new("/home/reader")),
+            None,
+        )
+        .expect_err("a contradiction is refused, not ranked");
+        assert!(
+            refused.contains("--notebook") && refused.contains("--global"),
+            "the refusal names both flags: {refused}"
+        );
+    }
+
+    #[test]
+    fn the_global_scope_needs_a_home_to_resolve_against() {
+        assert!(
+            notebook_root(Path::new("/work/project"), None, true, None, None).is_err(),
+            "with no home there is no user's notebook to name"
+        );
+    }
+
+    /// A home is exported once and outlives every `cd`, exactly like
+    /// `ANB_NOTEBOOK`. A relative one read from the working directory would
+    /// make `--global` a different notebook in every directory — and would
+    /// put the user's private records inside whatever repository they
+    /// happened to stand in.
+    #[test]
+    fn a_relative_home_names_no_users_notebook() {
+        assert!(
+            notebook_root(
+                Path::new("/work/project"),
+                None,
+                true,
+                Some(Path::new("myhome")),
+                None,
+            )
+            .is_err(),
+            "one export names one notebook, wherever it is read from"
+        );
+    }
+
+    /// The whole point of the second root: knowledge recorded from one
+    /// repository is read from another, with no path pasted between them.
+    #[test]
+    fn knowledge_recorded_globally_in_one_project_is_read_from_another() {
+        let home = TempDir::new().unwrap();
+        let first = a_project();
+        let second = a_project();
+
+        served(
+            &home,
+            first.path(),
+            None,
+            &[
+                "decide",
+                "Rust for command-line tools",
+                "--id",
+                "decision.rust-for-clis",
+                "--kind",
+                "rule",
+                "--global",
+            ],
+        );
+
+        let rows = served(&home, second.path(), None, &["list", "--global"]);
+        assert!(
+            rows.contains("decision.rust-for-clis"),
+            "the other project reads it: {rows}"
+        );
+        assert!(
+            home.path()
+                .join(".agent-notebook/decisions/decision.rust-for-clis.md")
+                .is_file(),
+            "a record is global by residence"
+        );
+        assert!(
+            !first.path().join(".agent-notebook").exists(),
+            "and the project it was typed in kept no copy"
+        );
+    }
+
+    /// The scopes differ in where a record lives and in nothing else: one
+    /// grammar, one renderer, one set of rules.
+    #[test]
+    fn the_same_note_reads_the_same_in_either_scope() {
+        let home = TempDir::new().unwrap();
+        let project = a_project();
+        let filed = ["note", "A shared practice", "--id", "note.practice"];
+
+        served(
+            &home,
+            project.path(),
+            None,
+            &[&filed[..], &["--global"]].concat(),
+        );
+        served(&home, project.path(), None, &filed);
+
+        assert_eq!(
+            served(
+                &home,
+                project.path(),
+                None,
+                &["view", "note.practice", "--global"]
+            ),
+            served(&home, project.path(), None, &["view", "note.practice"]),
+            "the output contract does not know which scope it is reading"
+        );
+        assert_eq!(
+            fs::read_to_string(home.path().join(".agent-notebook/notes/note.practice.md")).unwrap(),
+            fs::read_to_string(
+                project
+                    .path()
+                    .join(".agent-notebook/notes/note.practice.md")
+            )
+            .unwrap(),
+            "and neither does the file"
+        );
+    }
+
+    /// Work is always project work: a task filed globally would be work no
+    /// repository owns.
+    #[test]
+    fn the_users_notebook_refuses_a_task() {
+        let home = TempDir::new().unwrap();
+        let project = a_project();
+
+        let refused = anb_at_home(
+            &home,
+            project.path(),
+            None,
+            &["--json", "add", "Work with no project", "--global"],
+        );
+
+        assert!(!refused.status.success());
+        let payload = String::from_utf8(refused.stderr).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(payload.trim()).unwrap_or_else(|_| panic!("not JSON: {payload}"));
+        assert_eq!(parsed["error"], "invalid-argument");
+        assert!(
+            !home.path().join(".agent-notebook").exists(),
+            "a refused write leaves no notebook behind"
+        );
+        assert!(
+            !project.path().join(".agent-notebook").exists(),
+            "and it is refused, never quietly filed in the project instead"
+        );
+    }
+
+    /// The same verb without the flag is the project's to serve, so the
+    /// refusal is the scope's and not the verb's.
+    #[test]
+    fn the_project_still_takes_the_work_the_global_scope_refused() {
+        let home = TempDir::new().unwrap();
+        let project = a_project();
+
+        served(
+            &home,
+            project.path(),
+            None,
+            &["add", "Work with a project", "--id", "task.work"],
+        );
+        assert!(
+            project
+                .path()
+                .join(".agent-notebook/tasks/task.work.md")
+                .is_file()
         );
     }
 }
@@ -383,8 +666,7 @@ mod a_notebook_that_moved {
 
     #[test]
     fn the_flag_outranks_the_environment_all_the_way_through_the_binary() {
-        let project = TempDir::new().unwrap();
-        fs::create_dir_all(project.path().join(".git")).unwrap();
+        let project = a_project();
         anb(
             &project,
             ".tmp/from-the-environment",
@@ -409,8 +691,7 @@ mod a_notebook_that_moved {
 
     #[test]
     fn one_exported_root_is_one_notebook_from_every_directory() {
-        let project = TempDir::new().unwrap();
-        fs::create_dir_all(project.path().join(".git")).unwrap();
+        let project = a_project();
         let deep = project.path().join("crates/anb/src");
         fs::create_dir_all(&deep).unwrap();
 
@@ -447,8 +728,7 @@ mod a_notebook_that_moved {
 
     #[test]
     fn the_task_cycle_reaches_it_and_the_default_stays_empty() {
-        let project = TempDir::new().unwrap();
-        fs::create_dir_all(project.path().join(".git")).unwrap();
+        let project = a_project();
         let elsewhere = ".tmp/private-notebook";
 
         anb(&project, elsewhere, &["add", "Work kept to myself"]);
