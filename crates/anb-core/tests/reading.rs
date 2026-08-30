@@ -116,21 +116,23 @@ fn the_dashboard_opens_only_the_archived_records_live_ones_name() {
             &task("task.live-0", "open", "blocked-by: task.filed-7\n"),
         )
         .unwrap();
-    let notebook = Notebook::new(&mut storage);
-    notebook.overview().unwrap();
-    notebook
-        .status(TODAY, Budget::Unbounded, nothing_lost)
-        .unwrap();
-
-    assert_eq!(
-        storage.archived_reads(),
-        vec![
-            "archive/tasks/task.filed-7.md",
-            "archive/tasks/task.filed-7.md"
-        ],
-        "one per query, and only the record an edge points at — what the \
-         archive costs follows the live notebook's edges, not its own size"
-    );
+    for query in ["overview", "status"] {
+        storage.reads.borrow_mut().clear();
+        let notebook = Notebook::new(&mut storage);
+        if query == "overview" {
+            notebook.overview().unwrap();
+        } else {
+            notebook
+                .status(TODAY, Budget::Unbounded, nothing_lost)
+                .unwrap();
+        }
+        assert_eq!(
+            storage.archived_reads(),
+            vec!["archive/tasks/task.filed-7.md"],
+            "{query} opens the record an edge points at, once — what the \
+             archive costs follows the live notebook's edges, not its own size"
+        );
+    }
 }
 
 #[test]

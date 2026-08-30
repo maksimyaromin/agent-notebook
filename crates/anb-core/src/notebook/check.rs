@@ -14,10 +14,10 @@ use crate::record::{
 use crate::reply::{FileFinding, Repair};
 use crate::request::CLEARABLE;
 use crate::resolve::{Resolver, path_stem, record_path, type_of};
-use crate::storage::{Storage, StorageError};
+use crate::storage::StorageError;
 use std::collections::BTreeMap;
 
-impl<S: Storage> Notebook<'_, S> {
+impl Notebook<'_> {
     /// Verify the whole notebook: every record's own findings plus the
     /// cross-record rules — duplicate ids, dangling references, supersession
     /// pairs, routing threads — each carrying the move that erases it where
@@ -173,78 +173,115 @@ fn check_refs(record: &Record, resolvable: &Resolver<'_>, out: &mut Vec<FileFind
     }
 }
 
-/// The supersession pair, verified from both ends, reported against both
-/// files: a forward pointer without its back-pointer, a back-pointer without
-/// its claim, and a record marked replaced that still reads live.
+/// The supersession pair, verified from both ends and reported against
+/// both files. Three independent rules, each of which can fire alone.
 fn check_supersession_pair(
     record: &Record,
     by_stem: &BTreeMap<&str, &Record>,
     out: &mut Vec<FileFinding>,
 ) {
+    check_claim_answered(record, by_stem, out);
+    check_superseder_claims_back(record, by_stem, out);
+    check_replaced_record_is_settled(record, out);
+}
+
+/// A record claiming `supersedes` whose victim does not point back. Both
+/// halves of a supersession are written by one command, so a claim
+/// standing alone is a hand edit or an interrupted one.
+fn check_claim_answered(
+    record: &Record,
+    by_stem: &BTreeMap<&str, &Record>,
+    out: &mut Vec<FileFinding>,
+) {
     let stem = path_stem(record.path());
-    let mut pair_finding = |path: &str, finding: Finding| {
-        out.push(FileFinding::on(path, finding));
+    let Some((target, line)) = record.file().field_entry("supersedes") else {
+        return;
     };
-
-    if let Some((target, line)) = record.file().field_entry("supersedes")
-        && let Some(victim) = by_stem.get(target)
-        && victim.superseded_by() != Some(stem)
-    {
-        pair_finding(
-            record.path(),
-            Finding::located(
-                line,
-                FindingCode::BrokenSupersession,
-                format!("supersedes: `{target}` does not point back with `superseded-by`"),
-            ),
-        );
-        pair_finding(
-            victim.path(),
-            Finding::for_file(
-                FindingCode::BrokenSupersession,
-                format!("`{stem}` claims to supersede this record, which does not point back"),
-            ),
-        );
+    let Some(victim) = by_stem.get(target) else {
+        return;
+    };
+    if victim.superseded_by() == Some(stem) {
+        return;
     }
+    out.push(FileFinding::on(
+        record.path(),
+        Finding::located(
+            line,
+            FindingCode::BrokenSupersession,
+            format!("supersedes: `{target}` does not point back with `superseded-by`"),
+        ),
+    ));
+    out.push(FileFinding::on(
+        victim.path(),
+        Finding::for_file(
+            FindingCode::BrokenSupersession,
+            format!("`{stem}` claims to supersede this record, which does not point back"),
+        ),
+    ));
+}
 
-    if let Some((superseder, line)) = record.file().field_entry("superseded-by") {
-        if let Some(claimant) = by_stem.get(superseder)
-            && claimant.supersedes() != Some(stem)
-        {
-            pair_finding(
-                record.path(),
-                Finding::located(
-                    line,
-                    FindingCode::BrokenSupersession,
-                    format!("superseded-by: `{superseder}` does not claim `supersedes: {stem}`"),
-                ),
-            );
-            pair_finding(
-                claimant.path(),
-                Finding::for_file(
-                    FindingCode::BrokenSupersession,
-                    format!(
-                        "`{stem}` names this record as its superseder, which does not claim it"
-                    ),
-                ),
-            );
-        }
-        if let Some(record_type) = record.record_type()
-            && let Some((state, state_line)) = record.file().field_entry("state")
-            && record_type.live_states().contains(&state)
-        {
-            pair_finding(
-                record.path(),
-                Finding::located(
-                    state_line,
-                    FindingCode::BrokenSupersession,
-                    format!(
-                        "state: `{state}` on a record marked `superseded-by` — a replaced record must not read live"
-                    ),
-                ),
-            );
-        }
+/// A record pointing at a superseder that does not claim it — the same
+/// broken pair seen from the victim's end, which is the end a reader
+/// reaches first when the claimant is the file that was hand-edited.
+fn check_superseder_claims_back(
+    record: &Record,
+    by_stem: &BTreeMap<&str, &Record>,
+    out: &mut Vec<FileFinding>,
+) {
+    let stem = path_stem(record.path());
+    let Some((superseder, line)) = record.file().field_entry("superseded-by") else {
+        return;
+    };
+    let Some(claimant) = by_stem.get(superseder) else {
+        return;
+    };
+    if claimant.supersedes() == Some(stem) {
+        return;
     }
+    out.push(FileFinding::on(
+        record.path(),
+        Finding::located(
+            line,
+            FindingCode::BrokenSupersession,
+            format!("superseded-by: `{superseder}` does not claim `supersedes: {stem}`"),
+        ),
+    ));
+    out.push(FileFinding::on(
+        claimant.path(),
+        Finding::for_file(
+            FindingCode::BrokenSupersession,
+            format!("`{stem}` names this record as its superseder, which does not claim it"),
+        ),
+    ));
+}
+
+/// A replaced record that still reads live: the supersession flip and the
+/// back-pointer are written together, so a live state beside one means the
+/// record is being answered for by a replacement it has not stepped aside
+/// for. Judged from the record alone, whether or not the superseder exists.
+fn check_replaced_record_is_settled(record: &Record, out: &mut Vec<FileFinding>) {
+    let Some(record_type) = record.record_type() else {
+        return;
+    };
+    if record.file().field_entry("superseded-by").is_none() {
+        return;
+    }
+    let Some((state, line)) = record.file().field_entry("state") else {
+        return;
+    };
+    if !record_type.live_states().contains(&state) {
+        return;
+    }
+    out.push(FileFinding::on(
+        record.path(),
+        Finding::located(
+            line,
+            FindingCode::BrokenSupersession,
+            format!(
+                "state: `{state}` on a record marked `superseded-by` — a replaced record must not read live"
+            ),
+        ),
+    ));
 }
 
 /// Two files claiming one id, live and archive alike: ids are never reused,

@@ -1,24 +1,29 @@
 //! anb-core — the rules of the game.
 //!
 //! The Core runs with no filesystem, git, or network access: all data flows
-//! through the [`storage::Storage`] seam, fed by the host.
+//! through the [`Storage`] seam, fed by the host.
 
-pub mod config;
+// The crate's surface is the flat re-export below, so that every name a
+// host can reach has exactly one path and the modules stay free to move.
+// The two that stay public are namespaces a caller reads as one: the
+// encoders a host renders replies with, and the calendar.
 pub mod date;
-pub mod debt;
 pub mod encode;
-pub mod finding;
-pub mod grammar;
+
+mod config;
+mod debt;
+mod finding;
+mod grammar;
 mod graph;
 mod mention;
-pub mod notebook;
-pub mod record;
-pub mod reply;
-pub mod request;
+mod notebook;
+mod record;
+mod reply;
+mod request;
 mod resolve;
-pub mod status;
-pub mod storage;
-pub mod tokens;
+mod status;
+mod storage;
+mod tokens;
 
 pub use config::Config;
 pub use debt::{DebtSignal, DebtThresholds};

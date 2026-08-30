@@ -5,7 +5,7 @@
 use crate::recovery::{Recovery, Subject};
 use crate::reply::{Reply, repair_command, shown};
 use anb_core::{
-    Cited, Counts, DebtSignal, FileFinding, Held, ListedRecord, NotebookError, Overview, ReadyTask,
+    Cited, Counts, DebtSignal, FileFinding, ListedRecord, NotebookError, Overview, ReadyTask,
     SECTION_ROWS, Status, View, debt_classes, encode,
 };
 use serde_json::{Map, Value, json};
@@ -13,23 +13,20 @@ use serde_json::{Map, Value, json};
 #[must_use]
 pub fn render(reply: &Reply) -> String {
     let value = match reply {
-        Reply::Created { command, created } => {
-            let mut object = Map::new();
-            object.insert("ok".into(), json!(command));
-            object.insert("id".into(), json!(created.id));
-            object.insert("path".into(), json!(created.path));
-            if let Some(victim) = &created.superseded {
-                object.insert("superseded".into(), json!(victim));
-            }
-            if !created.may_conflict.is_empty() {
-                object.insert(
-                    "may-conflict".into(),
-                    bounded_section(&created.may_conflict, cited_value),
-                );
-            }
-            insert_dangling_mentions(&mut object, &created.dangling_mentions);
-            Value::Object(object)
-        }
+        Reply::Created { command, created } => Value::Object(fields([
+            ("ok", json!(command)),
+            ("id", json!(created.id)),
+            ("path", json!(created.path)),
+            ("superseded", json!(created.superseded)),
+            (
+                "may-conflict",
+                consequence(&created.may_conflict, cited_value),
+            ),
+            (
+                "dangling-mention",
+                dangling_mentions(&created.dangling_mentions),
+            ),
+        ])),
         Reply::Moved {
             command,
             transition,
@@ -41,32 +38,37 @@ pub fn render(reply: &Reply) -> String {
         }
         Reply::Dropped(dropped) => {
             let mut object = transition_map("answer", &dropped.transition);
-            insert_dangling_mentions(&mut object, &dropped.dangling_mentions);
+            object.extend(fields([(
+                "dangling-mention",
+                dangling_mentions(&dropped.dangling_mentions),
+            )]));
             Value::Object(object)
         }
         Reply::Closed(closed) => closed_value(closed),
-        Reply::Held { held, until } => {
-            let mut object = held_map("hold", held);
-            if let Some(until) = until {
-                object.insert("until".into(), json!(until));
-            }
-            Value::Object(object)
-        }
-        Reply::Unheld(held) => Value::Object(held_map("unhold", held)),
+        Reply::Held { held, until } => Value::Object(fields([
+            ("ok", json!("hold")),
+            ("id", json!(held.id)),
+            ("already", json!(held.already)),
+            ("until", json!(until)),
+        ])),
+        Reply::Unheld(held) => json!({
+            "ok": "unhold", "id": held.id, "already": held.already,
+        }),
         Reply::Blocked(edge) => {
             json!({"ok": "block", "id": edge.id, "on": edge.on, "already": edge.already})
         }
         Reply::Unblocked(edge) => {
             json!({"ok": "unblock", "id": edge.id, "on": edge.on, "already": edge.already})
         }
-        Reply::Commented(commented) => {
-            let mut object = Map::new();
-            object.insert("ok".into(), json!("comment"));
-            object.insert("id".into(), json!(commented.id));
-            object.insert("already".into(), json!(commented.already));
-            insert_dangling_mentions(&mut object, &commented.dangling_mentions);
-            Value::Object(object)
-        }
+        Reply::Commented(commented) => Value::Object(fields([
+            ("ok", json!("comment")),
+            ("id", json!(commented.id)),
+            ("already", json!(commented.already)),
+            (
+                "dangling-mention",
+                dangling_mentions(&commented.dangling_mentions),
+            ),
+        ])),
         Reply::Ready { rows, all, .. } => json!({
             "count": rows.len(),
             "ready": rows[..shown(rows.len(), *all)]
@@ -112,14 +114,20 @@ pub fn render_error(error: &NotebookError, subject: &Subject) -> String {
 
 #[must_use]
 pub fn render_recovery(recovery: &Recovery) -> String {
-    let mut object = Map::new();
-    object.insert("error".into(), json!(recovery.code));
-    object.insert("message".into(), json!(recovery.message));
-    if !recovery.details.is_empty() {
-        object.insert("findings".into(), json!(recovery.details));
-    }
-    object.insert("try".into(), json!(recovery.tries));
-    Value::Object(object).to_string()
+    Value::Object(fields([
+        ("error", json!(recovery.code)),
+        ("message", json!(recovery.message)),
+        (
+            "findings",
+            if recovery.details.is_empty() {
+                Value::Null
+            } else {
+                json!(recovery.details)
+            },
+        ),
+        ("try", json!(recovery.tries)),
+    ]))
+    .to_string()
 }
 
 /// The session-start payload for an agent hook, framed as data so record
@@ -140,18 +148,21 @@ pub fn hook_payload(status: &Status) -> String {
 
 fn closed_value(closed: &anb_core::Closed) -> Value {
     let mut object = transition_map("close", &closed.transition);
-    if let Some(note) = &closed.report_note {
-        object.insert("report".into(), json!(note));
-    }
-    insert_dangling_mentions(&mut object, &closed.dangling_mentions);
-    object.insert(
-        "unblocked".into(),
-        bounded_section(&closed.unblocked, |id| json!(id)),
-    );
-    object.insert(
-        "open-questions".into(),
-        bounded_section(&closed.open_questions, |id| json!(id)),
-    );
+    object.extend(fields([
+        ("report", json!(closed.report_note)),
+        (
+            "dangling-mention",
+            dangling_mentions(&closed.dangling_mentions),
+        ),
+        (
+            "unblocked",
+            bounded_section(&closed.unblocked, |id| json!(id)),
+        ),
+        (
+            "open-questions",
+            bounded_section(&closed.open_questions, |id| json!(id)),
+        ),
+    ]));
     Value::Object(object)
 }
 
@@ -160,67 +171,45 @@ fn transition_value(command: &str, transition: &anb_core::Transitioned) -> Value
 }
 
 fn transition_map(command: &str, transition: &anb_core::Transitioned) -> Map<String, Value> {
-    let mut object = Map::new();
-    object.insert("ok".into(), json!(command));
-    object.insert("id".into(), json!(transition.id));
-    object.insert("from".into(), json!(transition.from));
-    object.insert("to".into(), json!(transition.to));
-    object.insert("already".into(), json!(transition.already));
-    object
+    fields([
+        ("ok", json!(command)),
+        ("id", json!(transition.id)),
+        ("from", json!(transition.from)),
+        ("to", json!(transition.to)),
+        ("already", json!(transition.already)),
+    ])
 }
 
-fn held_map(command: &str, held: &Held) -> Map<String, Value> {
-    let mut object = Map::new();
-    object.insert("ok".into(), json!(command));
-    object.insert("id".into(), json!(held.id));
-    object.insert("already".into(), json!(held.already));
-    object
-}
-
-fn insert_dangling_mentions(object: &mut Map<String, Value>, ids: &[String]) {
-    if !ids.is_empty() {
-        object.insert(
-            "dangling-mention".into(),
-            bounded_section(ids, |id| json!(id)),
-        );
-    }
+/// The ids a body cited that the notebook cannot reach — a nudge the
+/// reply carries only when there are some.
+fn dangling_mentions(ids: &[String]) -> Value {
+    consequence(ids, |id| json!(id))
 }
 
 fn cited_value(cited: &Cited) -> Value {
-    let mut object = Map::new();
-    object.insert("id".into(), json!(cited.id));
-    if let Some(by) = &cited.by {
-        object.insert("by".into(), json!(by));
-    }
-    if let Some(via) = &cited.via {
-        object.insert("via".into(), json!(via));
-    }
-    Value::Object(object)
+    Value::Object(fields([
+        ("id", json!(cited.id)),
+        ("by", json!(cited.by)),
+        ("via", json!(cited.via)),
+    ]))
 }
 
-/// An absent field is omitted, in every row shape.
 fn ready_row(row: &ReadyTask) -> Value {
-    let mut object = Map::new();
-    object.insert("id".into(), json!(row.id));
-    if let Some(priority) = row.priority {
-        object.insert("priority".into(), json!(priority));
-    }
-    object.insert("created".into(), json!(row.created));
-    object.insert("title".into(), json!(row.title));
-    Value::Object(object)
+    Value::Object(fields([
+        ("id", json!(row.id)),
+        ("priority", json!(row.priority)),
+        ("created", json!(row.created)),
+        ("title", json!(row.title)),
+    ]))
 }
 
 fn listed_row(row: &ListedRecord) -> Value {
-    let mut object = Map::new();
-    object.insert("id".into(), json!(row.id));
-    object.insert("state".into(), json!(row.state));
-    if let Some(priority) = row.priority {
-        object.insert("priority".into(), json!(priority));
-    }
-    if let Some(title) = &row.title {
-        object.insert("title".into(), json!(title));
-    }
-    Value::Object(object)
+    Value::Object(fields([
+        ("id", json!(row.id)),
+        ("state", json!(row.state)),
+        ("priority", json!(row.priority)),
+        ("title", json!(row.title)),
+    ]))
 }
 
 fn checked_value(findings: &[FileFinding], all: bool) -> Value {
@@ -234,75 +223,69 @@ fn checked_value(findings: &[FileFinding], all: bool) -> Value {
 }
 
 fn archived_value(moved: &anb_core::Archived) -> Value {
-    let mut object = Map::new();
-    object.insert("ok".into(), json!("archive"));
-    object.insert("id".into(), json!(moved.id));
-    object.insert("from".into(), json!(moved.from));
-    object.insert("to".into(), json!(moved.to));
-    if !moved.carried.is_empty() {
-        object.insert(
-            "carried".into(),
-            bounded_section(&moved.carried, |id| json!(id)),
-        );
-    }
-    object.insert("already".into(), json!(moved.already));
-    Value::Object(object)
+    Value::Object(fields([
+        ("ok", json!("archive")),
+        ("id", json!(moved.id)),
+        ("from", json!(moved.from)),
+        ("to", json!(moved.to)),
+        ("carried", consequence(&moved.carried, |id| json!(id))),
+        ("already", json!(moved.already)),
+    ]))
 }
 
 fn edited_value(edited: &anb_core::Edited) -> Value {
-    let mut object = Map::new();
-    object.insert("ok".into(), json!("edit"));
-    object.insert("id".into(), json!(edited.id));
-    object.insert("changed".into(), json!(edited.changed));
-    object.insert("already".into(), json!(edited.changed.is_empty()));
-    insert_dangling_mentions(&mut object, &edited.dangling_mentions);
-    Value::Object(object)
+    Value::Object(fields([
+        ("ok", json!("edit")),
+        ("id", json!(edited.id)),
+        ("changed", json!(edited.changed)),
+        ("already", json!(edited.changed.is_empty())),
+        (
+            "dangling-mention",
+            dangling_mentions(&edited.dangling_mentions),
+        ),
+    ]))
 }
 
-/// An absent line is omitted: the finding is about the whole file.
 fn finding_value(located: &FileFinding) -> Value {
-    let mut object = Map::new();
-    object.insert("file".into(), json!(located.path));
-    if let Some(line) = located.finding.line {
-        object.insert("line".into(), json!(line));
-    }
-    object.insert(
-        "severity".into(),
-        json!(located.finding.code.severity().as_str()),
-    );
-    object.insert("code".into(), json!(located.finding.code.as_str()));
-    if let Some(repair) = &located.repair {
-        object.insert(
-            "repair".into(),
-            json!(repair_command(repair, &located.path)),
-        );
-    }
-    object.insert("message".into(), json!(located.finding.message));
-    Value::Object(object)
+    Value::Object(fields([
+        ("file", json!(located.path)),
+        ("line", json!(located.finding.line)),
+        ("severity", json!(located.finding.code.severity().as_str())),
+        ("code", json!(located.finding.code.as_str())),
+        (
+            "repair",
+            json!(
+                located
+                    .repair
+                    .as_ref()
+                    .map(|repair| repair_command(repair, &located.path))
+            ),
+        ),
+        ("message", json!(located.finding.message)),
+    ]))
 }
 
 fn epic_value(epic: &anb_core::Epic) -> Value {
-    let mut object = Map::new();
-    object.insert("id".into(), json!(epic.id));
-    object.insert("closed".into(), json!(epic.closed));
-    object.insert("total".into(), json!(epic.total));
-    if let Some(next) = &epic.next {
-        object.insert("next".into(), json!(next));
-    }
-    Value::Object(object)
+    Value::Object(fields([
+        ("id", json!(epic.id)),
+        ("closed", json!(epic.closed)),
+        ("total", json!(epic.total)),
+        ("next", json!(epic.next)),
+    ]))
 }
 
 fn overview_value(overview: &Overview, all: bool) -> Value {
-    let mut object = Map::new();
-    object.insert("live".into(), counts_value(&overview.live));
-    object.insert(
-        "epics".into(),
-        section(
-            &overview.epics,
-            shown(overview.epics.len(), all),
-            epic_value,
+    let mut object = fields([
+        ("live", counts_value(&overview.live)),
+        (
+            "epics",
+            section(
+                &overview.epics,
+                shown(overview.epics.len(), all),
+                epic_value,
+            ),
         ),
-    );
+    ]);
     for grouped in &overview.sections {
         object.insert(
             grouped.record_type.directory().into(),
@@ -364,6 +347,18 @@ fn status_value(status: &Status) -> Value {
     })
 }
 
+/// The fields of one object, in insertion order, where a null value lands
+/// no key at all: an absent field is omitted rather than rendered null, in
+/// every reply and every row shape. No reply field is legitimately null,
+/// so this is the whole rule.
+fn fields<const N: usize>(entries: [(&str, Value); N]) -> Map<String, Value> {
+    entries
+        .into_iter()
+        .filter(|(_, value)| !value.is_null())
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect()
+}
+
 /// One section of a grouped reply as data: how many there are, and the
 /// first `shown` of them. A reply an agent reads must not grow with the
 /// notebook, whichever format it asks for.
@@ -378,6 +373,16 @@ fn section<T>(rows: &[T], shown: usize, row: impl Fn(&T) -> Value) -> Value {
 /// passing rather than a listing a caller asked for: no flag lifts it.
 fn bounded_section<T>(rows: &[T], row: impl Fn(&T) -> Value) -> Value {
     section(rows, shown(rows.len(), false), row)
+}
+
+/// [`bounded_section`] for a consequence that is news only when it
+/// happened: nothing to report lands no key.
+fn consequence<T>(rows: &[T], row: impl Fn(&T) -> Value) -> Value {
+    if rows.is_empty() {
+        Value::Null
+    } else {
+        bounded_section(rows, row)
+    }
 }
 
 /// How many rows a Status section shows as data: the dashboard's own
@@ -403,13 +408,11 @@ fn debt_section(debt: &[DebtSignal]) -> Value {
 }
 
 fn in_flight_value(task: &anb_core::ActiveTask) -> Value {
-    let mut object = Map::new();
-    object.insert("id".into(), json!(task.id));
-    object.insert("title".into(), json!(task.title));
-    if let Some(log) = &task.log {
-        object.insert("log".into(), json!(log));
-    }
-    Value::Object(object)
+    Value::Object(fields([
+        ("id", json!(task.id)),
+        ("title", json!(task.title)),
+        ("log", json!(task.log)),
+    ]))
 }
 
 fn debt_value(signal: &DebtSignal) -> Value {

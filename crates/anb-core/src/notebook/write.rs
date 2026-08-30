@@ -83,7 +83,17 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     Ok(())
 }
 
-pub(super) fn validate_edit(record_type: RecordType, edit: &Edit) -> Result<(), NotebookError> {
+/// Judge an [`Edit`] whole and hand back the envelope keys `--clear`
+/// named, so the splice never has to re-read the caller's spelling of
+/// them: a field is matched against [`CLEARABLE`] exactly once, here.
+///
+/// # Errors
+/// [`NotebookError::InvalidArgument`] on any malformed or contradictory
+/// part of the request.
+pub(super) fn validate_edit(
+    record_type: RecordType,
+    edit: &Edit,
+) -> Result<Vec<&'static str>, NotebookError> {
     let invalid = |reason: String| Err(NotebookError::InvalidArgument { reason });
 
     if edit.changes_nothing() {
@@ -117,8 +127,9 @@ pub(super) fn validate_edit(record_type: RecordType, edit: &Edit) -> Result<(), 
     {
         return invalid(format!("review-by: {why}"));
     }
+    let mut cleared = Vec::new();
     for field in &edit.clear {
-        let Some(key) = CLEARABLE.iter().find(|key| **key == field.as_str()) else {
+        let Some(key) = CLEARABLE.into_iter().find(|key| *key == field.as_str()) else {
             return invalid(format!(
                 "clear: `{field}` is not an erasable field — {}",
                 CLEARABLE.join(", ")
@@ -127,14 +138,15 @@ pub(super) fn validate_edit(record_type: RecordType, edit: &Edit) -> Result<(), 
         if writes(edit, key) {
             return invalid(format!("clear: `{key}` is both written and cleared"));
         }
+        cleared.push(key);
     }
-    Ok(())
+    Ok(cleared)
 }
 
 /// Whether the same call also writes `key`: the one contradiction a clear
 /// can carry, asked of the list that will do the writing.
 fn writes(edit: &Edit, key: &str) -> bool {
-    edited_fields(edit)
+    edited_fields(edit, &[])
         .iter()
         .any(|(written, value)| *written == key && value.is_some())
 }
@@ -281,10 +293,15 @@ pub(super) fn report_note_title(task_title: &str) -> String {
 }
 
 /// Splice every requested correction into the file, answering the keys
-/// that actually moved.
-pub(super) fn spliced(file: &mut RecordFile, edit: &Edit) -> Vec<&'static str> {
+/// that actually moved. `cleared` is [`validate_edit`]'s reading of
+/// `--clear`.
+pub(super) fn spliced(
+    file: &mut RecordFile,
+    edit: &Edit,
+    cleared: &[&'static str],
+) -> Vec<&'static str> {
     let mut changed = Vec::new();
-    for (key, value) in edited_fields(edit) {
+    for (key, value) in edited_fields(edit, cleared) {
         let touched = match value {
             Some(value) => file.set_field(key, &value),
             None => file.remove_field(key),
@@ -310,7 +327,7 @@ pub(super) fn spliced(file: &mut RecordFile, edit: &Edit) -> Vec<&'static str> {
 /// sets the line, `None` erases it. Written and cleared fields share one
 /// list so that what an edit changes and what it may change over cannot
 /// drift apart.
-fn edited_fields(edit: &Edit) -> Vec<(&'static str, Option<String>)> {
+fn edited_fields(edit: &Edit, cleared: &[&'static str]) -> Vec<(&'static str, Option<String>)> {
     let mut fields: Vec<(&'static str, Option<String>)> = [
         (
             "title",
@@ -323,12 +340,7 @@ fn edited_fields(edit: &Edit) -> Vec<(&'static str, Option<String>)> {
     .into_iter()
     .filter_map(|(key, value)| value.map(|value| (key, Some(value))))
     .collect();
-    fields.extend(
-        edit.clear
-            .iter()
-            .filter_map(|field| CLEARABLE.iter().find(|key| **key == field.as_str()))
-            .map(|key| (*key, None)),
-    );
+    fields.extend(cleared.iter().map(|key| (*key, None)));
     fields
 }
 

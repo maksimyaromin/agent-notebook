@@ -151,9 +151,9 @@ pub struct Host<'a> {
 /// # Errors
 /// The Core's refusal, or the shell's own argument refusal — either
 /// renders as a recovery payload.
-pub fn execute<S: Storage>(
+pub fn execute(
     command: Command,
-    storage: &mut S,
+    storage: &mut dyn Storage,
     host: Host<'_>,
 ) -> Result<Reply, NotebookError> {
     let Host {
@@ -247,9 +247,9 @@ pub fn execute<S: Storage>(
 }
 
 /// A record minted under the verb that asked for it.
-fn created<S: Storage>(
+fn created(
     command: &'static str,
-    notebook: &mut Notebook<'_, S>,
+    notebook: &mut Notebook<'_>,
     draft: &Draft,
     today: &str,
 ) -> Result<Reply, NotebookError> {
@@ -269,8 +269,8 @@ fn moved(command: &'static str, transition: Transitioned) -> Reply {
 
 /// The Status, or the hook's fail-soft outcome: an empty context, never a
 /// blocked session.
-fn status_reply<S: Storage>(
-    notebook: &Notebook<'_, S>,
+fn status_reply(
+    notebook: &Notebook<'_>,
     budget: Option<u32>,
     hook: bool,
     lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
@@ -286,8 +286,8 @@ fn status_reply<S: Storage>(
 }
 
 /// The Status under the resolved ceiling: the flag outranks the config key.
-fn budgeted_status<S: Storage>(
-    notebook: &Notebook<'_, S>,
+fn budgeted_status(
+    notebook: &Notebook<'_>,
     budget: Option<u32>,
     lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
     today: &str,
@@ -299,8 +299,8 @@ fn budgeted_status<S: Storage>(
     notebook.status(today, ceiling, lost_proofs)
 }
 
-fn edited<S: Storage>(
-    notebook: &mut Notebook<'_, S>,
+fn edited(
+    notebook: &mut Notebook<'_>,
     args: EditArgs,
     today: &str,
 ) -> Result<Reply, NotebookError> {
@@ -328,8 +328,8 @@ fn edited<S: Storage>(
     Ok(Reply::Edited(notebook.edit(&id, &edit, today)?))
 }
 
-fn answered<S: Storage>(
-    notebook: &mut Notebook<'_, S>,
+fn answered(
+    notebook: &mut Notebook<'_>,
     id: &str,
     to: Option<String>,
     drop: Option<String>,
@@ -412,10 +412,7 @@ fn chosen_routing(to: Option<String>, drop: Option<String>) -> Result<Routing, N
 }
 
 /// The dispatch queue, whole or narrowed to one epic.
-fn queued<S: Storage>(
-    notebook: &Notebook<'_, S>,
-    scope: Option<&str>,
-) -> Result<Vec<ReadyTask>, NotebookError> {
+fn queued(notebook: &Notebook<'_>, scope: Option<&str>) -> Result<Vec<ReadyTask>, NotebookError> {
     match scope {
         Some(hub) => notebook.ready_for(hub),
         None => notebook.ready(),
@@ -423,8 +420,8 @@ fn queued<S: Storage>(
 }
 
 /// The live listing, whole or narrowed to one epic.
-fn listed<S: Storage>(
-    notebook: &Notebook<'_, S>,
+fn listed(
+    notebook: &Notebook<'_>,
     scope: Option<&str>,
 ) -> Result<Vec<ListedRecord>, NotebookError> {
     match scope {
@@ -456,8 +453,8 @@ fn chosen_proof(offered: [Option<ChosenProof>; 5]) -> Result<ChosenProof, Notebo
     }
 }
 
-fn close_reply<S: Storage>(
-    notebook: &mut Notebook<'_, S>,
+fn close_reply(
+    notebook: &mut Notebook<'_>,
     args: CloseArgs,
     read_report: &dyn Fn(&str) -> Result<String, StorageError>,
     git_by: impl FnOnce() -> Option<String>,
