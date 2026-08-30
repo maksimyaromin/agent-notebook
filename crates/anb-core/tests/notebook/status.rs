@@ -3,7 +3,7 @@ mod status_dashboard {
 
     fn status_text(storage: &mut MemoryStorage) -> String {
         Notebook::new(storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
             .unwrap()
             .text
     }
@@ -79,7 +79,7 @@ mod status_dashboard {
             let sound = record_file(id, type_word, state, extra, "");
             let mut storage = storage_with(&[(path, &sound)]);
             let seen = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, no_lost_proofs)
+                .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
                 .unwrap();
             let named: Vec<&str> = seen
                 .in_flight
@@ -97,7 +97,7 @@ mod status_dashboard {
             let broken = record_file(id, type_word, state, &broken_lines, "");
             let mut storage = storage_with(&[(path, &broken)]);
             let seen = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, no_lost_proofs)
+                .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
                 .unwrap();
             assert_eq!(seen.in_flight, vec![], "{case}");
             assert_eq!(seen.review, Vec::<String>::new(), "{case}");
@@ -168,7 +168,7 @@ mod status_dashboard {
     fn the_dashboard_opens_on_a_task_waiting_for_a_human_alone() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("review", &[]))]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
             .unwrap();
         assert!(!status.quiet, "{}", status.text);
         assert!(
@@ -182,7 +182,7 @@ mod status_dashboard {
     fn the_dashboard_opens_on_ready_work_alone() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
             .unwrap();
         assert!(!status.quiet);
         assert!(
@@ -200,7 +200,7 @@ mod status_dashboard {
             "---\nid: question.demo\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n",
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
             .unwrap();
         assert!(!status.quiet);
         assert!(
@@ -217,7 +217,7 @@ mod status_dashboard {
             &record_file("decision.demo", "decision", "active", &["kind: rule"], ""),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
             .unwrap();
         assert!(
             status.quiet,
@@ -354,10 +354,54 @@ mod debt_signals {
     }
 
     fn debt_of(storage: &mut MemoryStorage) -> Vec<DebtSignal> {
+        debt_behind(storage, None)
+    }
+
+    /// [`debt_of`] with the user's notebook standing behind this one.
+    fn debt_behind(storage: &mut MemoryStorage, user: Option<&MemoryStorage>) -> Vec<DebtSignal> {
         Notebook::new(storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(
+                TODAY,
+                Budget::Unbounded,
+                no_lost_proofs,
+                user.map(|user| user as &dyn Storage),
+            )
             .unwrap()
             .debt
+    }
+
+    fn debt_lines(storage: &mut MemoryStorage, user: Option<&MemoryStorage>) -> Vec<String> {
+        lines_of(&debt_behind(storage, user))
+    }
+
+    /// [`debt_lines`] against a notebook of any medium, not only the twin.
+    fn debt_behind_storage(storage: &mut MemoryStorage, user: &dyn Storage) -> Vec<String> {
+        lines_of(
+            &Notebook::new(storage)
+                .status(TODAY, Budget::Unbounded, no_lost_proofs, Some(user))
+                .unwrap()
+                .debt,
+        )
+    }
+
+    fn lines_of(debt: &[DebtSignal]) -> Vec<String> {
+        debt.iter().map(DebtSignal::line).collect()
+    }
+
+    /// A Decision of one notebook or the other, its author the one fact
+    /// these cases vary beside its state.
+    fn rule(id: &str, state: &str, by: &str, body: &str) -> String {
+        record_file(
+            id,
+            "decision",
+            state,
+            &["kind: rule", &format!("by: {by}")],
+            body,
+        )
+    }
+
+    fn cites(target: &str) -> String {
+        format!("This repository decides otherwise, against {target}.\n")
     }
 
     /// A clock counts days behind, and there are none: a date ahead of
@@ -711,7 +755,7 @@ mod debt_signals {
             ),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
             .unwrap();
         assert_eq!(
             status.debt,
@@ -775,7 +819,7 @@ mod debt_signals {
             ),
         ]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
             .unwrap();
         let pairs: Vec<&DebtSignal> = status
             .debt
@@ -1001,7 +1045,7 @@ mod debt_signals {
             &record_file("note.demo", "note", "active", &[], &format!("{body}\n")),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
             .unwrap();
         assert_eq!(status.debt.len(), 6, "the model keeps every signal");
         assert_eq!(
@@ -1042,10 +1086,15 @@ mod debt_signals {
         ]);
         let mut offered = Vec::new();
         Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, |cited| {
-                offered = cited.to_vec();
-                Vec::new()
-            })
+            .status(
+                TODAY,
+                Budget::Unbounded,
+                |cited| {
+                    offered = cited.to_vec();
+                    Vec::new()
+                },
+                None,
+            )
             .unwrap();
         assert_eq!(
             offered,
@@ -1080,7 +1129,7 @@ mod debt_signals {
             ),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, <[CitedProof]>::to_vec)
+            .status(TODAY, Budget::Unbounded, <[CitedProof]>::to_vec, None)
             .unwrap();
         assert_eq!(
             status.debt,
@@ -1118,7 +1167,7 @@ mod debt_signals {
         }];
         assert!(
             Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, |_| lost.clone())
+                .status(TODAY, Budget::Unbounded, |_| lost.clone(), None)
                 .unwrap()
                 .debt
                 .iter()
@@ -1204,6 +1253,259 @@ mod debt_signals {
                 ("question-age".to_owned(), "question.demo".to_owned()),
             ]
         );
+    }
+
+    /// The user's notebook stands behind a project's: what it keeps
+    /// standing is what a project rule can shadow.
+    mod the_notebook_behind_this_one {
+        use super::*;
+
+        /// The tool prints both sides and stops: which rule governs is
+        /// settled by residence, and who to argue with is the reader's to
+        /// see.
+        #[test]
+        fn a_project_rule_citing_the_users_own_names_the_pair_and_its_authors() {
+            let user = storage_with(&[(
+                "decisions/decision.tabs.md",
+                &rule("decision.tabs", "active", "Reader", ""),
+            )]);
+            let mut project = storage_with(&[(
+                "decisions/decision.spaces.md",
+                &rule(
+                    "decision.spaces",
+                    "active",
+                    "Teammate",
+                    &cites("decision.tabs"),
+                ),
+            )]);
+
+            assert_eq!(
+                debt_lines(&mut project, Some(&user)),
+                vec!["shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)"],
+                "the project rule leads: it is the one this repository follows"
+            );
+        }
+
+        /// A citation that resolves is not a citation of nothing, and which
+        /// notebook resolves it does not change that.
+        #[test]
+        fn a_record_the_users_notebook_holds_is_no_dangling_mention() {
+            let mut project = storage_with(&[(
+                "decisions/decision.spaces.md",
+                &rule(
+                    "decision.spaces",
+                    "active",
+                    "Teammate",
+                    &cites("note.practice"),
+                ),
+            )]);
+
+            assert_eq!(
+                debt_lines(&mut project, None),
+                vec!["dangling-mention: decision.spaces -> note.practice"],
+                "the project alone knows no such id"
+            );
+            let user = storage_with(&[(
+                "notes/note.practice.md",
+                &record_file("note.practice", "note", "active", &["kind: fact"], ""),
+            )]);
+            assert_eq!(
+                debt_lines(&mut project, Some(&user)),
+                Vec::<String>::new(),
+                "and a reader standing here can open it"
+            );
+        }
+
+        /// A rule that has been replaced or ended binds nobody, so nothing
+        /// stands against it — but the id still names a record, and calling
+        /// it missing would be false.
+        #[test]
+        fn a_rule_the_user_has_retired_is_shadowed_by_nothing_and_dangles_from_nothing() {
+            let user = storage_with(&[(
+                "decisions/decision.tabs.md",
+                &rule("decision.tabs", "retired", "Reader", ""),
+            )]);
+            let mut project = storage_with(&[(
+                "decisions/decision.spaces.md",
+                &rule(
+                    "decision.spaces",
+                    "active",
+                    "Teammate",
+                    &cites("decision.tabs"),
+                ),
+            )]);
+
+            assert_eq!(debt_lines(&mut project, Some(&user)), Vec::<String>::new());
+        }
+
+        /// A record the tool refuses to trust cannot be half of a pair it
+        /// prints: the id it would be named by is one its own envelope
+        /// disowns.
+        #[test]
+        fn an_invalid_rule_of_the_users_notebook_is_half_of_no_pair() {
+            let user = storage_with(&[(
+                "decisions/decision.tabs.md",
+                &rule("decision.tabs", "active", "Reader", "")
+                    .replace("state: active", "state: bogus"),
+            )]);
+            let mut project = storage_with(&[(
+                "decisions/decision.spaces.md",
+                &rule(
+                    "decision.spaces",
+                    "active",
+                    "Teammate",
+                    &cites("decision.tabs"),
+                ),
+            )]);
+
+            assert_eq!(debt_lines(&mut project, Some(&user)), Vec::<String>::new());
+        }
+
+        /// Two rules of one notebook are that notebook's own pair, and a
+        /// notebook read behind itself is still one notebook.
+        #[test]
+        fn a_pair_inside_one_notebook_is_never_a_shadow() {
+            let mut project = storage_with(&[
+                (
+                    "decisions/decision.tabs.md",
+                    &rule("decision.tabs", "active", "Reader", ""),
+                ),
+                (
+                    "decisions/decision.spaces.md",
+                    &rule(
+                        "decision.spaces",
+                        "active",
+                        "Teammate",
+                        &cites("decision.tabs"),
+                    ),
+                ),
+            ]);
+            let itself = project.clone();
+
+            assert_eq!(
+                debt_lines(&mut project, Some(&itself)),
+                vec!["undeclared-pair: decision.spaces (Teammate) <-> decision.tabs (Reader)"],
+                "a notebook read behind itself pairs with nobody across the scopes"
+            );
+        }
+
+        /// A rule this project retired is history here, so it hides
+        /// nothing: the user's rule still stands, and standing is what the
+        /// pair is about.
+        #[test]
+        fn a_rule_this_project_archived_stops_hiding_the_users_own() {
+            let user = storage_with(&[(
+                "decisions/decision.tabs.md",
+                &rule("decision.tabs", "active", "Reader", ""),
+            )]);
+            let mut project = storage_with(&[
+                (
+                    "archive/decisions/decision.tabs.md",
+                    &rule("decision.tabs", "retired", "Teammate", ""),
+                ),
+                (
+                    "decisions/decision.spaces.md",
+                    &rule(
+                        "decision.spaces",
+                        "active",
+                        "Teammate",
+                        &cites("decision.tabs"),
+                    ),
+                ),
+            ]);
+
+            assert_eq!(
+                debt_lines(&mut project, Some(&user)),
+                vec!["shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)"]
+            );
+        }
+
+        /// Debt is read top to bottom, and a body is written in an order
+        /// its author chose.
+        #[test]
+        fn the_pairs_of_one_record_arrive_in_the_order_its_body_names_them() {
+            let user = storage_with(&[
+                (
+                    "decisions/decision.zebra.md",
+                    &rule("decision.zebra", "active", "Reader", ""),
+                ),
+                (
+                    "decisions/decision.alpha.md",
+                    &rule("decision.alpha", "active", "Reader", ""),
+                ),
+            ]);
+            let mut project = storage_with(&[(
+                "decisions/decision.spaces.md",
+                &rule(
+                    "decision.spaces",
+                    "active",
+                    "Teammate",
+                    "Against decision.zebra first, then decision.alpha.\n",
+                ),
+            )]);
+
+            assert_eq!(
+                debt_lines(&mut project, Some(&user)),
+                vec![
+                    "shadow: decision.spaces (Teammate) <-> global decision.zebra (Reader)",
+                    "shadow: decision.spaces (Teammate) <-> global decision.alpha (Reader)",
+                ]
+            );
+        }
+
+        /// A second root is read for a hint on somebody else's dashboard.
+        /// A project whose session opens with a Status cannot be stopped by
+        /// the state of a notebook it does not own.
+        #[test]
+        fn a_user_notebook_that_cannot_be_read_leaves_the_dashboard_standing() {
+            let mut project = storage_with(&[(
+                "decisions/decision.spaces.md",
+                &rule(
+                    "decision.spaces",
+                    "active",
+                    "Teammate",
+                    &cites("decision.tabs"),
+                ),
+            )]);
+            let alone = debt_lines(&mut project.clone(), None);
+
+            assert_eq!(
+                debt_behind_storage(&mut project, &UnreadableNotebook),
+                alone,
+                "the hint is left out, and nothing else changes"
+            );
+        }
+
+        /// A root that is there and cannot be served: a medium that names
+        /// no missing file, only a failure.
+        struct UnreadableNotebook;
+
+        impl Storage for UnreadableNotebook {
+            fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
+                Err(Self::failure(dir))
+            }
+
+            fn read(&self, path: &str) -> Result<String, StorageError> {
+                Err(Self::failure(path))
+            }
+
+            fn write(&mut self, path: &str, _content: &str) -> Result<(), StorageError> {
+                Err(Self::failure(path))
+            }
+
+            fn remove(&mut self, path: &str) -> Result<(), StorageError> {
+                Err(Self::failure(path))
+            }
+        }
+
+        impl UnreadableNotebook {
+            fn failure(path: &str) -> StorageError {
+                StorageError::Io {
+                    path: path.to_owned(),
+                    detail: "the medium answered nothing".to_owned(),
+                }
+            }
+        }
     }
 }
 

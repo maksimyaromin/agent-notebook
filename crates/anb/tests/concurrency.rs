@@ -14,10 +14,15 @@ fn anb(root: &Path, line: &[&str]) -> std::process::Output {
         .expect("the binary runs")
 }
 
+/// `HOME` is pointed at the notebook's own root: a Status reads the user's
+/// notebook behind the project's, and the developer's own must not decide
+/// what a case proves.
 fn spawn(root: &Path, line: &[&str]) -> Child {
     Command::new(env!("CARGO_BIN_EXE_anb"))
         .args(["--notebook", root.to_str().unwrap()])
         .args(line)
+        .env("HOME", root)
+        .env_remove("ANB_NOTEBOOK")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

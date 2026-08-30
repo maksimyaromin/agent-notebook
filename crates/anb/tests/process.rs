@@ -10,10 +10,15 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use tempfile::TempDir;
 
+/// One command against the notebook at `root`. `HOME` is pointed at the
+/// case's own directory: a Status reads the user's notebook behind the
+/// project's, and the developer's own must not decide what a case proves.
 fn anb(root: &Path, line: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_anb"))
         .args(["--notebook", root.to_str().unwrap()])
         .args(line)
+        .env("HOME", root)
+        .env_remove("ANB_NOTEBOOK")
         .output()
         .expect("the binary runs")
 }
