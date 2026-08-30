@@ -125,8 +125,9 @@ mod budget_ladder {
                 no_lost_proofs,
             )
             .unwrap();
+        let (sections, budget_line) = status.text.rsplit_once("budget: ").unwrap();
         assert_eq!(
-            status.text,
+            sections,
             "ok: notebook — 32 tasks, 8 decisions, 0 notes, 0 questions\n\
              in-flight: task.flight0 \"A demo record\"\n\
              in-flight: task.flight1 \"A demo record\"\n\
@@ -152,11 +153,19 @@ mod budget_ladder {
              \x20 task.hub1: 0/1 closed, next: task.child1\n\
              \x20 task.hub2: 0/1 closed, next: task.child2\n\
              \x20 task.hub3: 0/1 closed, next: task.child3\n\
-             \x20 task.hub4: 0/1 closed, next: task.child4\n  \u{2026} 3 more\n\
-             budget: ~309/1500 tokens\n",
-            "every section stops at five rows and counts the rest, and a \
-             notebook that could fill any of them still leaves the default \
-             budget nothing to degrade"
+             \x20 task.hub4: 0/1 closed, next: task.child4\n  \u{2026} 3 more\n",
+            "every section stops at five rows and counts the rest"
+        );
+        assert_eq!(
+            budget_line,
+            format!("~{}/{} tokens\n", status.spent, Budget::DEFAULT_TOKENS),
+            "the budget line reports what the dashboard cost"
+        );
+        assert!(
+            status.spent <= Budget::DEFAULT_TOKENS,
+            "a notebook that could fill every section still leaves the \
+             default budget nothing to degrade: {}",
+            status.text
         );
     }
 

@@ -72,16 +72,23 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         }
     };
 
+    // A session starts whatever state the notebook is in, so the hook's
+    // fail-soft reaches the wiring below as well as the verb: everything
+    // between here and `execute` can fail before a reply exists to soften.
+    let stopped = |error: &NotebookError| -> Result<(String, ExitCode), String> {
+        if hook {
+            return Ok((String::new(), ExitCode::SUCCESS));
+        }
+        Err(render_failure(error))
+    };
+
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
-        // The hook's fail-soft covers the whole invocation, this wiring
-        // included.
-        Err(_) if hook => return Ok((String::new(), ExitCode::SUCCESS)),
         Err(error) => {
-            return Err(render_failure(&NotebookError::Storage(StorageError::Io {
+            return stopped(&NotebookError::Storage(StorageError::Io {
                 path: ".".to_owned(),
                 detail: error.to_string(),
-            })));
+            }));
         }
     };
     let root = notebook_root(
@@ -90,7 +97,7 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         std::env::var_os(NOTEBOOK_ENV).as_deref(),
     );
     if let Some(reason) = unusable_root(&root) {
-        return Err(render_failure(&NotebookError::InvalidArgument { reason }));
+        return stopped(&NotebookError::InvalidArgument { reason });
     }
     let mut storage = FsStorage::new(root.clone());
     let today = jiff::Zoned::now().date().to_string();
@@ -99,7 +106,7 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     // `let _ =` would release it before the first read.
     let _lock = match lock::taken(&root, &cli.command) {
         Ok(lock) => lock,
-        Err(error) => return Err(render_failure(&NotebookError::Storage(error))),
+        Err(error) => return stopped(&NotebookError::Storage(error)),
     };
 
     let lost = |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited);

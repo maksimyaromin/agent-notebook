@@ -417,9 +417,9 @@ fn render_ready(out: &mut String, ready: &[ReadyTask], shown: usize, today_day: 
         let _ = writeln!(out, "ready: {} — anb ready", ready.len());
         return;
     }
-    out.push_str(&crate::encode::ready_table(ready, shown, today_day));
+    out.push_str(&ReadyTask::table(ready, shown, today_day));
     if ready.len() > shown {
-        let _ = writeln!(out, "  … {} more: anb ready", ready.len() - shown);
+        let _ = writeln!(out, "  \u{2026} {} more: anb ready", ready.len() - shown);
     }
 }
 

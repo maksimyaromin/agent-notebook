@@ -18,6 +18,10 @@ pub enum RecordType {
     Question,
 }
 
+/// The directory history moves into, under the notebook root. Every type's
+/// archive is a directory inside it.
+pub const ARCHIVE_DIR: &str = "archive";
+
 impl RecordType {
     pub const ALL: [RecordType; 4] = [
         RecordType::Task,

@@ -608,6 +608,109 @@ mod archive_verb {
         assert!(storage.read("archive/tasks/task.demo.md").is_ok());
     }
 
+    /// A crash between a report's write and the removal of its live copy
+    /// leaves both files standing. The filed copy is retired and stamped
+    /// with the day it moved, so it can never equal the live bytes: only
+    /// recognising it for what it is lets the next call finish the move
+    /// instead of condemning the id forever.
+    #[test]
+    fn a_report_written_but_not_yet_removed_is_finished_not_condemned() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["link: note note.report"]),
+            ),
+            (
+                "notes/note.report.md",
+                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
+            ),
+            (
+                "archive/notes/note.report.md",
+                &record_file("note.report", "note", "retired", &["from: task.demo"], ""),
+            ),
+        ]);
+
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+
+        assert_eq!(moved.carried, vec!["note.report".to_owned()]);
+        assert!(storage.read("notes/note.report.md").is_err());
+        assert!(storage.read("archive/tasks/task.demo.md").is_ok());
+    }
+
+    /// The live copy is the report, and the copy an interrupted run left
+    /// is only where it was going: whatever was written into the report
+    /// since must survive the move, so finishing it writes the live bytes
+    /// rather than keeping what it found.
+    #[test]
+    fn a_report_corrected_after_an_interrupted_move_keeps_the_correction() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["link: note note.report"]),
+            ),
+            (
+                "notes/note.report.md",
+                &record_file(
+                    "note.report",
+                    "note",
+                    "active",
+                    &["from: task.demo"],
+                    "The findings, corrected after review.\n",
+                ),
+            ),
+            (
+                "archive/notes/note.report.md",
+                &record_file(
+                    "note.report",
+                    "note",
+                    "retired",
+                    &["from: task.demo"],
+                    "The findings as first written.\n",
+                ),
+            ),
+        ]);
+
+        Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+
+        let filed = storage.read("archive/notes/note.report.md").unwrap();
+        assert!(filed.contains("corrected after review"), "{filed}");
+    }
+
+    /// Another record wearing the report's id is not an interrupted move,
+    /// however retired it looks: the origin is what makes it this record's
+    /// history.
+    #[test]
+    fn a_foreign_record_at_the_reports_destination_refuses_the_move() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file("closed", &["link: note note.report"]),
+            ),
+            (
+                "notes/note.report.md",
+                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
+            ),
+            (
+                "archive/notes/note.report.md",
+                &record_file("note.report", "note", "retired", &["from: task.other"], ""),
+            ),
+        ]);
+
+        let refusal = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap_err();
+
+        assert!(
+            matches!(refusal, NotebookError::DuplicateId { ref id, .. } if id == "note.report"),
+            "{refusal:?}"
+        );
+        assert!(storage.read("tasks/task.demo.md").is_ok());
+    }
+
     #[test]
     fn a_replayed_archive_answers_already_and_changes_nothing() {
         let text = task_file("closed", &[]);

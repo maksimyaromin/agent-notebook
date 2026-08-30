@@ -25,7 +25,7 @@ pub use debt::{DebtSignal, DebtThresholds};
 pub use finding::{Finding, FindingCode, Severity};
 pub use grammar::RecordFile;
 pub use notebook::{Notebook, NotebookError};
-pub use record::{Record, RecordType, TaskState};
+pub use record::{ARCHIVE_DIR, Record, RecordType, TaskState};
 pub use reply::{
     Archived, Blocker, Cited, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged,
     Edited, Epic, Expunged, FileFinding, Held, ListedRecord, Overview, ReadyTask, Repair,

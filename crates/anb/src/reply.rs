@@ -443,24 +443,8 @@ enum ChosenProof {
 
 /// The single proof among the flags, or the refusal that says which way the
 /// caller missed: nothing offered, or more than one.
-fn chosen_proof(args: &mut CloseArgs) -> Result<ChosenProof, NotebookError> {
-    let mut offered: Vec<ChosenProof> = Vec::new();
-    if let Some(path) = args.note.take() {
-        offered.push(ChosenProof::Ingest(path));
-    }
-    for stored in [
-        args.pr.take().map(Proof::Pr),
-        args.sha.take().map(Proof::Sha),
-        args.report.take().map(Proof::Report),
-        args.no_proof.then_some(Proof::Waived),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        offered.push(ChosenProof::Stored(stored));
-    }
-
-    let mut offered = offered.into_iter();
+fn chosen_proof(offered: [Option<ChosenProof>; 5]) -> Result<ChosenProof, NotebookError> {
+    let mut offered = offered.into_iter().flatten();
     match (offered.next(), offered.next()) {
         (Some(only), None) => Ok(only),
         (None, _) => Err(NotebookError::InvalidArgument {
@@ -474,17 +458,32 @@ fn chosen_proof(args: &mut CloseArgs) -> Result<ChosenProof, NotebookError> {
 
 fn close_reply<S: Storage>(
     notebook: &mut Notebook<'_, S>,
-    mut args: CloseArgs,
+    args: CloseArgs,
     read_report: &dyn Fn(&str) -> Result<String, StorageError>,
     git_by: impl FnOnce() -> Option<String>,
     today: &str,
 ) -> Result<Closed, NotebookError> {
-    match chosen_proof(&mut args)? {
+    let CloseArgs {
+        id,
+        note,
+        pr,
+        sha,
+        report,
+        no_proof,
+    } = args;
+    // Each flag builds its own answer, so no two can be transposed.
+    match chosen_proof([
+        note.map(ChosenProof::Ingest),
+        pr.map(|url| ChosenProof::Stored(Proof::Pr(url))),
+        sha.map(|sha| ChosenProof::Stored(Proof::Sha(sha))),
+        report.map(|path| ChosenProof::Stored(Proof::Report(path))),
+        no_proof.then_some(ChosenProof::Stored(Proof::Waived)),
+    ])? {
         ChosenProof::Ingest(path) => {
             let report = read_report(&path).map_err(|error| report_refusal(&error))?;
-            notebook.close_with_report(&args.id, &report, git_by().as_deref(), today)
+            notebook.close_with_report(&id, &report, git_by().as_deref(), today)
         }
-        ChosenProof::Stored(proof) => notebook.close(&args.id, &proof, today),
+        ChosenProof::Stored(proof) => notebook.close(&id, &proof, today),
     }
 }
 

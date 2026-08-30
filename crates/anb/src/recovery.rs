@@ -151,7 +151,12 @@ fn bounded(details: Vec<String>) -> Vec<String> {
 /// one. Both retry paths read this table, so a refusal and a retry never
 /// offer a caller two different ways to do the same thing; `None` is a verb
 /// this table has no shape for, and each caller falls back its own way.
-fn runnable(verb: &str, id: Option<&str>) -> Option<Vec<String>> {
+///
+/// The shapes are what an agent types next, so they are part of the
+/// command-line contract and are read back by the test that keeps them
+/// runnable.
+#[must_use]
+pub fn runnable(verb: &str, id: Option<&str>) -> Option<Vec<String>> {
     let shapes = match (verb, id) {
         ("close", Some(id)) => vec![
             format!("anb close {id} --note <path>"),

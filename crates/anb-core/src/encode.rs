@@ -1,9 +1,7 @@
 //! The encoding every reply surface shares — the bound on a list, the
-//! quoting rule, and the ready rows — so no two surfaces spell the same
-//! value differently.
+//! bound on a text, and the quoting rule — so no two surfaces spell the
+//! same value differently.
 
-use crate::date;
-use crate::reply::ReadyTask;
 use std::fmt::Write as _;
 
 /// How many rows a reply carries before it names the rest as a count.
@@ -21,6 +19,54 @@ use std::fmt::Write as _;
 /// its rows would say what the reader can already see and hide what it
 /// cannot.
 pub const ROW_BOUND: usize = 20;
+
+/// How many characters of a record's own text a derived reply carries.
+///
+/// [`ROW_BOUND`] answers how many records a reply names; this answers how
+/// much of one. Without it a reply is bounded in one dimension only, and a
+/// single title or log line written long enough carries the whole reply
+/// past its budget.
+pub const TEXT_BOUND: usize = 200;
+
+/// A record's text cut to [`TEXT_BOUND`] characters — its two ends, with
+/// the elision that counts what fell out between them — or the text itself
+/// when it already fits.
+///
+/// Both ends are kept because such a value is read from both: the opening
+/// words say which record or which field, and a finding's reason stands at
+/// the end. Whoever needs the rest reads the record.
+#[must_use]
+pub fn bounded_text(value: String) -> String {
+    let length = value.chars().count();
+    if length <= TEXT_BOUND {
+        return value;
+    }
+    // The elision counts what it dropped, and no drop is wider than the
+    // text it came from, so the ends are cut to leave room for the widest
+    // that count can be — whatever it turns out to be, the answer fits.
+    let half = TEXT_BOUND.saturating_sub(elision(length).chars().count()) / 2;
+    let head = char_boundary(&value, half);
+    let tail = char_boundary(&value, length - half);
+    format!(
+        "{}{}{}",
+        &value[..head],
+        elision(length - 2 * half),
+        &value[tail..]
+    )
+}
+
+fn elision(dropped: usize) -> String {
+    format!(" \u{2026} {dropped} more characters \u{2026} ")
+}
+
+/// The byte index the `chars`th character starts at, or the end of the
+/// value when it holds no such character.
+fn char_boundary(value: &str, chars: usize) -> usize {
+    value
+        .char_indices()
+        .nth(chars)
+        .map_or(value.len(), |(index, _)| index)
+}
 
 /// The ids named inline in a reply, comma-separated: the first `bound` of
 /// them, then how many were left out.
@@ -120,44 +166,9 @@ pub(crate) fn json_quoted(value: &str) -> String {
     out
 }
 
-/// The ready table — header and the first `shown` rows, ages derived from
-/// `today_day`. The caller owns its own truncation hint.
-#[must_use]
-pub fn ready_table(rows: &[ReadyTask], shown: usize, today_day: i64) -> String {
-    let mut out = format!("ready[{}]{{id,priority,age,title}}:\n", rows.len());
-    for row in rows.iter().take(shown) {
-        let priority = row
-            .priority
-            .map_or_else(|| "-".to_owned(), |priority| priority.to_string());
-        let _ = writeln!(
-            out,
-            "  {},{priority},{}d,{}",
-            row.id,
-            age_days(&row.created, today_day),
-            quoted_if_delimited(&row.title)
-        );
-    }
-    out
-}
-
-/// Whole days from `created` to `today_day`, floored at zero; an unreadable
-/// date counts as today.
-fn age_days(created: &str, today_day: i64) -> i64 {
-    date::day_number(created).map_or(0, |day| (today_day - day).max(0))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn row(id: &str, priority: Option<u8>, created: &str, title: &str) -> ReadyTask {
-        ReadyTask {
-            id: id.to_owned(),
-            priority,
-            created: created.to_owned(),
-            title: title.to_owned(),
-        }
-    }
 
     fn ids(count: usize) -> Vec<String> {
         (0..count).map(|n| format!("task.t{n:02}")).collect()
@@ -172,65 +183,50 @@ mod tests {
     fn a_list_past_the_bound_names_the_first_and_counts_the_rest() {
         assert_eq!(
             id_list(&ids(6), 3),
-            "task.t00, task.t01, task.t02, … 3 more"
+            "task.t00, task.t01, task.t02, \u{2026} 3 more"
         );
     }
 
     #[test]
     fn a_chain_walks_its_ids_with_arrows() {
-        assert_eq!(id_chain(&ids(2)), "task.t00 → task.t01");
+        assert_eq!(id_chain(&ids(2)), "task.t00 \u{2192} task.t01");
     }
 
     #[test]
-    fn a_row_derives_its_age_and_quotes_a_delimited_title() {
-        let rows = [row(
-            "task.demo",
-            None,
-            "2026-08-24",
-            "Degrades sections, keeps Budget",
-        )];
-        let today_day = date::day_number("2026-08-28").unwrap();
+    fn text_within_the_bound_stands_as_it_was_written() {
+        let title = "Bounded replies keep a dashboard readable";
+        assert_eq!(bounded_text(title.to_owned()), title);
+    }
+
+    /// The two ends are what a reader needs: which record the text is
+    /// about, and the reason a finding ends with. Nothing is invented and
+    /// nothing goes missing — the count between the ends is exactly what
+    /// they leave out — and the whole answer fits the bound, elision
+    /// included, so a caller can spend against it.
+    #[test]
+    fn text_past_the_bound_keeps_both_ends_and_counts_the_rest() {
+        let written = format!("state: `{}` is not a state", "x".repeat(500));
+        let bounded = bounded_text(written.clone());
+
+        assert!(bounded.chars().count() <= TEXT_BOUND, "{bounded}");
+        let (head, rest) = bounded.split_once(" \u{2026} ").unwrap();
+        let (dropped, tail) = rest.split_once(" more characters \u{2026} ").unwrap();
+        assert!(
+            written.starts_with(head) && written.ends_with(tail),
+            "{bounded}"
+        );
         assert_eq!(
-            ready_table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,title}:\n  task.demo,-,4d,\"Degrades sections, keeps Budget\"\n"
+            head.chars().count() + dropped.parse::<usize>().unwrap() + tail.chars().count(),
+            written.chars().count()
         );
     }
 
+    /// The bound counts characters, and a cut lands between two of them:
+    /// slicing a multi-byte character in half would abort the process.
     #[test]
-    fn an_unreadable_created_date_counts_as_today() {
-        let rows = [row("task.demo", Some(1), "", "A demo record")];
-        assert_eq!(
-            ready_table(&rows, 1, 20_000),
-            "ready[1]{id,priority,age,title}:\n  task.demo,1,0d,A demo record\n"
-        );
-    }
-
-    /// A clock behind the notebook's own dates would otherwise age a record
-    /// backwards; nothing is younger than new.
-    #[test]
-    fn a_record_created_after_today_is_no_age_at_all() {
-        let rows = [row("task.demo", None, "2026-08-30", "A demo record")];
-        let today_day = date::day_number("2026-08-28").unwrap();
-        assert_eq!(
-            ready_table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,title}:\n  task.demo,-,0d,A demo record\n"
-        );
-    }
-
-    /// A terminal obeys the escape sequences in a title, so a row must not
-    /// carry one: `\r` alone reprints the line as another record's row.
-    #[test]
-    fn a_control_character_in_a_title_is_escaped_into_its_own_cell() {
-        let rows = [row(
-            "task.demo",
-            None,
-            "2026-08-28",
-            "Harmless\u{1b}[2K\rShipped",
-        )];
-        let today_day = date::day_number("2026-08-28").unwrap();
-        assert_eq!(
-            ready_table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,title}:\n  task.demo,-,0d,\"Harmless\\u001b[2K\\rShipped\"\n"
-        );
+    fn a_multi_byte_text_is_cut_by_characters_not_bytes() {
+        let bounded = bounded_text("\u{4e16}".repeat(300));
+        assert!(bounded.chars().count() <= TEXT_BOUND, "{bounded}");
+        assert!(bounded.starts_with('\u{4e16}') && bounded.ends_with('\u{4e16}'));
     }
 }

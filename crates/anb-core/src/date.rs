@@ -36,7 +36,7 @@ pub(crate) fn is_date(value: &str) -> bool {
 /// Status clocks do.
 #[must_use]
 pub fn day_number(value: &str) -> Option<i64> {
-    let date = match value.split_once('T') {
+    let date = match value.split_once(['T', 't']) {
         Some(_) if !is_timestamp(value) => return None,
         Some((date, _)) => date,
         None => value,
@@ -65,15 +65,16 @@ fn days_in_month(year: u16, month: u8) -> u8 {
     }
 }
 
-/// RFC 3339: `<date>T<HH:MM:SS>[.fraction](Z|±HH:MM)`.
+/// RFC 3339: `<date>T<HH:MM:SS>[.fraction](Z|±HH:MM)`, with the
+/// lower-case `t` and `z` the grammar's case-insensitive literals allow.
 pub(crate) fn is_timestamp(value: &str) -> bool {
-    let Some((date, time)) = value.split_once('T') else {
+    let Some((date, time)) = value.split_once(['T', 't']) else {
         return false;
     };
     if !is_date(date) {
         return false;
     }
-    let Some(offset_start) = time.find(['Z', '+', '-']) else {
+    let Some(offset_start) = time.find(['Z', 'z', '+', '-']) else {
         return false;
     };
     let (clock, offset) = time.split_at(offset_start);
@@ -83,7 +84,7 @@ pub(crate) fn is_timestamp(value: &str) -> bool {
         }
         None => is_clock(clock),
     };
-    let offset_ok = offset == "Z"
+    let offset_ok = offset.eq_ignore_ascii_case("Z")
         || offset
             .strip_prefix(['+', '-'])
             .and_then(|hhmm| hhmm.split_once(':'))
@@ -104,4 +105,33 @@ fn is_clock(clock: &str) -> bool {
         && clock[0..2].parse::<u8>().is_ok_and(|hours| hours <= 23)
         && clock[3..5].parse::<u8>().is_ok_and(|minutes| minutes <= 59)
         && clock[6..8].parse::<u8>().is_ok_and(|seconds| seconds <= 59)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `T` and the `Z` are case-insensitive literals, so the two
+    /// spellings are the same instant. A value the grammar accepts and the
+    /// calendar cannot read would fall out of every clock at once, aged as
+    /// today and never due.
+    #[test]
+    fn a_timestamp_reads_the_same_day_however_its_separator_is_cased() {
+        assert_eq!(
+            day_number("2026-08-24t12:34:56z"),
+            day_number("2026-08-24T12:34:56Z")
+        );
+        assert_eq!(day_number("2026-08-24t12:34:56z"), day_number("2026-08-24"));
+        assert!(is_timestamp("2026-08-24t12:34:56z"));
+    }
+
+    /// A value shaped like a timestamp and malformed inside it is no date:
+    /// taking the part before the separator would read a broken value as a
+    /// sound one.
+    #[test]
+    fn a_malformed_timestamp_is_no_day_at_all() {
+        for value in ["2026-08-24t99:00:00z", "2026-08-24T12:34:56", "2026-08-24t"] {
+            assert_eq!(day_number(value), None, "{value}");
+        }
+    }
 }

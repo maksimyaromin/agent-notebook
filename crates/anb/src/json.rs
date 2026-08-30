@@ -63,7 +63,6 @@ pub fn render(reply: &Reply) -> String {
             let mut object = Map::new();
             object.insert("ok".into(), json!("comment"));
             object.insert("id".into(), json!(commented.id));
-            object.insert("entry".into(), json!(commented.entry));
             object.insert("already".into(), json!(commented.already));
             insert_dangling_mentions(&mut object, &commented.dangling_mentions);
             Value::Object(object)

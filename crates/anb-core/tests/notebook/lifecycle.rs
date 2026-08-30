@@ -577,6 +577,48 @@ mod hold {
         assert!(!text.contains("\nhold-until:"));
     }
 
+    /// A hand-broken hold freezes a Task while naming the verb that would
+    /// free it, so `unhold` reads over its own findings: erasing the pair
+    /// is the repair, and the record it leaves carries neither.
+    #[test]
+    fn unhold_erases_a_hold_whose_date_is_broken() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &task_file("active", &["hold: a reason", "hold-until: someday"]),
+        )]);
+
+        let reply = Notebook::new(&mut storage)
+            .unhold("task.demo", TODAY)
+            .unwrap();
+
+        assert!(!reply.already);
+        let text = storage.read("tasks/task.demo.md").unwrap();
+        assert!(!text.contains("\nhold:"), "{text}");
+        assert!(!text.contains("\nhold-until:"), "{text}");
+        assert!(
+            Notebook::new(&mut storage).check().unwrap().is_empty(),
+            "the repaired record reads clean"
+        );
+    }
+
+    /// The admission is for a repair, not a pass: a verb that would erase
+    /// nothing leaves every finding standing, so it is refused rather than
+    /// answered `already`.
+    #[test]
+    fn unhold_is_refused_on_a_broken_task_that_carries_no_hold() {
+        let mut storage =
+            storage_with(&[("tasks/task.demo.md", &task_file("active", &["priority: 9"]))]);
+
+        let refusal = Notebook::new(&mut storage)
+            .unhold("task.demo", TODAY)
+            .unwrap_err();
+
+        assert!(
+            matches!(refusal, NotebookError::InvalidRecord { .. }),
+            "{refusal:?}"
+        );
+    }
+
     #[test]
     fn unhold_on_an_unheld_task_is_a_replay() {
         let text = task_file("active", &[]);
@@ -605,10 +647,6 @@ mod task_log {
             .unwrap();
         assert!(!reply.already);
         assert_eq!(
-            reply.entry,
-            "- 2026-08-27 claude-code: parser done, tests next"
-        );
-        assert_eq!(
             storage.read("tasks/task.demo.md").unwrap(),
             "---\nid: task.demo\ntype: task\nstate: active\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\n- 2026-08-27 claude-code: parser done, tests next\n"
         );
@@ -617,10 +655,15 @@ mod task_log {
     #[test]
     fn an_entry_without_an_acting_hand_shows_the_dash() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
-        let reply = Notebook::new(&mut storage)
+        Notebook::new(&mut storage)
             .comment("task.demo", None, "stopped at the render step", TODAY)
             .unwrap();
-        assert_eq!(reply.entry, "- 2026-08-27 -: stopped at the render step");
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .ends_with("- 2026-08-27 -: stopped at the render step\n")
+        );
     }
 
     #[test]

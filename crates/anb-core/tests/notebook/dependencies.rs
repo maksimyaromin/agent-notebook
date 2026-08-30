@@ -696,6 +696,37 @@ mod epics {
         );
     }
 
+    /// The same corruption seen from the epic's side: a child that stands
+    /// open is open, whatever the copy left in the archive says it became.
+    /// Counting the twin would report an epic further along than it is,
+    /// during exactly the corruption the id claim exists to survive.
+    #[test]
+    fn an_archived_twin_does_not_close_a_child_that_stands_open() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic.md",
+                &record_file("task.epic", "task", "open", &["blocked-by: task.child"], ""),
+            ),
+            (
+                "tasks/task.child.md",
+                &record_file("task.child", "task", "open", &["from: task.epic"], ""),
+            ),
+            (
+                "archive/tasks/task.child.md",
+                &record_file("task.child", "task", "closed", &["from: task.epic"], ""),
+            ),
+        ]);
+        assert_eq!(
+            Notebook::new(&mut storage).overview().unwrap().epics,
+            vec![Epic {
+                id: "task.epic".to_owned(),
+                closed: 0,
+                total: 1,
+                next: Some("task.child".to_owned()),
+            }]
+        );
+    }
+
     #[test]
     fn a_task_that_merely_spawned_a_question_is_no_hub() {
         let mut storage = storage_with(&[

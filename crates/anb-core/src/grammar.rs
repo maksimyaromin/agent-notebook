@@ -373,20 +373,20 @@ impl RecordFile {
             .map(|field| (field.value.as_str(), field.line))
     }
 
-    /// Replace `key`'s line with its canonical form, or insert a new line at
-    /// the key's canonical position; every other byte of the file stays
-    /// verbatim, so splicing into a CRLF file leaves its
-    /// untouched lines CRLF while the spliced line is canonical LF. Returns
-    /// whether any byte changed.
-    ///
-    /// The value must be one line — multi-line content belongs in the body.
-    ///
     /// Whether the file opens with a `---` fence, and so has an envelope to
     /// splice at all. The mutating methods below panic without one.
     pub(crate) fn has_envelope(&self) -> bool {
         self.envelope.is_some()
     }
 
+    /// Replace `key`'s line with its canonical form, or insert a new line at
+    /// the key's canonical position; every other byte of the file stays
+    /// verbatim, so splicing into a CRLF file leaves its untouched lines
+    /// CRLF while the spliced line is canonical LF. Returns whether any
+    /// byte changed.
+    ///
+    /// The value must be one line — multi-line content belongs in the body.
+    ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
     pub(crate) fn set_field(&mut self, key: &str, value: &str) -> bool {
@@ -721,7 +721,12 @@ fn check_fields(envelope: &Envelope, findings: &mut Vec<Finding>) {
             ));
             continue;
         }
-        seen.push((spec.key, field.line));
+        // A repeatable key records only its first line: `seen` is scanned
+        // once per field, and one entry per line would make that scan
+        // quadratic in the record's repeated fields.
+        if earlier.is_none() {
+            seen.push((spec.key, field.line));
+        }
         findings.extend(value_finding(spec, field));
     }
 

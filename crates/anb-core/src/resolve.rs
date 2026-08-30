@@ -6,7 +6,7 @@
 //! instead of from every file it holds.
 
 use crate::grammar;
-use crate::record::{Record, RecordType};
+use crate::record::{ARCHIVE_DIR, Record, RecordType};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What a reference may resolve to. An id resolves when a file bearing it
@@ -22,14 +22,17 @@ impl<'a> Resolver<'a> {
     /// The resolver of one query's records and the ids its archive
     /// listing named. Only a record sitting at its own canonical path
     /// resolves — a file elsewhere carries a name and claims nothing.
+    ///
+    /// The first file to claim an id answers for it, so a live record
+    /// outranks the archived twin an interrupted move leaves behind.
     pub(crate) fn of(records: &'a [Record], archived: &'a BTreeSet<String>) -> Resolver<'a> {
-        Resolver {
-            read: records
-                .iter()
-                .filter_map(|record| Some((resolvable_id(record.path())?, record)))
-                .collect(),
-            archived,
+        let mut read = BTreeMap::new();
+        for record in records {
+            if let Some(id) = resolvable_id(record.path()) {
+                read.entry(id).or_insert(record);
+            }
         }
+        Resolver { read, archived }
     }
 
     /// Whether the notebook still holds `id`, read or filed.
@@ -56,7 +59,9 @@ impl<'a> Resolver<'a> {
 pub(crate) fn resolvable_id(path: &str) -> Option<&str> {
     let stem = path_stem(path);
     let home = type_of(stem)?.directory();
-    let filed = path.strip_prefix("archive/").unwrap_or(path);
+    let filed = path
+        .strip_prefix(&format!("{ARCHIVE_DIR}/"))
+        .unwrap_or(path);
     let (directory, filename) = filed.rsplit_once('/')?;
     (directory == home && is_record_file(filename)).then_some(stem)
 }
@@ -76,7 +81,7 @@ pub(crate) fn archived_among<'a>(
 }
 
 pub(crate) fn archive_of(directory: &str) -> String {
-    format!("archive/{directory}")
+    format!("{ARCHIVE_DIR}/{directory}")
 }
 
 /// The paths an id could be held at, its live home before its archived
@@ -103,7 +108,7 @@ pub(crate) fn type_of(id: &str) -> Option<RecordType> {
 pub(crate) fn record_path(id: &str, record_type: RecordType, archived: bool) -> String {
     let dir = record_type.directory();
     if archived {
-        format!("archive/{dir}/{id}.md")
+        format!("{}/{id}.md", archive_of(dir))
     } else {
         format!("{dir}/{id}.md")
     }
@@ -119,7 +124,7 @@ pub(crate) fn is_record_file(path: &str) -> bool {
 }
 
 pub(crate) fn is_archived(path: &str) -> bool {
-    path.starts_with("archive/")
+    path.starts_with(&format!("{ARCHIVE_DIR}/"))
 }
 
 /// The id a canonical record path carries: the filename minus `.md`. The
