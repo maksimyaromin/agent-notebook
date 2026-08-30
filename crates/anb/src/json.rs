@@ -235,13 +235,19 @@ fn checked_value(findings: &[FileFinding], all: bool) -> Value {
 }
 
 fn archived_value(moved: &anb_core::Archived) -> Value {
-    json!({
-        "ok": "archive",
-        "id": moved.id,
-        "from": moved.from,
-        "to": moved.to,
-        "already": moved.already,
-    })
+    let mut object = Map::new();
+    object.insert("ok".into(), json!("archive"));
+    object.insert("id".into(), json!(moved.id));
+    object.insert("from".into(), json!(moved.from));
+    object.insert("to".into(), json!(moved.to));
+    if !moved.carried.is_empty() {
+        object.insert(
+            "carried".into(),
+            bounded_section(&moved.carried, |id| json!(id)),
+        );
+    }
+    object.insert("already".into(), json!(moved.already));
+    Value::Object(object)
 }
 
 fn edited_value(edited: &anb_core::Edited) -> Value {
@@ -323,10 +329,12 @@ fn view_value(view: &View) -> Value {
     })
 }
 
+/// The dashboard as data. The Budget belongs to the text: it measures a
+/// rendering, and this one is bounded per section instead — so neither the
+/// spent estimate nor the text it measures is restated here.
 fn status_value(status: &Status) -> Value {
     json!({
         "quiet": status.quiet,
-        "spent": status.spent,
         "counts": counts_value(&status.counts),
         "in-flight": section(&status.in_flight, dashboard_rows(&status.in_flight), in_flight_value),
         "review": section(&status.review, dashboard_rows(&status.review), |id| json!(id)),
@@ -336,7 +344,6 @@ fn status_value(status: &Status) -> Value {
         "ready": section(&status.ready, dashboard_rows(&status.ready), ready_row),
         "epics": section(&status.epics, dashboard_rows(&status.epics), epic_value),
         "debt": debt_section(&status.debt),
-        "text": status.text,
     })
 }
 

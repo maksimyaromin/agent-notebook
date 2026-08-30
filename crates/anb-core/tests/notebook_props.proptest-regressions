@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 1426494190ff309d18c1e8a7adef20d08ec2cfe322f55161e24b0fab68a32d1c # shrinks to open_tasks = 0, active_tasks = 2, aged_questions = 0, epics = 0, ceiling = 1
+cc ed156ccab930018065e9c1fd691050395d1508b17e3965c28e9e6244aa250dc9 # shrinks to title = ""

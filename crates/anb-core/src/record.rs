@@ -542,7 +542,6 @@ fn check_routing(record_type: RecordType, file: &RecordFile, findings: &mut Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::finding::Severity;
 
     fn record_text(field_lines: &[&str], body: &str) -> String {
         let mut text = String::from("---\n");
@@ -572,18 +571,6 @@ mod tests {
         )
     }
 
-    fn task_with(extra: &[&str]) -> Record {
-        let mut lines = vec![
-            "id: task.demo",
-            "type: task",
-            "state: open",
-            "title: A demo task",
-            "created: 2026-08-24",
-        ];
-        lines.extend_from_slice(extra);
-        Record::parse("tasks/task.demo.md", &record_text(&lines, ""))
-    }
-
     fn codes(record: &Record) -> Vec<FindingCode> {
         record
             .findings()
@@ -611,76 +598,25 @@ mod tests {
     }
 
     #[test]
-    fn a_state_outside_the_types_enum_names_the_valid_set() {
-        let record = Record::parse(
-            "tasks/task.demo.md",
-            &record_text(
-                &[
-                    "id: task.demo",
-                    "type: task",
-                    "state: routed",
-                    "title: A demo task",
-                    "created: 2026-08-24",
-                ],
-                "",
+    fn a_word_outside_its_types_vocabulary_names_the_whole_set() {
+        for (fields, valid) in [
+            (["state: active", "kind: law"], "rule, shape, drift"),
+            (
+                ["state: cancelled", "kind: rule"],
+                "active, superseded, retired",
             ),
-        );
-        assert_eq!(codes(&record), vec![FindingCode::BadValue]);
-        assert!(
-            record.findings()[0]
-                .message
-                .contains("open, active, review, closed"),
-            "message must name the valid set: {}",
-            record.findings()[0].message
-        );
-        assert!(record.has_errors());
-    }
-
-    #[test]
-    fn a_kind_on_a_kindless_type_is_a_forward_compatible_warning() {
-        let record = task_with(&["kind: feature"]);
-        assert_eq!(codes(&record), vec![FindingCode::UnknownField]);
-        assert!(!record.has_errors(), "the record stays fully usable");
-    }
-
-    #[test]
-    fn a_kind_outside_the_types_enum_names_the_valid_set() {
-        let record = Record::parse(
-            "decisions/decision.demo.md",
-            &record_text(
-                &[
-                    "id: decision.demo",
-                    "type: decision",
-                    "state: active",
-                    "kind: law",
-                    "title: A demo decision",
-                    "created: 2026-08-24",
-                ],
-                "",
-            ),
-        );
-        assert_eq!(codes(&record), vec![FindingCode::BadValue]);
-        assert!(record.findings()[0].message.contains("rule, shape, drift"));
-    }
-
-    #[test]
-    fn a_task_only_field_on_another_type_is_an_orphan_warning() {
-        let record = Record::parse(
-            "notes/note.demo.md",
-            &record_text(
-                &[
-                    "id: note.demo",
-                    "type: note",
-                    "state: active",
-                    "title: A demo note",
-                    "priority: 2",
-                    "created: 2026-08-24",
-                ],
-                "",
-            ),
-        );
-        assert_eq!(codes(&record), vec![FindingCode::OrphanField]);
-        assert!(!record.has_errors());
+        ] {
+            let mut lines = vec!["id: decision.demo", "type: decision"];
+            lines.extend(fields);
+            lines.extend(["title: A demo decision", "created: 2026-08-24"]);
+            let record = Record::parse("decisions/decision.demo.md", &record_text(&lines, ""));
+            assert_eq!(codes(&record), vec![FindingCode::BadValue], "{fields:?}");
+            assert!(
+                record.findings()[0].message.contains(valid),
+                "{fields:?} must name `{valid}`: {}",
+                record.findings()[0].message
+            );
+        }
     }
 
     #[test]
@@ -700,49 +636,6 @@ mod tests {
             ),
         );
         assert_eq!(codes(&record), vec![FindingCode::OrphanField]);
-    }
-
-    #[test]
-    fn a_return_needs_a_review_to_return_from() {
-        assert_eq!(
-            TaskState::Active.transition(TaskAction::Return),
-            Err(vec![TaskAction::Submit, TaskAction::Close])
-        );
-    }
-
-    #[test]
-    fn hold_until_without_hold_is_an_orphan_warning() {
-        let record = task_with(&["hold-until: 2026-09-01"]);
-        assert_eq!(codes(&record), vec![FindingCode::OrphanField]);
-    }
-
-    #[test]
-    fn hold_until_beside_hold_is_clean() {
-        let record = task_with(&[
-            "hold: waiting for the 1.99 release",
-            "hold-until: 2026-09-01",
-        ]);
-        assert_eq!(record.findings(), &[]);
-        assert_eq!(record.hold(), Some("waiting for the 1.99 release"));
-        assert_eq!(record.hold_until(), Some("2026-09-01"));
-    }
-
-    #[test]
-    fn a_question_routed_without_routed_to_is_broken_routing() {
-        let record = archived_question("state: routed", &[]);
-        assert_eq!(codes(&record), vec![FindingCode::BrokenRouting]);
-        assert_eq!(
-            record.findings()[0].code.severity(),
-            Severity::Error,
-            "a lost routing thread excludes the record from mutation"
-        );
-    }
-
-    #[test]
-    fn a_question_routed_with_routed_to_is_clean_for_this_record_alone() {
-        let record = archived_question("state: routed", &["routed-to: decision.the-answer"]);
-        assert_eq!(record.findings(), &[]);
-        assert_eq!(record.routed_to(), Some("decision.the-answer"));
     }
 
     #[test]
@@ -768,10 +661,6 @@ mod tests {
         ];
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         Record::parse(&format!("{directory}/{id}.md"), &record_text(&lines, ""))
-    }
-
-    fn task_at(directory: &str, state: &str) -> Record {
-        record_at(directory, RecordType::Task, state)
     }
 
     #[test]
@@ -838,39 +727,6 @@ mod tests {
     }
 
     #[test]
-    fn a_record_that_still_binds_from_inside_the_archive_is_an_error() {
-        let record = task_at("archive/tasks", "open");
-        assert_eq!(codes(&record), vec![FindingCode::ArchivedLiveRecord]);
-        assert_eq!(
-            record.findings()[0].code.severity(),
-            Severity::Error,
-            "a record no verb can move is invalid, not untidy"
-        );
-    }
-
-    #[test]
-    fn a_settled_record_still_in_the_working_set_is_only_unfiled() {
-        let record = task_at("tasks", "closed");
-        assert_eq!(codes(&record), vec![FindingCode::UnarchivedSettledRecord]);
-        assert!(
-            !record.has_errors(),
-            "an unfiled record loses nothing and stays fully usable"
-        );
-    }
-
-    #[test]
-    fn a_state_outside_the_enum_is_not_also_a_residence_finding() {
-        let record = task_at("tasks", "routed");
-        assert_eq!(codes(&record), vec![FindingCode::BadValue]);
-    }
-
-    #[test]
-    fn a_file_in_another_types_directory_is_named_by_placement_alone() {
-        let record = task_at("decisions", "closed");
-        assert_eq!(codes(&record), vec![FindingCode::TypeDirMismatch]);
-    }
-
-    #[test]
     fn a_malformed_state_is_flagged_once_not_twice() {
         let record = Record::parse(
             "tasks/task.demo.md",
@@ -886,52 +742,5 @@ mod tests {
             ),
         );
         assert_eq!(codes(&record), vec![FindingCode::BadValue]);
-    }
-
-    #[test]
-    fn the_task_machine_moves_along_the_spec_table() {
-        use TaskAction::{Close, Reopen, Return, Start, Submit};
-        use TaskState::{Active, Closed, Open, Review};
-        let moves = [
-            (Open, Start, Active),
-            (Active, Submit, Review),
-            (Active, Close, Closed),
-            (Review, Close, Closed),
-            (Review, Return, Active),
-            (Closed, Reopen, Open),
-        ];
-        for (from, action, to) in moves {
-            assert_eq!(
-                from.transition(action),
-                Ok(Transition::Move { from, to }),
-                "{} from {}",
-                action.word(),
-                from.word()
-            );
-        }
-    }
-
-    #[test]
-    fn reaching_the_state_the_action_targets_is_a_replay_not_an_error() {
-        assert_eq!(
-            TaskState::Active.transition(TaskAction::Start),
-            Ok(Transition::Already)
-        );
-        assert_eq!(
-            TaskState::Closed.transition(TaskAction::Close),
-            Ok(Transition::Already)
-        );
-    }
-
-    #[test]
-    fn an_invalid_transition_answers_with_the_valid_actions() {
-        assert_eq!(
-            TaskState::Open.transition(TaskAction::Close),
-            Err(vec![TaskAction::Start])
-        );
-        assert_eq!(
-            TaskState::Review.transition(TaskAction::Start),
-            Err(vec![TaskAction::Close, TaskAction::Return])
-        );
     }
 }

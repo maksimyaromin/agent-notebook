@@ -56,6 +56,11 @@ pub enum FindingCode {
 }
 
 impl FindingCode {
+    /// Where the line falls: a record whose finding leaves no verb able to
+    /// move it is in error — nothing can act on it until a hand repairs the
+    /// file — while a record that stays usable as it is carries a warning,
+    /// however untidy. An unfiled settled record loses nothing; a live one
+    /// sitting in the archive cannot be reached by any command at all.
     #[must_use]
     pub fn severity(self) -> Severity {
         match self {

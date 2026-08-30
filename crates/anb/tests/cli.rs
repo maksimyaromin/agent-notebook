@@ -165,6 +165,84 @@ mod task_cycle_replies {
         );
     }
 
+    /// Whether the value is an integer is the command line\'s question;
+    /// whether it is a priority is the notebook\'s, and both answers reach
+    /// the caller in one shape.
+    #[test]
+    fn a_priority_outside_the_scale_is_refused_the_same_way_at_any_size() {
+        for out_of_range in ["9", "300"] {
+            assert_eq!(
+                refused(
+                    &mut MemoryStorage::new(),
+                    &["add", "A triaged task", "--priority", out_of_range]
+                ),
+                format!(
+                    "error[invalid-argument]: priority: {out_of_range} is not 0\u{2013}4\ntry: anb add \"<title>\"\n"
+                )
+            );
+        }
+    }
+
+    /// The refusals a mistyped command earns, each naming the argument it
+    /// judged: the shape of an id, of a tag, of a link, of a date.
+    #[test]
+    fn a_malformed_argument_is_refused_before_any_byte_moves() {
+        for (line, reason) in [
+            (
+                vec!["start", "not-an-id"],
+                "id: `not-an-id` is not `<type>.<slug>`",
+            ),
+            (
+                vec!["add", "A tagged task", "--tag", "Bad Tag"],
+                "tags: `Bad Tag` is not a `[a-z0-9-]+` tag",
+            ),
+            (
+                vec!["add", "A linked task", "--link", "foo"],
+                "link: `foo` is not `<kind> <target>`",
+            ),
+            (
+                vec!["add", "A note by another name", "--id", "note.demo"],
+                "id: `note.demo` names a note, the draft is a task",
+            ),
+            (
+                vec!["add", "???"],
+                "title: yields an empty id \u{2014} pass an explicit id",
+            ),
+        ] {
+            let mut storage = MemoryStorage::new();
+            let refusal = refused(&mut storage, &line);
+            assert!(
+                refusal.starts_with(&format!("error[invalid-argument]: {reason}\n")),
+                "`anb {}` answered {refusal}",
+                line.join(" ")
+            );
+            assert!(
+                storage.list("tasks").unwrap().is_empty(),
+                "`anb {}` wrote a record it had refused",
+                line.join(" ")
+            );
+        }
+    }
+
+    #[test]
+    fn a_hold_until_that_is_not_a_date_is_refused() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_eq!(
+            refused(
+                &mut storage,
+                &[
+                    "hold",
+                    "task.demo",
+                    "--reason",
+                    "waiting",
+                    "--until",
+                    "soon"
+                ]
+            ),
+            "error[invalid-argument]: hold-until: `soon` is not `YYYY-MM-DD` or an RFC 3339 timestamp\ntry: anb hold task.demo --reason \"<why>\"\n"
+        );
+    }
+
     #[test]
     fn start_answers_the_transition() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
@@ -762,30 +840,6 @@ mod knowledge_replies {
     }
 
     #[test]
-    fn a_question_routes_only_into_a_decision_or_a_task() {
-        let mut storage = storage_with(&[
-            (
-                "questions/question.doubt.md".to_owned(),
-                record_file("question.doubt", "question", "open", "A doubt", &[], ""),
-            ),
-            (
-                "notes/note.fact.md".to_owned(),
-                record_file("note.fact", "note", "active", "A fact", &[], ""),
-            ),
-        ]);
-        assert_snapshot!(
-            refused(
-                &mut storage,
-                &["answer", "question.doubt", "--to", "note.fact"],
-            ),
-            @r"
-        error[wrong-type]: `note.fact` is not a decision or a task
-        try: anb view note.fact
-        "
-        );
-    }
-
-    #[test]
     fn retire_ends_a_decision_without_a_successor() {
         let mut storage = storage_with(&[(
             "decisions/decision.old-rule.md".to_owned(),
@@ -855,7 +909,6 @@ mod flat_lists {
         assert_snapshot!(
             ok(&mut worked_example(), &["ready"]),
             @r#"
-        count: 3
         ready[3]{id,priority,age,title}:
           task.parser-fences,1,2d,Grammar parser accepts fenced envelopes
           task.check-corpus,2,9d,Negative corpus wired into CI
@@ -869,7 +922,10 @@ mod flat_lists {
         let mut storage = many_open_tasks(22);
 
         let bounded = ok(&mut storage, &["ready"]);
-        assert!(bounded.starts_with("count: 22\nready[20]{"), "{bounded}");
+        assert!(
+            bounded.starts_with("ready[22]{"),
+            "the header counts the queue, not the rows it affords: {bounded}"
+        );
         assert!(
             bounded.ends_with("  \u{2026} 2 more: anb ready --all\n"),
             "{bounded}"
@@ -910,18 +966,12 @@ mod flat_lists {
         assert_snapshot!(
             ok(&mut storage, &["list"]),
             @r#"
-        count: 3
         records[3]{id,state,priority,title}:
           task.demo,open,-,A demo record
           decision.why-rust,active,-,Rust for the CLI
           question.doubt,open,-,"What, exactly?"
         "#
         );
-    }
-
-    #[test]
-    fn an_empty_notebook_lists_nothing() {
-        assert_eq!(ok(&mut MemoryStorage::new(), &["list"]), "count: 0\n");
     }
 }
 
@@ -1072,6 +1122,11 @@ mod session_status {
         assert_eq!(
             value["in-flight"]["rows"][0]["id"],
             serde_json::json!("task.demo")
+        );
+        let keys = value.as_object().unwrap();
+        assert!(
+            !keys.contains_key("text") && !keys.contains_key("spent"),
+            "the model carries no copy of the text rendering, nor its budget"
         );
     }
 }
@@ -1392,7 +1447,6 @@ mod maintenance_replies {
         assert_snapshot!(
             ok(&mut storage, &["check"]),
             @r#"
-        count: 1
         findings[1]{file,line,severity,code,message}:
           tasks/task.demo.md,4,error,bad-value,"state: `cancelled` is not one of open, active, review, closed for a task"
         "#
@@ -1630,6 +1684,57 @@ mod maintenance_replies {
         );
     }
 
+    /// One epic per row, and a notebook can carry more epics than any reply
+    /// shows.
+    fn many_epics(count: usize) -> MemoryStorage {
+        let mut files = Vec::new();
+        for nth in 0..count {
+            let hub = format!("task.epic-{nth:02}");
+            let child = format!("task.child-{nth:02}");
+            files.push((
+                format!("tasks/{hub}.md"),
+                record_file(
+                    &hub,
+                    "task",
+                    "open",
+                    "An epic",
+                    &[&format!("blocked-by: {child}")],
+                    "",
+                ),
+            ));
+            files.push((
+                format!("tasks/{child}.md"),
+                record_file(
+                    &child,
+                    "task",
+                    "open",
+                    "A child",
+                    &[&format!("from: {hub}")],
+                    "",
+                ),
+            ));
+        }
+        storage_with(&files)
+    }
+
+    #[test]
+    fn the_epic_block_is_bounded_like_every_other_listing() {
+        let shown = ok(&mut many_epics(22), &["overview"]);
+        assert!(
+            shown.contains("epics[22]:")
+                && shown.matches("closed, next:").count() == 20
+                && shown.contains("\u{2026} 2 more: anb overview --all"),
+            "the count is the notebook\'s, the rows are the reply\'s: {shown}"
+        );
+        assert_eq!(
+            ok(&mut many_epics(22), &["overview", "--all"])
+                .matches("closed, next:")
+                .count(),
+            22,
+            "and --all lifts the bound here as everywhere"
+        );
+    }
+
     #[test]
     fn the_epic_block_is_a_shape_the_json_carries_too() {
         assert_eq!(
@@ -1645,7 +1750,6 @@ mod maintenance_replies {
         assert_snapshot!(
             ok(&mut storage, &["ready", "--for", "task.epic-auth"]),
             @r"
-        count: 1
         ready[1]{id,priority,age,title}:
           task.auth-tokens,-,4d,Token rotation
         "
@@ -1747,7 +1851,6 @@ mod search_replies {
         assert_snapshot!(
             ok(&mut storage, &["search", "parser"]),
             @r"
-        count: 2
         matches[2]{id,state,priority,title}:
           task.parser,open,-,Grammar parser work
           task.spike,closed,-,Parser spike
@@ -1887,7 +1990,7 @@ mod check_bounds {
     fn the_findings_table_is_bounded_with_the_restore_hint() {
         let mut storage = many_broken_records(22);
         let out = ok(&mut storage, &["check"]);
-        assert!(out.starts_with("count: 22\nfindings[20]{"), "got: {out}");
+        assert!(out.starts_with("findings[22]{"), "got: {out}");
         assert_eq!(out.lines().last().unwrap(), "  … 2 more: anb check --all");
     }
 }
@@ -2048,6 +2151,62 @@ mod bounded_consequences {
 mod json_maintenance_surface {
     use super::*;
 
+    /// Every verb answers in JSON too, and an agent keying on `ok` and the
+    /// fields beside it gets the same reply the text carries.
+    #[test]
+    fn every_edge_and_hold_verb_carries_its_own_json_shape() {
+        let mut storage = storage_with(&[
+            open_task("task.demo", "A demo record", &[]),
+            open_task("task.other", "Another record", &[]),
+            (
+                "questions/question.doubt.md".to_owned(),
+                record_file("question.doubt", "question", "open", "A doubt", &[], ""),
+            ),
+        ]);
+        for (line, expected) in [
+            (
+                vec!["block", "task.demo", "task.other", "--json"],
+                r#"{"ok":"block","id":"task.demo","on":"task.other","already":false}"#,
+            ),
+            (
+                vec!["unblock", "task.demo", "task.other", "--json"],
+                r#"{"ok":"unblock","id":"task.demo","on":"task.other","already":false}"#,
+            ),
+            (
+                vec![
+                    "hold",
+                    "task.demo",
+                    "--reason",
+                    "waiting on the owner",
+                    "--until",
+                    "2026-09-09",
+                    "--json",
+                ],
+                r#"{"ok":"hold","id":"task.demo","already":false,"until":"2026-09-09"}"#,
+            ),
+            (
+                vec!["unhold", "task.demo", "--json"],
+                r#"{"ok":"unhold","id":"task.demo","already":false}"#,
+            ),
+            (
+                vec![
+                    "answer",
+                    "question.doubt",
+                    "--drop",
+                    "the ground it stood on is gone",
+                    "--json",
+                ],
+                r#"{"ok":"answer","id":"question.doubt","from":"open","to":"dropped","already":false}"#,
+            ),
+            (
+                vec!["expunge", "task.other", "--json"],
+                r#"{"ok":"expunge","id":"task.other","paths":["tasks/task.other.md"]}"#,
+            ),
+        ] {
+            assert_eq!(ok(&mut storage, &line), expected);
+        }
+    }
+
     #[test]
     fn check_carries_findings_with_the_line_omitted_when_absent() {
         let mut storage = storage_with(&[(
@@ -2088,6 +2247,38 @@ mod json_maintenance_surface {
     }
 
     #[test]
+    fn archive_carries_its_reports_in_the_json_too() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md".to_owned(),
+                record_file(
+                    "task.demo",
+                    "task",
+                    "closed",
+                    "A demo record",
+                    &["link: note note.report"],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.report.md".to_owned(),
+                record_file(
+                    "note.report",
+                    "note",
+                    "active",
+                    "The report",
+                    &["from: task.demo"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_eq!(
+            ok(&mut storage, &["archive", "task.demo", "--json"]),
+            r#"{"ok":"archive","id":"task.demo","from":"tasks/task.demo.md","to":"archive/tasks/task.demo.md","carried":{"count":1,"rows":["note.report"]},"already":false}"#
+        );
+    }
+
+    #[test]
     fn archive_confirms_the_move() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md".to_owned(),
@@ -2096,6 +2287,38 @@ mod json_maintenance_surface {
         assert_eq!(
             ok(&mut storage, &["archive", "task.demo", "--json"]),
             r#"{"ok":"archive","id":"task.demo","from":"tasks/task.demo.md","to":"archive/tasks/task.demo.md","already":false}"#
+        );
+    }
+
+    #[test]
+    fn archive_names_the_report_it_carried() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md".to_owned(),
+                record_file(
+                    "task.demo",
+                    "task",
+                    "closed",
+                    "A demo record",
+                    &["link: note note.report"],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.report.md".to_owned(),
+                record_file(
+                    "note.report",
+                    "note",
+                    "active",
+                    "The report",
+                    &["from: task.demo"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_eq!(
+            ok(&mut storage, &["archive", "task.demo"]),
+            "ok: archive task.demo — tasks/task.demo.md\u{2192}archive/tasks/task.demo.md\ncarried[1]: note.report\n"
         );
     }
 

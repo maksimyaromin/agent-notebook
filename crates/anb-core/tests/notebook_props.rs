@@ -247,15 +247,26 @@ mod minting {
         fn a_minted_record_reads_back_clean(title in "\\PC{0,200}") {
             let mut storage = MemoryStorage::new();
             let draft = Draft::new(RecordType::Task, &title);
-            if let Ok(created) = Notebook::new(&mut storage).create(&draft, TODAY) {
-                let text = storage.read(&created.path).unwrap();
-                let record = Record::parse(&created.path, &text);
-                prop_assert!(
-                    !record.has_errors(),
-                    "{title:?} minted {}: {:?}",
-                    created.id,
-                    record.findings()
-                );
+            match Notebook::new(&mut storage).create(&draft, TODAY) {
+                Ok(created) => {
+                    let text = storage.read(&created.path).unwrap();
+                    let record = Record::parse(&created.path, &text);
+                    prop_assert!(
+                        !record.has_errors(),
+                        "{title:?} minted {}: {:?}",
+                        created.id,
+                        record.findings()
+                    );
+                }
+                // A title a mint cannot slug is refused as the bad argument
+                // it is, and a refusal writes nothing.
+                Err(refusal) => {
+                    prop_assert!(
+                        matches!(refusal, NotebookError::InvalidArgument { .. }),
+                        "{title:?} was refused as {refusal:?}"
+                    );
+                    prop_assert!(storage.list("tasks").unwrap().is_empty());
+                }
             }
         }
 

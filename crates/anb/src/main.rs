@@ -9,6 +9,7 @@ use anb::{json, text};
 use anb_core::NotebookError;
 use anb_core::storage::StorageError;
 use clap::Parser;
+use std::io::{self, ErrorKind, Write};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -17,12 +18,26 @@ fn main() -> ExitCode {
         Err(error) => return parse_refused(&error),
     };
     match run(cli) {
-        Ok((output, exit)) => {
-            print!("{}", terminated(output));
-            exit
-        }
-        Err(payload) => {
-            eprint!("{}", terminated(payload));
+        Ok((output, exit)) => emitted(&mut io::stdout(), &terminated(output), exit),
+        Err(payload) => emitted(&mut io::stderr(), &terminated(payload), ExitCode::FAILURE),
+    }
+}
+
+/// Write one reply out and answer with the exit it earned.
+///
+/// A reader that stops early — `anb view <id> | head` — closes the pipe
+/// mid-write. That is the reader's choice, not a failed command, and the
+/// process ends on the verdict it had already reached. Any other write
+/// failure is the host's to report.
+fn emitted(stream: &mut impl Write, payload: &str, exit: ExitCode) -> ExitCode {
+    match stream
+        .write_all(payload.as_bytes())
+        .and_then(|()| stream.flush())
+    {
+        Ok(()) => exit,
+        Err(error) if error.kind() == ErrorKind::BrokenPipe => exit,
+        Err(error) => {
+            let _ = writeln!(io::stderr(), "anb: the reply could not be written: {error}");
             ExitCode::FAILURE
         }
     }
@@ -41,8 +56,7 @@ fn parse_refused(error: &clap::Error) -> ExitCode {
     } else {
         text::render_recovery(&recovery)
     };
-    eprint!("{}", terminated(payload));
-    ExitCode::FAILURE
+    emitted(&mut io::stderr(), &terminated(payload), ExitCode::FAILURE)
 }
 
 /// `Ok` is stdout with the reply's exit; `Err` is the rendered recovery

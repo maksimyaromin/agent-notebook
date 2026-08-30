@@ -239,6 +239,57 @@ mod root_resolution {
     }
 }
 
+/// What the shell sees when it stops listening mid-reply.
+mod a_reader_that_walks_away {
+    use super::*;
+    use std::fmt::Write as _;
+    use std::io::Read as _;
+    use std::process::{Command, Stdio};
+
+    #[test]
+    fn a_reader_that_stops_early_ends_the_reply_quietly() {
+        let project = TempDir::new().unwrap();
+        let notebook = project.path().join("nb");
+        fs::create_dir_all(notebook.join("tasks")).unwrap();
+        // Past any pipe buffer, so the write blocks and then fails.
+        let mut body = String::new();
+        for line in 0..20_000 {
+            let _ = writeln!(body, "  line {line}");
+        }
+        fs::write(
+            notebook.join("tasks/task.big.md"),
+            format!(
+                "---\nid: task.big\ntype: task\nstate: open\ntitle: Big\ncreated: 2026-08-24\nupdated: 2026-08-25\n---\n\n{body}"
+            ),
+        )
+        .unwrap();
+
+        let mut view = Command::new(env!("CARGO_BIN_EXE_anb"))
+            .args(["--notebook", notebook.to_str().unwrap(), "view", "task.big"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the binary runs");
+        // The pipe closes when this temporary drops at the end of the
+        // statement — binding it would keep the reader listening.
+        let mut first = [0u8; 16];
+        view.stdout.take().unwrap().read_exact(&mut first).unwrap();
+
+        let ended = view.wait_with_output().unwrap();
+        assert!(
+            ended.status.success(),
+            "a closed pipe is the reader's choice, not a failure: {:?}, {}",
+            ended.status,
+            String::from_utf8_lossy(&ended.stderr)
+        );
+        assert!(
+            ended.stderr.is_empty(),
+            "nothing is reported about it either: {}",
+            String::from_utf8_lossy(&ended.stderr)
+        );
+    }
+}
+
 /// The relocated notebook, driven end to end through the real binary: the
 /// location is configuration, so every verb must reach it wherever it sits.
 mod a_notebook_that_moved {

@@ -54,6 +54,7 @@ pub(crate) fn split_link(link: &str) -> Option<(&str, &str)> {
 }
 
 /// A record to be created; `id: None` mints one from the title.
+#[derive(Debug)]
 pub struct Draft {
     pub record_type: RecordType,
     pub title: String,
@@ -65,7 +66,7 @@ pub struct Draft {
     pub tags: Vec<String>,
     pub links: Vec<Link>,
     pub supersedes: Option<String>,
-    pub priority: Option<u8>,
+    pub priority: Option<u32>,
     pub body: String,
 }
 
@@ -89,6 +90,7 @@ impl Draft {
     }
 }
 
+#[derive(Debug)]
 pub struct Link {
     pub kind: String,
     pub target: String,
@@ -96,6 +98,7 @@ pub struct Link {
 
 /// The auditable evidence a close carries. `Waived` is the explicit
 /// override: the caller states there is no proof rather than omitting it.
+#[derive(Debug)]
 pub enum Proof {
     Pr(String),
     Sha(String),
@@ -266,19 +269,22 @@ pub struct Archived {
     pub id: String,
     pub from: String,
     pub to: String,
+    /// The report Notes this call filed alongside, in the order the record
+    /// names them.
+    pub carried: Vec<String>,
     pub already: bool,
 }
 
 /// The deliberate corrections `edit` applies to a live record's own fields.
 /// State, id, and the envelope dates stay the commands' territory.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Edit {
     pub title: Option<String>,
     pub body: Option<String>,
     pub add_tags: Vec<String>,
     pub remove_tags: Vec<String>,
     pub from: Option<String>,
-    pub priority: Option<u8>,
+    pub priority: Option<u32>,
     pub review_by: Option<String>,
 }
 
@@ -402,6 +408,30 @@ pub enum NotebookError {
     Storage(StorageError),
 }
 
+impl NotebookError {
+    /// The stable kebab-case code a caller keys on.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            NotebookError::UnknownId { .. } => "unknown-id",
+            NotebookError::Archived { .. } => "archived",
+            NotebookError::InvalidRecord { .. } => "invalid-record",
+            NotebookError::WrongType { .. } => "wrong-type",
+            NotebookError::InvalidTransition { .. } => "invalid-transition",
+            NotebookError::InvalidArgument { .. } => "invalid-argument",
+            NotebookError::DuplicateId { .. } => "duplicate-id",
+            NotebookError::StillReferenced { .. } => "still-referenced",
+            NotebookError::DanglingRef { .. } => "dangling-ref",
+            NotebookError::CannotSupersede { .. } => "cannot-supersede",
+            NotebookError::WouldCycle { .. } => "would-cycle",
+            // The command-level code and the Check finding share one
+            // vocabulary.
+            NotebookError::Storage(StorageError::NotUtf8 { .. }) => "not-utf8",
+            NotebookError::Storage(_) => "storage",
+        }
+    }
+}
+
 impl std::fmt::Display for NotebookError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -447,7 +477,14 @@ impl std::fmt::Display for NotebookError {
     }
 }
 
-impl std::error::Error for NotebookError {}
+impl std::error::Error for NotebookError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            NotebookError::Storage(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<StorageError> for NotebookError {
     fn from(error: StorageError) -> Self {
@@ -488,7 +525,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// A storage failure.
     pub fn check(&self) -> Result<Vec<FileFinding>, NotebookError> {
         let corpus = self.whole_corpus()?;
-        let records = corpus.records();
+        let records = &corpus.records;
         let resolvable = corpus.resolver();
         // Live before archived, as every index over a colliding name reads:
         // the edge a finding points a reader at is the one in the live file.
@@ -549,7 +586,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// A storage failure.
     pub fn ready(&self) -> Result<Vec<ReadyTask>, NotebookError> {
         let corpus = self.live_corpus()?;
-        Ok(ready_rows(corpus.records(), &corpus.resolver()))
+        Ok(ready_rows(&corpus.records, &corpus.resolver()))
     }
 
     /// [`Notebook::ready`] narrowed to one hub's scope: the queue for
@@ -561,7 +598,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// failure.
     pub fn ready_for(&self, hub: &str) -> Result<Vec<ReadyTask>, NotebookError> {
         let (corpus, scope) = self.scoped(hub)?;
-        Ok(ready_rows(corpus.records(), &corpus.resolver())
+        Ok(ready_rows(&corpus.records, &corpus.resolver())
             .into_iter()
             .filter(|row| scope.contains(&row.id))
             .collect())
@@ -576,7 +613,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let (corpus, scope) = self.scoped(hub)?;
         let resolvable = corpus.resolver();
         Ok(corpus
-            .records()
+            .records
             .iter()
             .filter(|record| scope.contains(path_stem(record.path())))
             .map(|record| listed_row(record, &resolvable))
@@ -594,7 +631,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         }
         let corpus = self.live_corpus()?;
         let kin = self.archived_kin(&corpus)?;
-        let scope = MembershipIndex::of(corpus.records(), &kin)
+        let scope = MembershipIndex::of(&corpus.records, &kin)
             .scope_of(hub)
             .into_iter()
             .map(str::to_owned)
@@ -610,7 +647,9 @@ impl<'a, S: Storage> Notebook<'a, S> {
     pub fn epics(&self) -> Result<Vec<Epic>, NotebookError> {
         let corpus = self.live_corpus()?;
         let kin = self.archived_kin(&corpus)?;
-        Ok(epic_rows(corpus.records(), &kin, &corpus.resolver()))
+        let resolvable = corpus.resolver();
+        let queue = ready_rows(&corpus.records, &resolvable);
+        Ok(epic_rows(&corpus.records, &kin, &resolvable, &queue))
     }
 
     /// The archived records the live ones still name as a blocker or an
@@ -634,7 +673,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     fn archived_kin(&self, corpus: &Corpus) -> Result<Vec<Record>, NotebookError> {
         let archived = corpus.resolver();
         let mut wanted: Vec<String> = corpus
-            .records()
+            .records
             .iter()
             .flat_map(kin_of)
             .filter(|target| archived.archived(target))
@@ -688,7 +727,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let today_day = guarded_day(today)?;
         let thresholds = self.config()?.debt_thresholds();
         let corpus = self.live_corpus()?;
-        let records = corpus.records();
+        let records = &corpus.records;
         let resolvable = corpus.resolver();
         let live_valid: Vec<&Record> = records
             .iter()
@@ -702,13 +741,14 @@ impl<'a, S: Storage> Notebook<'a, S> {
             today_day,
             lost_proofs: &lost,
         };
+        let queue = ready_rows(records, &resolvable);
         let inputs = StatusInputs {
             counts: live_counts(records),
             in_flight: in_flight_tasks(&live_valid),
             review: review_tasks(&live_valid),
             rules: standing_rules(&live_valid),
-            ready: ready_rows(records, &resolvable),
-            epics: epic_rows(records, &self.archived_kin(&corpus)?, &resolvable),
+            epics: epic_rows(records, &self.archived_kin(&corpus)?, &resolvable, &queue),
+            ready: queue,
             debt: debt::signals(&sources, &thresholds),
             today_day,
         };
@@ -725,7 +765,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let corpus = self.live_corpus()?;
         let resolvable = corpus.resolver();
         Ok(corpus
-            .records()
+            .records
             .iter()
             .map(|record| listed_row(record, &resolvable))
             .collect())
@@ -748,7 +788,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let corpus = self.whole_corpus()?;
         let resolvable = corpus.resolver();
         Ok(corpus
-            .records()
+            .records
             .iter()
             .filter(|record| matches_query(record, &needle))
             .map(|record| listed_row(record, &resolvable))
@@ -763,7 +803,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// A storage failure.
     pub fn overview(&self) -> Result<Overview, NotebookError> {
         let corpus = self.live_corpus()?;
-        let records = corpus.records();
+        let records = &corpus.records;
         let resolvable = corpus.resolver();
         let sections = RecordType::ALL
             .into_iter()
@@ -776,11 +816,12 @@ impl<'a, S: Storage> Notebook<'a, S> {
                     .collect(),
             })
             .collect();
+        let queue = ready_rows(records, &resolvable);
         Ok(Overview {
             live: live_counts(records),
-            epics: epic_rows(records, &self.archived_kin(&corpus)?, &resolvable),
+            epics: epic_rows(records, &self.archived_kin(&corpus)?, &resolvable, &queue),
             sections,
-            archived: corpus.archive_counts(),
+            archived: corpus.archive,
         })
     }
 
@@ -800,7 +841,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
             .map(str::to_owned)
             .collect();
         let mentioned_by = live
-            .records()
+            .records
             .iter()
             .filter(|other| path_stem(other.path()) != id)
             .filter(|other| mention::mentions(other.file().body()).contains(&id))
@@ -856,8 +897,8 @@ impl<'a, S: Storage> Notebook<'a, S> {
         let victim = self.guard_supersession(draft)?;
 
         let corpus = self.live_corpus()?;
-        let records = corpus.records();
-        let id = resolve_draft_id(draft, &id_claims(records, corpus.archived_ids()))?;
+        let records = &corpus.records;
+        let id = resolve_draft_id(draft, &id_claims(records, &corpus.archived))?;
         let may_conflict = conflict_candidates(draft, records, &corpus.resolver());
         let path = record_path(&id, draft.record_type, false);
         self.storage
@@ -929,7 +970,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
             }
         })?;
         let corpus = self.live_corpus()?;
-        let records = corpus.records();
+        let records = &corpus.records;
         let resolvable = corpus.resolver();
         Ok(Closed {
             transition,
@@ -1387,26 +1428,44 @@ impl<'a, S: Storage> Notebook<'a, S> {
         })
     }
 
-    /// Move a settled record into the archive: same filename, same bytes,
-    /// so `git log --follow` keeps its history and the round-trip contract
-    /// holds. The archive copy lands before the live file goes — a failure
-    /// between the two leaves a loud `duplicate-id`, never a lost record.
+    /// Move a settled record into the archive, and carry its reports with
+    /// it: same filename, same bytes, so `git log --follow` keeps its
+    /// history and the round-trip contract holds. Each archive copy lands
+    /// before its live file goes — a failure between the two leaves a loud
+    /// `duplicate-id`, never a lost record.
+    ///
+    /// The reports are the record's own history, so filing one without the
+    /// other is a split no reader can act on; carried along, the live
+    /// notebook stays the size of the work still open. Everything else a
+    /// record spawned stays where it is — an open Question born inside a
+    /// closed Task is a debt the dashboard raises, not history.
     ///
     /// # Errors
     /// [`NotebookError::InvalidTransition`] on a record still live, naming
-    /// the commands that settle it, plus the resolution errors of
+    /// the commands that settle it, [`NotebookError::InvalidRecord`] or
+    /// [`NotebookError::DuplicateId`] on a report that cannot be filed —
+    /// answered before anything moves — plus the resolution errors of
     /// [`Notebook::close`].
-    pub fn archive(&mut self, id: &str) -> Result<Archived, NotebookError> {
+    pub fn archive(&mut self, id: &str, today: &str) -> Result<Archived, NotebookError> {
+        guard_today(today)?;
         let record_type = parsed_type(id)?;
-        let moved = |already| Archived {
+        let mut moved = Archived {
             id: id.to_owned(),
             from: record_path(id, record_type, false),
             to: record_path(id, record_type, true),
-            already,
+            carried: Vec::new(),
+            already: false,
         };
         let loaded = match self.resolve_live(id, record_type) {
             Ok(loaded) => loaded,
-            Err(NotebookError::Archived { .. }) => return self.replayed_archive(moved(true)),
+            // The record is already where it belongs, and whatever
+            // travelled with it travelled then: a second call is a
+            // question, not a move.
+            Err(NotebookError::Archived { .. }) => {
+                moved.already = true;
+                self.replayed_archive(&moved)?;
+                return Ok(moved);
+            }
             Err(error) => return Err(error),
         };
         if loaded.record.is_live() {
@@ -1416,29 +1475,90 @@ impl<'a, S: Storage> Notebook<'a, S> {
                 valid: settling_commands(record_type, loaded.state_word()),
             });
         }
-        let moved = moved(false);
+        let reports = self.carriable_reports(&loaded.record)?;
         self.guard_archive_destination_free(id, &moved.to, loaded.record.file())?;
+        // The reports move first, so a run interrupted inside the cascade
+        // leaves the record live and the next call finishes it: what was
+        // filed already is no longer live, so it is no longer carriable.
+        for report in &reports {
+            moved.carried.push(self.file_report(report, today)?);
+        }
         self.storage
             .write(&moved.to, &loaded.record.file().render())?;
         self.storage.remove(&moved.from)?;
         Ok(moved)
     }
 
+    /// The reports `filed` carries that this move may take with it, each
+    /// read and judged before a single byte moves — the whole cascade is
+    /// decided first, so a report the notebook cannot move refuses the
+    /// archive instead of interrupting it.
+    ///
+    /// A report is a Note this record links and that was born inside it:
+    /// the record's own output, which is what makes it that record's
+    /// history rather than knowledge outliving it. A link naming anything
+    /// else — a Note born elsewhere, one already filed, a target that is no
+    /// record id at all — is left alone, because a link is evidence and
+    /// evidence is not a licence to move another record.
+    fn carriable_reports(&self, filed: &Record) -> Result<Vec<LoadedLive>, NotebookError> {
+        let origin = path_stem(filed.path());
+        let mut reports = Vec::new();
+        for id in note_links(filed) {
+            let path = record_path(&id, RecordType::Note, false);
+            let Ok(text) = self.storage.read(&path) else {
+                continue;
+            };
+            let record = Record::parse(&path, &text);
+            if record.origin() != Some(origin) {
+                continue;
+            }
+            if record.has_errors() {
+                return Err(NotebookError::InvalidRecord {
+                    path,
+                    findings: error_findings(&record),
+                });
+            }
+            self.guard_archive_destination_free(
+                &id,
+                &record_path(&id, RecordType::Note, true),
+                record.file(),
+            )?;
+            reports.push(LoadedLive { path, record });
+        }
+        Ok(reports)
+    }
+
+    /// Retire a report and file it in one move: a Note is current knowledge
+    /// until something ends it, and what ends this one is the record it
+    /// reports on becoming history. Only the Note this call already judged
+    /// moves — a report of its own is not followed, so the cascade is one
+    /// record deep.
+    fn file_report(&mut self, report: &LoadedLive, today: &str) -> Result<String, NotebookError> {
+        let id = path_stem(&report.path).to_owned();
+        let mut file = RecordFile::parse(&report.record.file().render());
+        file.set_field("state", "retired");
+        file.set_field("updated", today);
+        self.storage
+            .write(&record_path(&id, RecordType::Note, true), &file.render())?;
+        self.storage.remove(&report.path)?;
+        Ok(id)
+    }
+
     /// Judge the copy already in the archive before calling the move done.
     /// Only a clean one proves this very move happened; on any error finding
     /// — the same gate every write passes — answering `already` would report
     /// a corruption as a success.
-    fn replayed_archive(&self, moved: Archived) -> Result<Archived, NotebookError> {
+    fn replayed_archive(&self, moved: &Archived) -> Result<Record, NotebookError> {
         let record = match self.storage.read(&moved.to) {
             Ok(text) => Record::parse(&moved.to, &text),
             Err(StorageError::NotUtf8 { .. }) => Record::unreadable(&moved.to),
             Err(error) => return Err(error.into()),
         };
         if !record.has_errors() {
-            return Ok(moved);
+            return Ok(record);
         }
         Err(NotebookError::InvalidRecord {
-            path: moved.to,
+            path: moved.to.clone(),
             findings: error_findings(&record),
         })
     }
@@ -1467,7 +1587,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
         if paths.is_empty() {
             return Err(NotebookError::UnknownId { id: id.to_owned() });
         }
-        let blockers = inbound_edges(self.whole_corpus()?.records(), id);
+        let blockers = inbound_edges(&self.whole_corpus()?.records, id);
         if !blockers.is_empty() {
             return Err(NotebookError::StillReferenced {
                 id: id.to_owned(),
@@ -1850,7 +1970,7 @@ impl<'a, S: Storage> Notebook<'a, S> {
     /// answers the question the caller asked.
     fn holder_path(&self, id: &str) -> Result<Option<String>, NotebookError> {
         for path in canonical_paths(id) {
-            if self.holds(&path)? {
+            if self.storage.exists(&path)? {
                 return Ok(Some(path));
             }
         }
@@ -1863,22 +1983,11 @@ impl<'a, S: Storage> Notebook<'a, S> {
     fn holder_paths(&self, id: &str) -> Result<Vec<String>, NotebookError> {
         let mut holders = Vec::new();
         for path in canonical_paths(id) {
-            if self.holds(&path)? {
+            if self.storage.exists(&path)? {
                 holders.push(path);
             }
         }
         Ok(holders)
-    }
-
-    /// Whether a file sits at `path`: the storage probe behind every
-    /// question about an id's existence. A file that is not UTF-8 still
-    /// claims its id — ids are never reused, unreadable holders included.
-    fn holds(&self, path: &str) -> Result<bool, NotebookError> {
-        match self.storage.read(path) {
-            Ok(_) | Err(StorageError::NotUtf8 { .. }) => Ok(true),
-            Err(StorageError::NotFound { .. }) => Ok(false),
-            Err(error) => Err(error.into()),
-        }
     }
 
     /// The whole notebook read: history's bytes among the rest. The corpus
@@ -1969,6 +2078,23 @@ fn cited_proofs(records: &[Record]) -> Vec<CitedProof> {
         .collect()
 }
 
+/// The Notes a record links, each once, in the order it names them. A
+/// target that is not a Note id names no record — a link is free text
+/// until the grammar says otherwise, and nothing may turn one into a path.
+fn note_links(record: &Record) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    record
+        .file()
+        .field_values("link")
+        .filter_map(|link| match split_link(link)? {
+            ("note", target) => Some(target.to_owned()),
+            _ => None,
+        })
+        .filter(|target| parsed_type(target) == Ok(RecordType::Note))
+        .filter(|target| seen.insert(target.clone()))
+        .collect()
+}
+
 /// The records one query reads, beside the ids the archive holds. The two
 /// are separate because they cost differently: a record is a file opened,
 /// an archived id is a name in a listing.
@@ -1979,20 +2105,6 @@ struct Corpus {
 }
 
 impl Corpus {
-    fn records(&self) -> &[Record] {
-        &self.records
-    }
-
-    /// How many files the archive holds, per type — whatever they say,
-    /// since a tally of the archive is a tally of its files.
-    fn archive_counts(&self) -> Counts {
-        self.archive
-    }
-
-    fn archived_ids(&self) -> &BTreeSet<String> {
-        &self.archived
-    }
-
     fn resolver(&self) -> Resolver<'_> {
         Resolver {
             read: self
@@ -2125,11 +2237,8 @@ fn resolve_draft_id(
     if !claims.contains_key(&base) {
         return Ok(base);
     }
-    for attempt in 0..1296 {
-        let candidate = format!(
-            "{base}-{}",
-            base36_pair(fnv1a(&draft.title).wrapping_add(attempt))
-        );
+    for attempt in 0..SUFFIX_COUNT {
+        let candidate = format!("{base}-{}", base36_pair(attempt));
         if !claims.contains_key(&candidate) {
             return Ok(candidate);
         }
@@ -2431,7 +2540,7 @@ fn finding_order(located: &FileFinding) -> (u8, &str, usize, &'static str) {
 /// path↔id rule has this one home; a host never re-derives it.
 #[must_use]
 pub fn path_stem(path: &str) -> &str {
-    let filename = path.rsplit('/').next().unwrap_or(path);
+    let filename = path.rsplit_once('/').map_or(path, |(_, name)| name);
     filename.strip_suffix(".md").unwrap_or(filename)
 }
 
@@ -2633,9 +2742,13 @@ impl<'a> MembershipIndex<'a> {
 /// waits on, while `next` reads the whole scope, since anything the epic
 /// waits on is work it still owes. A hub never nominates itself: one that
 /// reaches `ready` is asking for its acceptance close, not for work.
-fn epic_rows(records: &[Record], archived: &[Record], resolvable: &Resolver<'_>) -> Vec<Epic> {
+fn epic_rows(
+    records: &[Record],
+    archived: &[Record],
+    resolvable: &Resolver<'_>,
+    queue: &[ReadyTask],
+) -> Vec<Epic> {
     let index = MembershipIndex::of(records, archived);
-    let queue = ready_rows(records, resolvable);
     records
         .iter()
         .filter(|record| index.is_hub(record, resolvable))
@@ -2853,9 +2966,10 @@ fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     for link in &draft.links {
         guard_single_line("link", &link.target)?;
         if !grammar::is_token(&link.kind) || link.target.trim().is_empty() {
+            let given = format!("{} {}", link.kind, link.target);
             return invalid(format!(
-                "link: `{} {}` is not `<kind> <target>`",
-                link.kind, link.target
+                "link: `{}` is not `<kind> <target>`",
+                given.trim_end()
             ));
         }
     }
@@ -3047,20 +3161,17 @@ fn slugify(title: &str) -> String {
     }
 }
 
-fn fnv1a(text: &str) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
-}
+/// How many suffixed ids one slug can carry: every two-character base36
+/// pair.
+const SUFFIX_COUNT: usize = 36 * 36;
 
-fn base36_pair(n: u64) -> String {
-    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    let n = (n % 1296) as usize;
-    let pair = [DIGITS[n / 36], DIGITS[n % 36]];
-    String::from_utf8_lossy(&pair).into_owned()
+fn base36_pair(n: usize) -> String {
+    const DIGITS: [char; 36] = [
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h',
+        'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    ];
+    debug_assert!(n < SUFFIX_COUNT);
+    format!("{}{}", DIGITS[n / 36], DIGITS[n % 36])
 }
 
 /// The finding a reference into nothing deserves — every surface names one

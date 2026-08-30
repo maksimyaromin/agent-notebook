@@ -140,6 +140,16 @@ impl Storage for FsStorage {
             Err(error) => Err(io_error(path, &error)),
         }
     }
+
+    /// The filesystem answers this from the inode, so an id's existence
+    /// costs a `stat` rather than the record it names.
+    fn exists(&self, path: &str) -> Result<bool, StorageError> {
+        match fs::metadata(self.absolute(path)) {
+            Ok(found) => Ok(found.is_file()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(io_error(path, &error)),
+        }
+    }
 }
 
 /// Whether the entry names a file to read. The kind arrives with the

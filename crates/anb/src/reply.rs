@@ -196,7 +196,7 @@ where
             findings: notebook.check()?,
             all,
         }),
-        Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id)?)),
+        Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id, today)?)),
         Command::Expunge { id } => Ok(Reply::Expunged(notebook.expunge(&id)?)),
         Command::Edit(args) => edited(&mut notebook, args, today),
         Command::Search { query, all } => Ok(Reply::Searched {
@@ -329,7 +329,7 @@ impl Recovery {
     #[must_use]
     pub fn new(error: &NotebookError, subject: &Subject) -> Self {
         let mut recovery = Recovery {
-            code: error_code(error),
+            code: error.code(),
             message: error.to_string(),
             details: Vec::new(),
             tries: Vec::new(),
@@ -439,25 +439,6 @@ fn argument_retries(subject: &Subject) -> Vec<String> {
         ("ask", _) => vec!["anb ask \"<title>\"".to_owned()],
         ("search", _) => vec!["anb search \"<text>\"".to_owned()],
         _ => Vec::new(),
-    }
-}
-
-fn error_code(error: &NotebookError) -> &'static str {
-    match error {
-        NotebookError::UnknownId { .. } => "unknown-id",
-        NotebookError::Archived { .. } => "archived",
-        NotebookError::InvalidRecord { .. } => "invalid-record",
-        NotebookError::WrongType { .. } => "wrong-type",
-        NotebookError::InvalidTransition { .. } => "invalid-transition",
-        NotebookError::InvalidArgument { .. } => "invalid-argument",
-        NotebookError::DuplicateId { .. } => "duplicate-id",
-        NotebookError::StillReferenced { .. } => "still-referenced",
-        NotebookError::DanglingRef { .. } => "dangling-ref",
-        NotebookError::CannotSupersede { .. } => "cannot-supersede",
-        NotebookError::WouldCycle { .. } => "would-cycle",
-        // The command-level code and the Check finding share one vocabulary.
-        NotebookError::Storage(StorageError::NotUtf8 { .. }) => "not-utf8",
-        NotebookError::Storage(_) => "storage",
     }
 }
 

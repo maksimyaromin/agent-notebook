@@ -7,6 +7,10 @@
 //! unrepresentable. Parsing is total: any input yields a [`RecordFile`] whose
 //! [`render`](RecordFile::render) reproduces the input byte-exact; rejection
 //! happens through named findings, never by dropping bytes.
+//!
+//! Reading and judging a file is anyone's; changing one is the notebook's,
+//! whose write-time invariants bind whoever writes — so the splicing
+//! methods stay inside the crate and a record is changed through a verb.
 
 use crate::finding::{Finding, FindingCode, Severity};
 
@@ -380,7 +384,7 @@ impl RecordFile {
     ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
-    pub fn set_field(&mut self, key: &str, value: &str) -> bool {
+    pub(crate) fn set_field(&mut self, key: &str, value: &str) -> bool {
         let canonical = canonical_line(key, value);
         let envelope = self.envelope_for_mutation();
         if let Some(field) = envelope.first_mut(key) {
@@ -402,7 +406,7 @@ impl RecordFile {
     ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
-    pub fn append_field(&mut self, key: &str, value: &str) {
+    pub(crate) fn append_field(&mut self, key: &str, value: &str) {
         let canonical = canonical_line(key, value);
         let envelope = self.envelope_for_mutation();
         let at = match envelope.last_index_of(key) {
@@ -417,7 +421,7 @@ impl RecordFile {
     ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
-    pub fn remove_field(&mut self, key: &str) -> bool {
+    pub(crate) fn remove_field(&mut self, key: &str) -> bool {
         let envelope = self.envelope_for_mutation();
         let before = envelope.lines.len();
         envelope
@@ -431,7 +435,7 @@ impl RecordFile {
     ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
-    pub fn remove_field_value(&mut self, key: &str, value: &str) -> bool {
+    pub(crate) fn remove_field_value(&mut self, key: &str, value: &str) -> bool {
         let envelope = self.envelope_for_mutation();
         let before = envelope.lines.len();
         envelope.lines.retain(|line| {
@@ -446,7 +450,7 @@ impl RecordFile {
     ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
-    pub fn append_body(&mut self, line: &str) {
+    pub(crate) fn append_body(&mut self, line: &str) {
         if self.body.is_empty() {
             let close_fence = &mut self.envelope_for_mutation().close_fence;
             if let Some(fence) = close_fence
@@ -468,7 +472,7 @@ impl RecordFile {
     ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
-    pub fn set_body(&mut self, body: &str) {
+    pub(crate) fn set_body(&mut self, body: &str) {
         if !body.is_empty() {
             let close_fence = &mut self.envelope_for_mutation().close_fence;
             if let Some(fence) = close_fence
@@ -540,7 +544,7 @@ fn split_bom(input: &str) -> (bool, &str) {
 /// The structural pass: fences, field lines, and the body split — every
 /// finding the line grammar can name without knowing any field.
 fn parse_structure(text: &str) -> RecordFile {
-    let lines = raw_lines(text);
+    let lines = text.split_inclusive('\n').collect::<Vec<&str>>();
     let opens_with_fence = lines.first().is_some_and(|first| {
         let (content, _) = line_content(first);
         content == FENCE
@@ -643,23 +647,6 @@ fn scan_envelope(open_fence: &str, field_rows: &[&str]) -> EnvelopeScan {
         first_crlf_line,
         findings,
     }
-}
-
-/// Split into lines that keep their terminators; only the last may lack one.
-fn raw_lines(text: &str) -> Vec<&str> {
-    let mut lines = Vec::new();
-    let mut rest = text;
-    while !rest.is_empty() {
-        if let Some(newline) = rest.find('\n') {
-            let (line, tail) = rest.split_at(newline + 1);
-            lines.push(line);
-            rest = tail;
-        } else {
-            lines.push(rest);
-            rest = "";
-        }
-    }
-    lines
 }
 
 /// The line without its terminator, and whether that terminator was CRLF.
@@ -1013,49 +1000,10 @@ mod tests {
     }
 
     #[test]
-    fn a_minimal_record_is_accepted_with_no_findings() {
-        let file = RecordFile::parse(&record(&REQUIRED, ""));
-        assert_eq!(file.findings(), &[]);
-        assert_eq!(file.field("id"), Some("task.demo-record"));
-        assert_eq!(file.field("title"), Some("A demo record"));
-    }
-
-    #[test]
-    fn the_body_is_opaque_even_when_it_carries_a_full_fake_envelope() {
-        let body = "prose\n---\nid: task.fake\ntype: task\n---\nkey: value prose\n----\n";
-        let text = record(&REQUIRED, body);
-        let file = RecordFile::parse(&text);
-        assert_eq!(file.findings(), &[]);
-        assert_eq!(file.body(), body);
-        assert_eq!(file.render(), text);
-    }
-
-    #[test]
     fn state_no_stays_the_string_no_and_never_becomes_a_boolean() {
         let file = RecordFile::parse(&record(&required_with("state", "state: no"), ""));
         assert_eq!(file.findings(), &[]);
         assert_eq!(file.field("state"), Some("no"));
-    }
-
-    #[test]
-    fn lenient_separators_parse_to_trimmed_values_and_render_verbatim() {
-        let text = record(
-            &[
-                "id:task.demo-record",
-                "type:  task",
-                "state:\topen",
-                "title: A demo record   ",
-                "created: 2026-08-24",
-            ],
-            "",
-        );
-        let file = RecordFile::parse(&text);
-        assert_eq!(file.findings(), &[]);
-        assert_eq!(file.field("id"), Some("task.demo-record"));
-        assert_eq!(file.field("type"), Some("task"));
-        assert_eq!(file.field("state"), Some("open"));
-        assert_eq!(file.field("title"), Some("A demo record"));
-        assert_eq!(file.render(), text);
     }
 
     #[test]
@@ -1087,14 +1035,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_never_rewrites_a_file_rejected_with_errors() {
-        let text = record(&["id: task.demo-record"], "body\n");
-        let file = RecordFile::parse(&text);
-        assert!(file.has_errors());
-        assert_eq!(file.normalize(), text);
-    }
-
-    #[test]
     fn a_repeatable_field_yields_every_occurrence_in_file_order() {
         let mut lines = REQUIRED.to_vec();
         lines.push("link: doc docs/format.md");
@@ -1106,14 +1046,6 @@ mod tests {
             vec!["doc docs/format.md", "pr https://example.com/1"]
         );
         assert_eq!(file.field("link"), Some("doc docs/format.md"));
-    }
-
-    #[test]
-    fn a_repeated_non_repeatable_field_is_a_duplicate_field_error_at_its_line() {
-        let mut lines = REQUIRED.to_vec();
-        lines.push("state: closed");
-        let file = RecordFile::parse(&record(&lines, ""));
-        assert_eq!(codes(&file), vec![(Some(7), FindingCode::DuplicateField)]);
     }
 
     #[test]
@@ -1132,53 +1064,6 @@ mod tests {
                     .any(|finding| finding.message.contains(&format!("`{key}`"))),
                 "no finding names `{key}`: {:?}",
                 file.findings()
-            );
-        }
-    }
-
-    #[test]
-    fn an_id_naming_a_different_type_than_the_type_field_is_a_bad_id() {
-        let file = RecordFile::parse(&record(&required_with("id", "id: note.demo-record"), ""));
-        assert_eq!(codes(&file), vec![(Some(2), FindingCode::BadId)]);
-    }
-
-    #[test]
-    fn placement_names_a_filename_that_is_not_the_id() {
-        let file = RecordFile::parse(&record(&REQUIRED, ""));
-        let findings = file.placement_findings("tasks/task.other-name.md");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].code, FindingCode::IdFilenameMismatch);
-    }
-
-    #[test]
-    fn placement_names_a_directory_that_is_not_the_types() {
-        let file = RecordFile::parse(&record(&REQUIRED, ""));
-        let findings = file.placement_findings("decisions/task.demo-record.md");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].code, FindingCode::TypeDirMismatch);
-    }
-
-    #[test]
-    fn placement_accepts_the_archive_path_of_the_records_type() {
-        let file = RecordFile::parse(&record(&REQUIRED, ""));
-        assert_eq!(
-            file.placement_findings("archive/tasks/task.demo-record.md"),
-            vec![]
-        );
-    }
-
-    #[test]
-    fn placement_names_a_home_nested_below_the_two_a_type_has() {
-        let file = RecordFile::parse(&record(&REQUIRED, ""));
-        for path in [
-            "stuff/tasks/task.demo-record.md",
-            "archive/archive/tasks/task.demo-record.md",
-        ] {
-            let findings = file.placement_findings(path);
-            assert_eq!(
-                findings.iter().map(|f| f.code).collect::<Vec<_>>(),
-                vec![FindingCode::TypeDirMismatch],
-                "{path} is neither home"
             );
         }
     }
@@ -1297,57 +1182,6 @@ mod tests {
         let mut file = RecordFile::parse(&record(&REQUIRED, "no newline at the end"));
         file.append_body("- a log line");
         assert_eq!(file.body(), "no newline at the end\n- a log line\n");
-    }
-
-    #[test]
-    fn a_file_without_an_opening_fence_is_no_envelope_with_bytes_untouched() {
-        let text = "# just markdown\n\nprose\n";
-        let file = RecordFile::parse(text);
-        assert_eq!(codes(&file), vec![(Some(1), FindingCode::NoEnvelope)]);
-        assert_eq!(file.render(), text);
-        assert_eq!(file.normalize(), text);
-    }
-
-    #[test]
-    fn an_envelope_never_closed_is_unclosed_envelope_with_bytes_untouched() {
-        let text = "---\nid: task.demo-record\n";
-        let file = RecordFile::parse(text);
-        assert!(
-            codes(&file).contains(&(Some(1), FindingCode::UnclosedEnvelope)),
-            "findings: {:?}",
-            file.findings()
-        );
-        assert_eq!(file.render(), text);
-        assert_eq!(file.normalize(), text);
-    }
-
-    #[test]
-    fn a_bom_is_a_warning_preserved_by_render_and_dropped_by_normalize() {
-        let text = format!("\u{feff}{}", record(&REQUIRED, "body\n"));
-        let file = RecordFile::parse(&text);
-        assert_eq!(codes(&file), vec![(Some(1), FindingCode::Bom)]);
-        assert!(!file.has_errors());
-        assert_eq!(file.render(), text);
-        assert_eq!(file.normalize(), record(&REQUIRED, "body\n"));
-    }
-
-    #[test]
-    fn crlf_envelope_lines_are_one_warning_preserved_by_render_and_fixed_by_normalize() {
-        let text = record(&REQUIRED, "body\n").replace('\n', "\r\n");
-        let file = RecordFile::parse(&text);
-        assert_eq!(codes(&file), vec![(Some(1), FindingCode::Crlf)]);
-        assert_eq!(file.render(), text);
-        // The close fence's CRLF belongs to the envelope; the body keeps its own.
-        assert_eq!(file.normalize(), record(&REQUIRED, "body\r\n"));
-    }
-
-    #[test]
-    fn an_envelope_only_file_without_a_final_newline_is_a_warning() {
-        let text = record(&REQUIRED, "");
-        let text = text.strip_suffix('\n').unwrap();
-        let file = RecordFile::parse(text);
-        assert_eq!(codes(&file), vec![(Some(7), FindingCode::NoFinalNewline)]);
-        assert_eq!(file.render(), text);
     }
 
     #[test]

@@ -69,14 +69,16 @@ pub fn render(reply: &Reply, today: &str) -> String {
         Reply::Viewed(view) => single_record(view),
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
         Reply::Archived(moved) => {
-            if moved.already {
+            let mut out = if moved.already {
                 format!("ok: archive {} — archived (already)\n", moved.id)
             } else {
                 format!(
                     "ok: archive {} — {}\u{2192}{}\n",
                     moved.id, moved.from, moved.to
                 )
-            }
+            };
+            named_line(&mut out, "carried", &moved.carried);
+            out
         }
         Reply::Expunged(gone) => format!(
             "ok: expunge {} — {} removed\n",
@@ -211,11 +213,15 @@ fn transition_line(command: &str, transition: &anb_core::Transitioned) -> String
     }
 }
 
+/// A listing with nothing in it: the one reply that has no table to head,
+/// so it states the count the header would have carried.
+const EMPTY_LISTING: &str = "count: 0\n";
+
 fn ready_table(rows: &[ReadyTask], shown: usize, today: &str) -> String {
-    let mut out = format!("count: {}\n", rows.len());
     if rows.is_empty() {
-        return out;
+        return EMPTY_LISTING.to_owned();
     }
+    let mut out = String::new();
     let today_day = grammar::day_number(today).unwrap_or(0);
     out.push_str(&encode::ready_table(rows, shown, today_day));
     truncation_hint(&mut out, rows.len(), shown, "anb ready --all");
@@ -223,18 +229,17 @@ fn ready_table(rows: &[ReadyTask], shown: usize, today: &str) -> String {
 }
 
 fn listing_table(rows: &[ListedRecord], shown: usize, label: &str, restore: &str) -> String {
-    let mut out = format!("count: {}\n", rows.len());
     if rows.is_empty() {
-        return out;
+        return EMPTY_LISTING.to_owned();
     }
-    out.push_str(&record_rows(rows, shown, label));
+    let mut out = record_rows(rows, shown, label);
     truncation_hint(&mut out, rows.len(), shown, restore);
     out
 }
 
 /// The one shape of a record-listing block: header, then comma rows.
 fn record_rows(rows: &[ListedRecord], shown: usize, label: &str) -> String {
-    let mut out = format!("{label}[{shown}]{{id,state,priority,title}}:\n");
+    let mut out = format!("{label}[{}]{{id,state,priority,title}}:\n", rows.len());
     for row in &rows[..shown] {
         let priority = row
             .priority
@@ -249,11 +254,13 @@ fn record_rows(rows: &[ListedRecord], shown: usize, label: &str) -> String {
 }
 
 fn findings_table(findings: &[FileFinding], shown: usize) -> String {
-    let mut out = format!("count: {}\n", findings.len());
     if findings.is_empty() {
-        return out;
+        return EMPTY_LISTING.to_owned();
     }
-    let _ = writeln!(out, "findings[{shown}]{{file,line,severity,code,message}}:");
+    let mut out = format!(
+        "findings[{}]{{file,line,severity,code,message}}:\n",
+        findings.len()
+    );
     for located in &findings[..shown] {
         let line = located
             .finding
@@ -275,10 +282,12 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
 fn overview_page(overview: &Overview, all: bool) -> String {
     let mut out = format!("notebook: {}\n", counts_phrase(&overview.live));
     if !overview.epics.is_empty() {
+        let shown = shown(overview.epics.len(), all);
         let _ = writeln!(out, "epics[{}]:", overview.epics.len());
-        for epic in &overview.epics {
+        for epic in &overview.epics[..shown] {
             let _ = writeln!(out, "  {}", anb_core::epic_line(epic));
         }
+        truncation_hint(&mut out, overview.epics.len(), shown, "anb overview --all");
     }
     for section in &overview.sections {
         if section.rows.is_empty() {

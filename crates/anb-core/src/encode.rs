@@ -12,6 +12,12 @@ use std::fmt::Write as _;
 /// whatever the notebook holds; a listing lifts that with `--all`, and a
 /// consequence named in passing has no lift. A record's own bytes are not
 /// derived and are shown whole.
+///
+/// Its other half, for every block a reply heads with `label[n]`: `n` is
+/// the whole set, and the rows under it are as many as the reply affords,
+/// with the shortfall named by the block's own hint. A header that counted
+/// its rows would say what the reader can already see and hide what it
+/// cannot.
 pub const ROW_BOUND: usize = 20;
 
 /// The ids named inline in a reply, comma-separated: the first `bound` of
@@ -24,7 +30,7 @@ pub fn id_list(ids: &[String], bound: usize) -> String {
 /// An edge walk named inline in a message — a dependency cycle, a lineage.
 /// A message has one surface and so one bound.
 #[must_use]
-pub fn id_chain(ids: &[String]) -> String {
+pub(crate) fn id_chain(ids: &[String]) -> String {
     bounded_join(ids, " \u{2192} ", ROW_BOUND)
 }
 
@@ -55,10 +61,10 @@ pub(crate) fn json_quoted(value: &str) -> String {
 }
 
 /// The ready table — header and the first `shown` rows, ages derived from
-/// `today_day`. The caller owns the count line and its own truncation hint.
+/// `today_day`. The caller owns its own truncation hint.
 #[must_use]
 pub fn ready_table(rows: &[ReadyTask], shown: usize, today_day: i64) -> String {
-    let mut out = format!("ready[{shown}]{{id,priority,age,title}}:\n");
+    let mut out = format!("ready[{}]{{id,priority,age,title}}:\n", rows.len());
     for row in &rows[..shown] {
         let priority = row
             .priority
