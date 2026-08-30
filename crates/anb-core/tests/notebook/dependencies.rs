@@ -248,6 +248,23 @@ mod dependency_graph {
         );
     }
 
+    /// The repair `check` prints for a malformed `blocked-by` value is
+    /// `anb unblock <id> <that value>`, so the verb has to accept a value
+    /// the id grammar refuses — otherwise the one line no other verb can
+    /// reach leaves the record repairable only by deleting it.
+    #[test]
+    fn unblock_erases_an_edge_whose_target_is_no_id_at_all() {
+        let mut storage = storage_with(&[(
+            "tasks/task.a.md",
+            &task("task.a", "open", &["blocked-by: NOT_AN_ID"]),
+        )]);
+        let reply = Notebook::new(&mut storage)
+            .unblock("task.a", "NOT_AN_ID", TODAY)
+            .unwrap();
+        assert_eq!(reply, edged("task.a", "NOT_AN_ID", false));
+        assert!(Notebook::new(&mut storage).check().unwrap().is_empty());
+    }
+
     #[test]
     fn a_corrupted_edge_freezes_every_verb_but_unblock() {
         let text = task("task.a", "open", &["blocked-by: task.a"]);

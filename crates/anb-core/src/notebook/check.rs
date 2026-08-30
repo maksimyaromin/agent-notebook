@@ -15,7 +15,7 @@ use crate::reply::{FileFinding, Repair};
 use crate::request::CLEARABLE;
 use crate::resolve::{Resolver, path_stem, record_path, type_of};
 use crate::storage::StorageError;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 impl Notebook<'_> {
     /// Verify the whole notebook: every record's own findings plus the
@@ -369,18 +369,23 @@ fn cycle_findings(
     code: FindingCode,
     out: &mut Vec<FileFinding>,
 ) {
+    let mut named: BTreeSet<(String, String)> = BTreeSet::new();
     for cycle in cycles {
-        let walk = encode::id_chain(&closed_walk(&cycle));
+        let mut walk = None;
         for (position, member) in cycle.iter().enumerate() {
             let next = &cycle[(position + 1) % cycle.len()];
             let Some(record) = by_stem.get(member.as_str()) else {
                 continue;
             };
+            if !named.insert((record.path().to_owned(), next.clone())) {
+                continue;
+            }
             let line = record
                 .file()
                 .field_entries(field)
                 .find(|(target, _)| target == next)
                 .and_then(|(_, line)| line);
+            let walk = walk.get_or_insert_with(|| encode::id_chain(&closed_walk(&cycle)));
             out.push(FileFinding::on(
                 record.path(),
                 Finding::located(

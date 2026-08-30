@@ -822,7 +822,6 @@ impl<'a> Notebook<'a> {
     /// The resolution errors of [`Notebook::close`].
     pub fn unblock(&mut self, id: &str, on: &str, today: &str) -> Result<Edged, NotebookError> {
         write::guard_today(today)?;
-        write::parsed_type(on)?;
         let repairing = self.load_live_repairing(id, &[RecordType::Task])?;
         let stands = query::edge_exists(repairing.record(), on);
         let erased = self.commit_repair(repairing, today, |file| {
@@ -1039,6 +1038,13 @@ impl<'a> Notebook<'a> {
         let origin = path_stem(filed.path());
         let mut reports = Vec::new();
         for id in query::note_links(filed) {
+            // A record that links itself is a hand edit, and carrying it as
+            // its own report would file it twice: once here and once by the
+            // move that called this, whose second write would then fail on
+            // a source it had already removed.
+            if id == origin {
+                continue;
+            }
             let path = record_path(&id, RecordType::Note, false);
             let Ok(text) = self.storage.read(&path) else {
                 continue;
@@ -1489,8 +1495,8 @@ impl<'a> Notebook<'a> {
     /// search it, or refuse an id it already claims.
     fn whole_corpus(&self) -> Result<Corpus, NotebookError> {
         let mut records = Vec::new();
-        let mut held = [0; RecordType::ALL.len()];
-        for (record_type, tally) in RecordType::ALL.into_iter().zip(&mut held) {
+        let mut held = RecordType::ALL.map(|record_type| (record_type, 0));
+        for (record_type, tally) in &mut held {
             records.extend(self.records_in(record_type.directory())?);
             let filed = self.records_in(&archive_of(record_type.directory()))?;
             *tally = filed.len();
@@ -1522,8 +1528,8 @@ impl<'a> Notebook<'a> {
 
     fn corpus(&self, records: Vec<Record>) -> Result<Corpus, NotebookError> {
         let mut archived = BTreeSet::new();
-        let mut held = [0; RecordType::ALL.len()];
-        for (record_type, tally) in RecordType::ALL.into_iter().zip(&mut held) {
+        let mut held = RecordType::ALL.map(|record_type| (record_type, 0));
+        for (record_type, tally) in &mut held {
             for path in self.storage.list(&archive_of(record_type.directory()))? {
                 if !is_record_file(&path) {
                     continue;
@@ -1552,6 +1558,12 @@ impl<'a> Notebook<'a> {
                 // The adapter's duty ends at naming the encoding; the
                 // file stays a visible invalid record, not an abort.
                 Err(StorageError::NotUtf8 { .. }) => records.push(Record::unreadable(&path)),
+                // A listing is a snapshot. Between it and this read another
+                // process may have filed or expunged the record, and a
+                // reader that answered `not found` for the whole notebook
+                // would be reporting someone else's completed work as its
+                // own failure.
+                Err(StorageError::NotFound { .. }) => {}
                 Err(error) => return Err(error.into()),
             }
         }

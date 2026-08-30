@@ -317,12 +317,24 @@ fn body_value(body: &str, all: bool) -> Value {
     }
 }
 
+/// An envelope line as data: cut like every other reply's text unless the
+/// caller asked for the record whole.
+fn field_value(value: &str, all: bool) -> String {
+    if all {
+        value.to_owned()
+    } else {
+        encode::bounded_text(value.to_owned())
+    }
+}
+
 fn view_value(view: &View, all: bool) -> Value {
     json!({
         "id": view.id,
         "path": view.path,
         "archived": view.archived,
-        "fields": view.fields.iter().map(|(key, value)| json!([key, value])).collect::<Vec<Value>>(),
+        "fields": section(&view.fields, shown(view.fields.len(), all), |(key, value)| {
+            json!([key, field_value(value, all)])
+        }),
         "body": body_value(&view.body, all),
         "mentions": section(&view.mentions, shown(view.mentions.len(), all), |id| json!(id)),
         "mentioned-by": section(&view.mentioned_by, shown(view.mentioned_by.len(), all), |id| json!(id)),

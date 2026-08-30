@@ -410,6 +410,7 @@ fn collect_dangling_mentions(
 /// construction — a typed id in prose is a deliberate reference.
 fn undeclared_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSignal> {
     let mut found: Vec<RankedPair> = Vec::new();
+    let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
     let live_decision =
         |record: &Record| record.record_type() == Some(RecordType::Decision) && record.is_live();
     let valid_paths: BTreeSet<&str> = valid.iter().map(|record| record.path()).collect();
@@ -430,13 +431,10 @@ fn undeclared_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSig
             } else {
                 (other, record)
             };
-            let (one, other) = (Cited::of(first), Cited::of(second));
-            if found
-                .iter()
-                .any(|pair| pair.first == one && pair.second == other)
-            {
+            if !seen.insert((path_stem(first.path()), path_stem(second.path()))) {
                 continue;
             }
+            let (one, other) = (Cited::of(first), Cited::of(second));
             found.push(RankedPair {
                 older_created: [first, second]
                     .into_iter()

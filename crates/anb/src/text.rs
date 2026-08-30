@@ -2,6 +2,10 @@
 //! a leading `ok:` line with the transition and its computed consequences,
 //! header+rows tables for flat lists, labeled `key: value` for one record,
 //! and every refusal as a recovery payload with literal next commands.
+//!
+//! `status --hook` is the one reply this module does not render itself: a
+//! session hook's payload is JSON whichever format the caller asked for,
+//! because the harness reading it is not the agent reading the dashboard.
 
 use crate::json;
 use crate::recovery::{Recovery, Subject};
@@ -364,15 +368,32 @@ fn truncation_hint(out: &mut String, total: usize, shown: usize, restore: &str) 
     }
 }
 
+/// An envelope line as `view` shows it: a record's own text, cut like
+/// every other reply's unless the caller asked for the record whole.
+fn field_value(value: &str, all: bool) -> String {
+    if all {
+        value.to_owned()
+    } else {
+        encode::bounded_text(value.to_owned())
+    }
+}
+
 fn single_record(view: &View, all: bool) -> String {
     let mut out = String::new();
-    for (key, value) in &view.fields {
+    let fields = shown(view.fields.len(), all);
+    for (key, value) in &view.fields[..fields] {
         if value.is_empty() {
             let _ = writeln!(out, "{key}:");
         } else {
-            let _ = writeln!(out, "{key}: {value}");
+            let _ = writeln!(out, "{key}: {}", field_value(value, all));
         }
     }
+    truncation_hint(
+        &mut out,
+        view.fields.len(),
+        fields,
+        &format!("anb view {} --all", view.id),
+    );
     if view.archived {
         out.push_str("archived: true\n");
     }

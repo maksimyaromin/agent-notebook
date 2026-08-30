@@ -245,7 +245,7 @@ pub struct TypeSection {
 }
 
 /// Live records per type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counts {
     pub tasks: usize,
     pub decisions: usize,
@@ -254,15 +254,21 @@ pub struct Counts {
 }
 
 impl Counts {
-    /// A tally read in [`RecordType::ALL`]'s order.
+    /// A tally read by the type each count is of, so neither side depends
+    /// on [`RecordType::ALL`]'s order.
     #[must_use]
-    pub fn per_type(held: [usize; RecordType::ALL.len()]) -> Counts {
-        Counts {
-            tasks: held[0],
-            decisions: held[1],
-            notes: held[2],
-            questions: held[3],
+    pub fn per_type(held: [(RecordType, usize); RecordType::ALL.len()]) -> Counts {
+        let mut counts = Counts::default();
+        for (record_type, held) in held {
+            let count = match record_type {
+                RecordType::Task => &mut counts.tasks,
+                RecordType::Decision => &mut counts.decisions,
+                RecordType::Note => &mut counts.notes,
+                RecordType::Question => &mut counts.questions,
+            };
+            *count = held;
         }
+        counts
     }
 }
 

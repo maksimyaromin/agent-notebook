@@ -197,6 +197,42 @@ mod record_view {
         let error = Notebook::new(&mut storage).view("task.absent").unwrap_err();
         assert!(matches!(error, NotebookError::UnknownId { .. }));
     }
+
+    /// One reply must not group a record two ways: the counts line and the
+    /// section that shows it are read together, and a record in the wrong
+    /// directory is a state `check` names and a reader can see.
+    #[test]
+    fn the_counts_group_a_record_where_the_sections_show_it() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/note.misplaced.md",
+                "---\nid: note.misplaced\ntype: note\nstate: active\ncreated: 2026-08-01\nupdated: 2026-08-01\ntitle: A note living in tasks\n---\n\nB.\n",
+            ),
+            (
+                "tasks/task.real.md",
+                "---\nid: task.real\ntype: task\nstate: open\ncreated: 2026-08-01\nupdated: 2026-08-01\ntitle: Real\n---\n\nB.\n",
+            ),
+        ]);
+        let overview = Notebook::new(&mut storage).overview().unwrap();
+
+        assert_eq!(overview.live.tasks, 2, "both files sit under tasks/");
+        assert_eq!(overview.live.notes, 0);
+        for section in &overview.sections {
+            let held = match section.record_type {
+                RecordType::Task => overview.live.tasks,
+                RecordType::Decision => overview.live.decisions,
+                RecordType::Note => overview.live.notes,
+                RecordType::Question => overview.live.questions,
+            };
+            assert_eq!(
+                section.rows.len(),
+                held,
+                "the {:?} section and the {:?} count disagree",
+                section.record_type,
+                section.record_type
+            );
+        }
+    }
 }
 
 mod search_query {

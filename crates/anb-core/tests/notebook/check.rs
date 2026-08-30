@@ -483,6 +483,57 @@ fn a_routed_question_pointing_at_nothing_has_lost_its_thread() {
     );
 }
 
+/// A cluster where every Task waits on every other lies on one cycle
+/// per pair, and a walk through each names every member: a finding per
+/// line per cycle is cubic in the cluster for a reply that shows
+/// twenty rows. Each corrupted line is named once.
+#[test]
+fn a_line_in_many_cycles_is_named_once() {
+    let ids = ["task.a", "task.b", "task.c"];
+    let files: Vec<(String, String)> = ids
+        .iter()
+        .map(|id| {
+            let edges: Vec<String> = ids
+                .iter()
+                .filter(|other| *other != id)
+                .map(|other| format!("blocked-by: {other}"))
+                .collect();
+            let lines: Vec<&str> = edges.iter().map(String::as_str).collect();
+            (
+                format!("tasks/{id}.md"),
+                record_file(id, "task", "open", &lines, ""),
+            )
+        })
+        .collect();
+    let mut storage = storage_with(
+        &files
+            .iter()
+            .map(|(path, text)| (path.as_str(), text.as_str()))
+            .collect::<Vec<_>>(),
+    );
+
+    let checked = Notebook::new(&mut storage).check().unwrap();
+    let mut lines: Vec<(&str, Option<usize>)> = checked
+        .iter()
+        .filter(|found| found.finding.code == FindingCode::DepCycle)
+        .map(|found| (found.path.as_str(), found.finding.line))
+        .collect();
+    let named = lines.len();
+    lines.sort_unstable();
+    lines.dedup();
+    assert_eq!(
+        named,
+        lines.len(),
+        "each corrupted line is named once: {checked:?}"
+    );
+    for id in ids {
+        assert!(
+            lines.iter().any(|(path, _)| path.contains(id)),
+            "every member of the cluster is named: {checked:?}"
+        );
+    }
+}
+
 mod unreadable_files {
     use crate::*;
 

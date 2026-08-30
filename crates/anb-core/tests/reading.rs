@@ -285,6 +285,54 @@ fn a_dashboard_reads_a_lineage_only_once_an_epic_can_hold_it() {
     );
 }
 
+/// A listing is a snapshot: between it and the read, another process may
+/// have archived or expunged the record. Reporting that as the reader's
+/// own storage failure turns someone else's completed work into an error
+/// on every read verb.
+#[test]
+fn a_record_filed_between_the_listing_and_the_read_is_skipped() {
+    struct Vanishing {
+        files: MemoryStorage,
+        gone: String,
+    }
+
+    impl Storage for Vanishing {
+        fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
+            self.files.list(dir)
+        }
+
+        fn read(&self, path: &str) -> Result<String, StorageError> {
+            if path == self.gone {
+                return Err(StorageError::NotFound {
+                    path: path.to_owned(),
+                });
+            }
+            self.files.read(path)
+        }
+
+        fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
+            self.files.write(path, content)
+        }
+
+        fn remove(&mut self, path: &str) -> Result<(), StorageError> {
+            self.files.remove(path)
+        }
+    }
+
+    let mut storage = Vanishing {
+        files: watched(3, 0).files,
+        gone: "tasks/task.live-1.md".to_owned(),
+    };
+    let rows = Notebook::new(&mut storage).list().unwrap();
+
+    let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["task.live-0", "task.live-2"],
+        "the rest of the listing still answers"
+    );
+}
+
 #[test]
 fn minting_an_id_opens_nothing_in_the_archive() {
     let mut storage = watched(3, 200);

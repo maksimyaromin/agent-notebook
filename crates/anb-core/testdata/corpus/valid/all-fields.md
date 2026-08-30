@@ -2,7 +2,7 @@
 closed: 2026-08-25
 by: supolka
 review-by: 2026-09-20
-link: doc .tmp/docs/spec-anb-format.md
+link: doc docs/record-format.md
 updated: 2026-08-25
 hold: waiting for the demo review
 tags: core, parser
