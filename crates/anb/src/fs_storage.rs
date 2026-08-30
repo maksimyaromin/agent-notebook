@@ -37,26 +37,64 @@ pub fn resolve_root(start: &Path) -> PathBuf {
     project_anchor(start).join(NOTEBOOK_DIR)
 }
 
-/// The notebook root for this call: the path the caller named, else the one
+/// The notebook root for this call: the one the flags name, else the one
 /// the environment names, else [`resolve_root`]'s default. A notebook may
 /// sit beside the code and be committed with it, hide in a git-ignored
 /// corner, or live outside the repository altogether.
 ///
-/// A relative path anchors differently in the two, because they are typed
+/// `--notebook` and `--global` name a root two ways and share the flag
+/// rung, so a call using both is refused rather than ranked. `--global`
+/// names the user's own notebook, `NOTEBOOK_DIR` in `home`, which is the
+/// same directory a call made from the home directory would find.
+///
+/// A named path anchors differently from `from_env`, because they are typed
 /// at different moments: a flag arrives with a known working directory and
 /// is read from there, while `ANB_NOTEBOOK` is exported once and outlives
 /// every `cd`, so it is read from the project. Anchoring the variable on
 /// the working directory would make one export mean a different notebook in
-/// every directory.
-#[must_use]
-pub fn notebook_root(start: &Path, named: Option<&Path>, from_env: Option<&OsStr>) -> PathBuf {
-    if let Some(named) = named {
-        return start.join(named);
+/// every directory. `home` is exported the same way, and is required
+/// absolute for the same reason.
+///
+/// # Errors
+/// The reason, when both flags name a root, or when `--global` has no
+/// absolute home to name one in.
+pub fn notebook_root(
+    start: &Path,
+    named: Option<&Path>,
+    global: bool,
+    home: Option<&Path>,
+    from_env: Option<&OsStr>,
+) -> Result<PathBuf, String> {
+    if global {
+        if named.is_some() {
+            return Err("notebook: pass exactly one of --notebook <path>, --global".to_owned());
+        }
+        return user_root(home);
     }
-    match from_env.filter(|chosen| !chosen.is_empty()) {
+    if let Some(named) = named {
+        return Ok(start.join(named));
+    }
+    Ok(match from_env.filter(|chosen| !chosen.is_empty()) {
         Some(chosen) => project_anchor(start).join(chosen),
         None => resolve_root(start),
+    })
+}
+
+/// The user's own notebook root inside `home`.
+fn user_root(home: Option<&Path>) -> Result<PathBuf, String> {
+    let Some(home) = home else {
+        return Err(
+            "notebook: --global names a notebook in the home directory, and this run knows no home"
+                .to_owned(),
+        );
+    };
+    if !home.is_absolute() {
+        return Err(format!(
+            "notebook: the home directory is not an absolute path: {}",
+            home.display()
+        ));
     }
+    Ok(home.join(NOTEBOOK_DIR))
 }
 
 /// Why `root` cannot hold a notebook, when it cannot. A path that names a

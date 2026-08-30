@@ -22,7 +22,7 @@ Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byt
 - `.tmp/` — git-ignored. Scratch space AND the standard home of all working documents at this stage: nothing under it may be moved or copied elsewhere in the repo. Never use `/tmp`.
 - `.claude/` — local agent config and skills, git-ignored.
 - `.agents/` — reserved for skills and agent config that must be committed and shared.
-- `.agent-notebook/` — the notebook: the source of truth for Tasks, Decisions, Notes, Questions. Mutate it only through the anb CLI, never by hand-editing the files. This project keeps it at the repo root and commits it by choice; where a notebook sits and whether it is committed are configuration (`--notebook`, `ANB_NOTEBOOK`), not something anb requires.
+- `.agent-notebook/` — the notebook: the source of truth for Tasks, Decisions, Notes, Questions. Mutate it only through the anb CLI, never by hand-editing the files. This project keeps it at the repo root and commits it by choice; where a notebook sits and whether it is committed are configuration (`--notebook`, `ANB_NOTEBOOK`), not something anb requires. `--global` names the user's own notebook in the home directory instead — knowledge that outlives one repository, and no place for this project's work.
 
 ## Working documents (all under `.tmp/`, deliberately uncommitted)
 
