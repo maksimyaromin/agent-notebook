@@ -107,18 +107,11 @@ pub enum Reply {
         overview: Overview,
         all: bool,
     },
-    /// The graph itself: the tiles and the lines between them, which is
-    /// what a caller with no browser asked the verb for.
+    /// The graph itself: the records and the edges between them.
     Graphed {
         graph: Graph,
         full: bool,
         all: bool,
-    },
-    /// The map drawn, and where the host left the file.
-    Mapped {
-        path: String,
-        tasks: usize,
-        edges: usize,
     },
     /// The hook's fail-soft outcome: no context rather than a blocked
     /// session.
@@ -156,11 +149,6 @@ pub struct Host<'a> {
     /// close over where it reads from — the tests hand in a table of
     /// reports, the shell reads the filesystem.
     pub read_report: &'a dyn Fn(&str) -> Result<String, StorageError>,
-    /// Where the emitted map is put. Like `read_report` this is a path the
-    /// caller typed, which Storage cannot serve: a map is a derived
-    /// artifact and belongs wherever the reader wants it, not inside the
-    /// notebook.
-    pub write_artifact: &'a dyn Fn(&str, &str) -> Result<(), StorageError>,
     /// Which of the proofs a notebook cites the world no longer holds. The
     /// Core holds neither git nor a filesystem, so the question is asked
     /// out here; a caller with nothing to ask answers with an empty list.
@@ -185,7 +173,6 @@ pub fn execute(
     let Host {
         git_by,
         read_report,
-        write_artifact,
         lost_proofs,
         user_notebook,
         today,
@@ -268,7 +255,7 @@ pub fn execute(
             overview: notebook.overview()?,
             all,
         }),
-        Command::Graph(args) => graphed(&notebook, args, write_artifact),
+        Command::Graph(args) => graphed(&notebook, args),
         Command::Status { budget, hook } => {
             status_reply(&notebook, budget, hook, lost_proofs, user_notebook, today)
         }
@@ -288,60 +275,25 @@ fn created(
     })
 }
 
-/// The path `--out` names, as the text everything downstream speaks: a
-/// reply is text, and so is the host seam a path crosses on its way to a
-/// file. A path with no UTF-8 spelling is refused under the flag it
-/// arrived on rather than mangled into a name pointing somewhere else.
-fn spelled(path: &std::path::Path) -> Result<&str, NotebookError> {
-    path.to_str().ok_or_else(|| NotebookError::InvalidArgument {
-        reason: "graph: --out names a path that is not UTF-8".to_owned(),
-    })
-}
-
-/// How far around a focus a map reaches when the caller names no depth:
+/// How far around a focus a graph reaches when the caller names no depth:
 /// the record and what touches it. A focus asks that before it asks
 /// anything wider.
 const FOCUS_DEPTH: usize = 1;
 
-/// The graph the caller asked for: printed as data, or drawn into the file
-/// they named. The data is the answer by default, because every other verb
-/// answers an agent and a picture answers nobody without a browser.
-///
-/// The Core answers the model and the host writes the file: Storage speaks
-/// only in paths under the notebook root, and a derived artifact belongs
-/// wherever its reader is.
-fn graphed(
-    notebook: &Notebook<'_>,
-    args: GraphArgs,
-    write_artifact: &dyn Fn(&str, &str) -> Result<(), StorageError>,
-) -> Result<Reply, NotebookError> {
-    let GraphArgs {
-        slice,
-        full,
-        all,
-        out,
-    } = args;
-    // Spelled before the notebook is read: a path this host cannot name is
-    // the caller's argument to retype, whatever the notebook holds.
-    let out = match &out {
-        Some(named) => Some(spelled(named)?.to_owned()),
-        None => None,
-    };
+/// The graph the caller asked for, as the records and the edges between
+/// them. Drawing is nobody's business here: a reader who wants a picture
+/// has an agent that builds one, and it can only do that from a graph that
+/// arrived whole.
+fn graphed(notebook: &Notebook<'_>, args: GraphArgs) -> Result<Reply, NotebookError> {
+    let GraphArgs { slice, full, all } = args;
     let graph = notebook.graph(&asked_for(slice))?;
-    let Some(path) = out else {
-        return Ok(Reply::Graphed { graph, full, all });
-    };
-    write_artifact(&path, &anb_graph::render(&graph)).map_err(|error| artifact_refusal(&error))?;
-    Ok(Reply::Mapped {
-        tasks: graph.nodes.len(),
-        edges: graph.edges().len(),
-        path,
-    })
+    Ok(Reply::Graphed { graph, full, all })
 }
 
 /// The command line's slice as the Core reads it.
 fn asked_for(args: SliceArgs) -> GraphSlice {
     GraphSlice {
+        kinds: args.kinds,
         hub: args.scope,
         ready_only: args.ready,
         focus: args.focus.map(|id| Focus {
@@ -354,10 +306,14 @@ fn asked_for(args: SliceArgs) -> GraphSlice {
 
 /// The `graph` call that answers a slice, as the caller would type it
 /// again: a truncation hint has to name the same slice it cut, or it lifts
-/// a different map.
+/// a different graph.
 #[must_use]
 pub fn slice_command(slice: &GraphSlice, full: bool) -> String {
     let mut out = "anb graph".to_owned();
+    if !slice.kinds.is_empty() {
+        let words: Vec<&str> = slice.kinds.iter().copied().map(RecordType::word).collect();
+        let _ = write!(out, " --type {}", words.join(","));
+    }
     if let Some(hub) = &slice.hub {
         let _ = write!(out, " --for {hub}");
     }
@@ -608,21 +564,6 @@ fn close_reply(
 
 /// The proof flags as one phrase, so the two refusals name the same set.
 const PROOF_FLAGS: &str = "--note <path>, --pr <url>, --sha <sha>, --report <path>, or --no-proof";
-
-/// A map the shell could not put where the caller asked for it. The path
-/// came off the command line, so however the write failed it is a refused
-/// argument the caller retypes — one shape, since what the caller does
-/// about it is the same whichever way the host said no.
-fn artifact_refusal(error: &StorageError) -> NotebookError {
-    let (path, detail) = match error {
-        StorageError::NotFound { path } => (path, "nothing there to write into".to_owned()),
-        StorageError::NotUtf8 { path } => (path, "not a path this host writes".to_owned()),
-        StorageError::Io { path, detail } => (path, detail.clone()),
-    };
-    NotebookError::InvalidArgument {
-        reason: format!("graph: cannot write `{path}` — {detail}"),
-    }
-}
 
 /// A report the caller named and the shell could not read. The path came
 /// off the command line, so every way it can fail is a refused argument the

@@ -28,7 +28,7 @@ fn run_reading(
     line: &[&str],
     reports: &[(&str, &str)],
 ) -> Result<String, String> {
-    run_with_reports(storage, line, &|path: &str| {
+    run_with(storage, line, &|path: &str| {
         reports
             .iter()
             .find(|(named, _)| *named == path)
@@ -39,33 +39,12 @@ fn run_reading(
     })
 }
 
-/// [`run`] with the shell's own reader, so a test can pose the ways a read
-/// fails as well as what it returns.
-fn run_with_reports(
-    storage: &mut MemoryStorage,
-    line: &[&str],
-    read_report: &dyn Fn(&str) -> Result<String, StorageError>,
-) -> Result<String, String> {
-    run_with(storage, line, read_report, &no_artifact)
-}
-
-/// [`run`] with the shell's own writer, so a test can read the file a
-/// command left as well as pose the ways a write fails.
-fn run_writing(
-    storage: &mut MemoryStorage,
-    line: &[&str],
-    write_artifact: &dyn Fn(&str, &str) -> Result<(), StorageError>,
-) -> Result<String, String> {
-    run_with(storage, line, &missing_report, write_artifact)
-}
-
-/// One command line against a host whose two reaches outside the notebook —
-/// the report it reads and the artifact it writes — the case chooses.
+/// One command line against a host whose one reach outside the notebook —
+/// the report it reads — the case chooses.
 fn run_with(
     storage: &mut MemoryStorage,
     line: &[&str],
     read_report: &dyn Fn(&str) -> Result<String, StorageError>,
-    write_artifact: &dyn Fn(&str, &str) -> Result<(), StorageError>,
 ) -> Result<String, String> {
     let mut args = vec!["anb"];
     args.extend_from_slice(line);
@@ -75,7 +54,6 @@ fn run_with(
     let host = Host {
         git_by: || Some(GIT_IDENTITY.to_owned()),
         read_report,
-        write_artifact,
         lost_proofs: &nothing_lost,
         user_notebook: None,
         today: TODAY,
@@ -100,19 +78,10 @@ fn undated_host() -> Host<'static> {
     Host {
         git_by: || None,
         read_report: &missing_report,
-        write_artifact: &no_artifact,
         lost_proofs: &nothing_lost,
         user_notebook: None,
         today: "not-a-date",
     }
-}
-
-/// The host of a case that emits no artifact: a path nothing put a file
-/// at is the same failure as a directory that is not there.
-fn no_artifact(path: &str, _content: &str) -> Result<(), StorageError> {
-    Err(StorageError::NotFound {
-        path: path.to_owned(),
-    })
 }
 
 /// The world of a case that is not about reconciliation: it still holds
@@ -195,7 +164,7 @@ mod task_cycle_replies {
         };
 
         assert_snapshot!(
-            run_with_reports(&mut storage, &["close", "task.demo", "--note", "report.md"], &unreadable)
+            run_with(&mut storage, &["close", "task.demo", "--note", "report.md"], &unreadable)
                 .expect_err("bytes outside UTF-8 are no proof"),
             @r"
         error[invalid-argument]: note: `report.md` is not UTF-8
@@ -1648,15 +1617,7 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "--global", "list"],
         vec!["anb", "list", "--global"],
         vec!["anb", "graph"],
-        vec![
-            "anb",
-            "graph",
-            "--for",
-            "task.epic",
-            "--ready",
-            "--out",
-            "map.html",
-        ],
+        vec!["anb", "graph", "--for", "task.epic", "--ready"],
         vec![
             "anb",
             "edit",
@@ -1937,7 +1898,6 @@ mod maintenance_replies {
             Host {
                 git_by: || None,
                 read_report: &missing_report,
-                write_artifact: &no_artifact,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
                 today: TODAY,
@@ -1967,7 +1927,6 @@ mod maintenance_replies {
             Host {
                 git_by: || None,
                 read_report: &missing_report,
-                write_artifact: &no_artifact,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
                 today: TODAY,
@@ -2446,20 +2405,6 @@ mod overview_reply {
 /// the shell leaves when they ask for a picture instead.
 mod task_graph {
     use super::*;
-    use std::cell::RefCell;
-
-    /// A host that keeps what a call wrote instead of putting it on a disk,
-    /// so a case reads the file the reply claims to have left.
-    fn capturing(
-        written: &RefCell<Vec<(String, String)>>,
-    ) -> impl Fn(&str, &str) -> Result<(), StorageError> {
-        |path, content| {
-            written
-                .borrow_mut()
-                .push((path.to_owned(), content.to_owned()));
-            Ok(())
-        }
-    }
 
     /// A chain of two beside a Task of its own: three tiles, one line, and
     /// only two of them startable now.
@@ -2476,10 +2421,10 @@ mod task_graph {
     #[test]
     fn the_verb_prints_the_graph_itself() {
         assert_snapshot!(ok(&mut a_chain(), &["graph"]), @r"
-        nodes[3]{id,state,archived,degree,epic,title}:
-          task.first,open,no,1,-,The blocker
-          task.second,open,no,1,-,The waiter
-          task.stray,open,no,0,-,Another line of work
+        nodes[3]{id,type,state,ready,archived,degree,priority,created,epic,title}:
+          task.first,task,open,yes,no,1,-,2026-08-24,-,The blocker
+          task.second,task,open,no,no,1,-,2026-08-24,-,The waiter
+          task.stray,task,open,yes,no,0,-,2026-08-24,-,Another line of work
         edges[1]{from,to,kind}:
           task.first,task.second,waits
         ");
@@ -2493,7 +2438,7 @@ mod task_graph {
         let parsed: serde_json::Value =
             serde_json::from_str(&payload).unwrap_or_else(|_| panic!("not JSON: {payload}"));
 
-        assert_eq!(parsed["v"], 1);
+        assert_eq!(parsed["v"], 2);
         assert_eq!(parsed["slice"]["ready"], true);
         assert_eq!(parsed["slice"]["archive"], false);
         assert_eq!(parsed["nodes"]["count"], 2);
@@ -2532,8 +2477,8 @@ mod task_graph {
             &["graph", "--focus", "task.stray", "--full"],
         );
         assert_snapshot!(printed, @r#"
-        nodes[1]{id,state,archived,degree,epic,title}:
-          task.stray,open,no,0,-,Another line of work
+        nodes[1]{id,type,state,ready,archived,degree,priority,created,epic,title}:
+          task.stray,task,open,yes,no,0,-,2026-08-24,-,Another line of work
         edges[0]{from,to,kind}:
         fields[6]{id,key,value}:
           task.stray,id,task.stray
@@ -2552,25 +2497,146 @@ mod task_graph {
     fn every_slice_flag_narrows_what_the_verb_answers() {
         let mut storage = a_chain();
         assert_snapshot!(ok(&mut storage, &["graph", "--ready"]), @r"
-        nodes[2]{id,state,archived,degree,epic,title}:
-          task.first,open,no,0,-,The blocker
-          task.stray,open,no,0,-,Another line of work
+        nodes[2]{id,type,state,ready,archived,degree,priority,created,epic,title}:
+          task.first,task,open,yes,no,0,-,2026-08-24,-,The blocker
+          task.stray,task,open,yes,no,0,-,2026-08-24,-,Another line of work
         edges[0]{from,to,kind}:
         ");
         assert_snapshot!(ok(&mut storage, &["graph", "--for", "task.second"]), @r"
-        nodes[2]{id,state,archived,degree,epic,title}:
-          task.first,open,no,1,-,The blocker
-          task.second,open,no,1,-,The waiter
+        nodes[2]{id,type,state,ready,archived,degree,priority,created,epic,title}:
+          task.first,task,open,yes,no,1,-,2026-08-24,-,The blocker
+          task.second,task,open,no,no,1,-,2026-08-24,-,The waiter
         edges[1]{from,to,kind}:
           task.first,task.second,waits
         ");
         assert_snapshot!(ok(&mut storage, &["graph", "--focus", "task.first"]), @r"
-        nodes[2]{id,state,archived,degree,epic,title}:
-          task.first,open,no,1,-,The blocker
-          task.second,open,no,1,-,The waiter
+        nodes[2]{id,type,state,ready,archived,degree,priority,created,epic,title}:
+          task.first,task,open,yes,no,1,-,2026-08-24,-,The blocker
+          task.second,task,open,no,no,1,-,2026-08-24,-,The waiter
         edges[1]{from,to,kind}:
           task.first,task.second,waits
         ");
+    }
+
+    /// The plain text is bounded because a reader asked a question; the
+    /// document is not, because what reads it draws from it, and a drawing
+    /// made from some of the edges is not a smaller picture of this
+    /// notebook but a picture of one that does not exist.
+    #[test]
+    fn the_document_carries_every_row_the_text_bounds() {
+        let mut storage = many_open_tasks(anb_core::encode::ROW_BOUND + 2);
+
+        let printed = ok(&mut storage, &["graph"]);
+        let rows = printed
+            .lines()
+            .filter(|line| line.starts_with("  task."))
+            .count();
+        assert_eq!(rows, anb_core::encode::ROW_BOUND, "the text is bounded");
+
+        let payload = ok(&mut storage, &["--json", "graph"]);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).unwrap_or_else(|_| panic!("not JSON: {payload}"));
+        let counted = anb_core::encode::ROW_BOUND + 2;
+        assert_eq!(parsed["nodes"]["count"], counted);
+        assert_eq!(
+            parsed["nodes"]["rows"].as_array().expect("rows").len(),
+            counted,
+            "and the document carries all of them"
+        );
+    }
+
+    /// A body naming a record is an edge, so the notebook's own prose is
+    /// part of its graph and not only the fields an envelope declares.
+    #[test]
+    fn a_record_named_in_another_s_prose_is_an_edge() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.one.md".to_owned(),
+                record_file(
+                    "task.one",
+                    "task",
+                    "open",
+                    "The one that names",
+                    &[],
+                    "The reasoning lives in task.two.",
+                ),
+            ),
+            open_task("task.two", "The one that is named", &[]),
+        ]);
+
+        let printed = ok(&mut storage, &["graph"]);
+        assert!(
+            printed.contains("task.one,task.two,mentions"),
+            "the prose edge is drawn: {printed}"
+        );
+    }
+
+    /// A pair of records is one edge however many times the notebook says
+    /// so. A blocker whose own prose names the record waiting on it states
+    /// one relation twice, and two edges would weigh that pair twice in
+    /// every degree derived from the graph.
+    #[test]
+    fn a_relation_stated_twice_is_still_one_edge() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.blocker.md".to_owned(),
+                record_file(
+                    "task.blocker",
+                    "task",
+                    "open",
+                    "The blocker",
+                    &[],
+                    "This one clears the way for task.waiter.",
+                ),
+            ),
+            open_task("task.waiter", "The waiter", &["blocked-by: task.blocker"]),
+        ]);
+
+        let printed = ok(&mut storage, &["graph"]);
+        let between = printed
+            .lines()
+            .filter(|line| line.starts_with("  task.blocker,task.waiter,"))
+            .collect::<Vec<&str>>();
+        assert_eq!(
+            between,
+            vec!["  task.blocker,task.waiter,waits"],
+            "the declared word survives and the mention does not repeat it: {printed}"
+        );
+    }
+
+    /// A kind the notebook has no word for is refused by the flag that
+    /// carried it, rather than answered with a graph of nothing — which
+    /// reads exactly like a notebook holding no such work.
+    #[test]
+    fn a_type_that_is_no_kind_of_record_is_refused_by_the_flag() {
+        let Err(refused) = Cli::try_parse_from(["anb", "graph", "--type", "tsk"]) else {
+            panic!("a kind the notebook cannot name must not parse");
+        };
+        let refusal = refused.to_string();
+
+        assert!(refusal.contains("tsk"), "{refusal}");
+        assert!(
+            refusal.contains("task, decision, note, question"),
+            "and it names the kinds there are: {refusal}"
+        );
+    }
+
+    /// A slice a document does not name reads as a notebook that holds
+    /// nothing else, which is a true-sounding answer to a question the
+    /// caller never asked.
+    #[test]
+    fn the_document_names_the_kinds_it_was_narrowed_to() {
+        let payload = ok(
+            &mut a_chain(),
+            &["--json", "graph", "--type", "task,decision"],
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).unwrap_or_else(|_| panic!("not JSON: {payload}"));
+
+        assert_eq!(
+            parsed["slice"]["type"],
+            serde_json::json!(["task", "decision"])
+        );
     }
 
     /// A hint that cut a slice has to lift that same slice, or it names a
@@ -2583,85 +2649,6 @@ mod task_graph {
             printed.contains("anb graph --archive --all"),
             "the hint carries the slice: {printed}"
         );
-    }
-
-    /// The drawing is what `--out` asks for, and the reply says where the
-    /// shell left it and what it holds.
-    #[test]
-    fn the_picture_lands_at_the_path_the_caller_named() {
-        let mut storage = a_chain();
-        let written = RefCell::new(Vec::new());
-
-        assert_snapshot!(
-            run_writing(
-                &mut storage,
-                &["graph", "--out", "maps/today.html"],
-                &capturing(&written)
-            )
-            .expect("the command must succeed"),
-            @"ok: graph maps/today.html — 3 tasks, 1 edges"
-        );
-
-        let files = written.borrow();
-        let [(path, page)] = files.as_slice() else {
-            panic!("a map is one file: {files:?}")
-        };
-        assert_eq!(path, "maps/today.html");
-        assert!(
-            page.contains("data-id=\"task.second\""),
-            "and the file is the map of this notebook"
-        );
-    }
-
-    /// A slice honoured when the graph is printed and ignored when it is
-    /// drawn would hand the reader a picture of another notebook.
-    #[test]
-    fn the_picture_holds_the_slice_the_flags_asked_for() {
-        let written = RefCell::new(Vec::new());
-
-        run_writing(
-            &mut a_chain(),
-            &["graph", "--ready", "--out", "map.html"],
-            &capturing(&written),
-        )
-        .expect("the command must succeed");
-
-        let files = written.borrow();
-        let page = &files[0].1;
-        assert!(!page.contains("data-id=\"task.second\""), "{page}");
-        assert_eq!(
-            page.matches("data-id=").count(),
-            2,
-            "the ready lens draws what it printed"
-        );
-    }
-
-    /// A path the host will not take is the caller's to retype, whatever
-    /// the host's reason was: a map the reply called written and nobody can
-    /// open is the one outcome to prevent.
-    #[test]
-    fn a_write_the_host_refused_names_the_path_and_what_it_said() {
-        let failing = |path: &str, _: &str| {
-            Err(StorageError::Io {
-                path: path.to_owned(),
-                detail: "no space left on device".to_owned(),
-            })
-        };
-        assert_snapshot!(
-            refused_write(&failing),
-            @"error[invalid-argument]: graph: cannot write `map.html` — no space left on device"
-        );
-    }
-
-    /// The payload a `graph --out` call comes to when the host will not put
-    /// the file where the caller asked for it.
-    fn refused_write(write_artifact: &dyn Fn(&str, &str) -> Result<(), StorageError>) -> String {
-        run_writing(
-            &mut a_chain(),
-            &["graph", "--out", "map.html"],
-            write_artifact,
-        )
-        .expect_err("a map that was not written is no map")
     }
 }
 

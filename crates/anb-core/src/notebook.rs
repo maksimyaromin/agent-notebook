@@ -376,27 +376,27 @@ impl<'a> Notebook<'a> {
         })
     }
 
-    /// The task graph as a map: every Task the slice reaches, each with the
-    /// edges it draws and the record a reader opens on its tile.
+    /// The notebook as a graph: every record the slice reaches, each with the
+    /// edges it takes part in, and the record itself when asked for.
     ///
     /// Every slice reads the whole notebook. Narrowing changes what is
-    /// shown, never what is read: a tile's state, an epic's count, and the
-    /// queue are all settled against the whole notebook first, so a hub
-    /// still counts the closed children a slice leaves off the map.
+    /// shown, never what is read: a record's state, an epic's count, and
+    /// the queue are all settled against the whole notebook first, so a hub
+    /// still counts the closed children a slice leaves out.
     ///
-    /// One id is one tile. Where an interrupted archive move left the same
+    /// One id is one node. Where an interrupted archive move left the same
     /// id in both homes, the live file answers for it, as it does on every
     /// other edge the notebook walks.
     ///
     /// The nodes arrive in one order for one notebook: live records before
-    /// archived ones, by file name within each. A drawing derives its
-    /// arrangement from this order, so two maps of an unchanged notebook
-    /// are the same map.
+    /// archived ones, by file name within each. Whatever derives an
+    /// arrangement from that order gets the same one twice from an
+    /// unchanged notebook.
     ///
     /// # Errors
     /// [`NotebookError::UnknownId`] when the slice names no record,
     /// [`NotebookError::InvalidArgument`] on a malformed id or on a focus
-    /// the slice itself leaves off the map, or a storage failure.
+    /// the slice itself leaves out, or a storage failure.
     pub fn graph(&self, slice: &GraphSlice) -> Result<Graph, NotebookError> {
         if let Some(hub) = &slice.hub {
             write::parsed_type(hub)?;
@@ -422,7 +422,6 @@ impl<'a> Notebook<'a> {
             .records
             .iter()
             .chain(&filed)
-            .filter(|record| record.record_type() == Some(RecordType::Task))
             .filter(|record| claimed.insert(path_stem(record.path())))
             .filter(|record| slice.archive || !is_archived(record.path()))
             .collect();
@@ -435,16 +434,27 @@ impl<'a> Notebook<'a> {
             None => None,
         };
 
+        // The kinds narrow what is drawn, never what the neighbourhood was
+        // walked over: a reader asking which Decisions stand around a Task
+        // is asking about that Task's surroundings, and a walk that could
+        // not step through a Task would answer that nothing does.
+        let asked_for = |record: &Record| {
+            slice.kinds.is_empty()
+                || record
+                    .record_type()
+                    .is_some_and(|kind| slice.kinds.contains(&kind))
+        };
         let shown = |record: &Record| {
             let id = path_stem(record.path());
-            scope.as_ref().is_none_or(|scope| scope.contains(id))
+            asked_for(record)
+                && scope.as_ref().is_none_or(|scope| scope.contains(id))
                 && (!slice.ready_only || queue.iter().any(|row| row.id == id))
                 && near.as_ref().is_none_or(|near| near.contains(id))
         };
         let nodes = drawable
             .into_iter()
             .filter(|record| shown(record))
-            .map(|record| query::graph_node(record, &resolvable, &epics))
+            .map(|record| query::graph_node(record, &resolvable, &epics, &queue))
             .collect();
         Ok(Graph {
             slice: slice.clone(),
@@ -452,19 +462,16 @@ impl<'a> Notebook<'a> {
         })
     }
 
-    /// The id a focus walk starts from, once it is a Task this slice keeps.
-    /// Both refusals replace an empty picture — which reads exactly like a
-    /// notebook with nothing in it — with the correction that fills it.
-    /// A focus narrowed away by `hub` or `ready_only` is still an empty
-    /// answer; those two say what they leave out by their own names.
+    /// The id a focus walk starts from, once it is a record this slice
+    /// keeps. An id nothing is filed under, and one filed away while the
+    /// archive is left out, both answer with an empty graph — which reads
+    /// exactly like a notebook holding nothing — so each is replaced by the
+    /// correction that fills it. A focus narrowed away by another flag is
+    /// still an empty answer; the others say what they leave out in the
+    /// slice they carry back.
     fn focusable<'f>(&self, focus: &'f Focus, archive: bool) -> Result<&'f str, NotebookError> {
         let refused = |reason: String| Err(NotebookError::InvalidArgument { reason });
-        if write::parsed_type(&focus.id)? != RecordType::Task {
-            return refused(format!(
-                "graph: `{}` is no Task, and a map draws Tasks",
-                focus.id
-            ));
-        }
+        write::parsed_type(&focus.id)?;
         let Some(path) = self.holder_path(&focus.id)? else {
             return Err(NotebookError::UnknownId {
                 id: focus.id.clone(),

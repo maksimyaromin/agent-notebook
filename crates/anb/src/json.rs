@@ -6,8 +6,8 @@ use crate::recovery::{Recovery, Subject};
 use crate::reply::{Reply, repair_command, shown};
 use anb_core::{
     Cited, Counts, DebtSignal, EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, GraphSlice,
-    ListedRecord, NotebookError, Overview, ReadyTask, SECTION_ROWS, Status, View, debt_classes,
-    encode,
+    ListedRecord, NotebookError, Overview, ReadyTask, RecordType, SECTION_ROWS, Status, View,
+    debt_classes, encode,
 };
 use serde_json::{Map, Value, json};
 
@@ -104,9 +104,6 @@ pub fn render(reply: &Reply) -> String {
         }),
         Reply::Overviewed { overview, all } => overview_value(overview, *all),
         Reply::Graphed { graph, full, all } => graph_value(graph, *full, *all),
-        Reply::Mapped { path, tasks, edges } => json!({
-            "ok": "graph", "path": path, "tasks": tasks, "edges": edges,
-        }),
         Reply::Silence => return String::new(),
     };
     value.to_string()
@@ -304,21 +301,25 @@ fn overview_value(overview: &Overview, all: bool) -> Value {
 /// Which reading of the graph document this is. A caller builds against a
 /// shape, and a shape that could change without saying so is one nobody can
 /// build against.
-const GRAPH_CONTRACT: u8 = 1;
+const GRAPH_CONTRACT: u8 = 2;
 
-/// The graph as data: the slice it answers, the tiles, and the lines
-/// between them. Bounded like every other listing, with the whole count
-/// beside each block so a truncated one still says how much it stands for.
+/// The graph as one document: the slice it answers, the records, and the
+/// edges between them. The two structural blocks are never bounded — a
+/// listing is cut to a screenful because a reader asked a question, but a
+/// graph is drawn from rather than read, and a drawing made from some of
+/// the edges is not a smaller picture of this notebook but a picture of one
+/// that does not exist. What `--all` still lifts is the text inside a
+/// record, which is prose either way.
 fn graph_value(graph: &Graph, full: bool, all: bool) -> Value {
     let degrees = graph.degrees();
     let edges = graph.edges();
     json!({
         "v": GRAPH_CONTRACT,
         "slice": slice_value(&graph.slice),
-        "nodes": section(&graph.nodes, shown(graph.nodes.len(), all), |node| {
+        "nodes": whole_section(&graph.nodes, |node| {
             graph_node_value(node, degrees.get(node.id.as_str()).copied().unwrap_or_default(), full, all)
         }),
-        "edges": section(&edges, shown(edges.len(), all), graph_edge_value),
+        "edges": whole_section(&edges, graph_edge_value),
     })
 }
 
@@ -332,19 +333,43 @@ fn slice_value(slice: &GraphSlice) -> Value {
             json!(slice.focus.as_ref().map(|focus| focus.depth)),
         ),
         ("archive", json!(slice.archive)),
+        // A narrowing left out here reads as a notebook that holds nothing
+        // of the kind, which is a true-sounding answer to a question the
+        // caller never asked.
+        (
+            "type",
+            match slice.kinds.as_slice() {
+                [] => Value::Null,
+                kinds => json!(
+                    kinds
+                        .iter()
+                        .copied()
+                        .map(RecordType::word)
+                        .collect::<Vec<&str>>()
+                ),
+            },
+        ),
     ]))
 }
 
 fn graph_node_value(node: &GraphNode, degree: usize, full: bool, all: bool) -> Value {
     let mut object = fields([
         ("id", json!(node.id)),
+        ("type", json!(node.kind.map(RecordType::word))),
         ("state", json!(node.state)),
+        ("ready", json!(node.ready)),
         ("archived", json!(node.archived)),
         ("degree", json!(degree)),
+        ("priority", json!(node.priority)),
+        ("created", json!(node.created)),
         ("epic", node.epic.as_ref().map_or(Value::Null, epic_value)),
         ("title", json!(node.title)),
     ]);
     if full {
+        // A record's own prose is not part of the structure and is bounded
+        // like prose everywhere else: the whole notebook at full text is a
+        // quarter of a megabyte, and nothing can be drawn from the tail of
+        // a body that could not be drawn from its head.
         object.extend(fields([
             (
                 "fields",
@@ -367,6 +392,7 @@ fn graph_edge_value(edge: &GraphEdge<'_>) -> Value {
         "kind": match edge.kind {
             EdgeKind::BlockedBy => "waits",
             EdgeKind::Origin => "born",
+            EdgeKind::Mentions => "mentions",
         },
     })
 }
@@ -454,6 +480,12 @@ fn section<T>(rows: &[T], shown: usize, row: impl Fn(&T) -> Value) -> Value {
         "count": rows.len(),
         "rows": rows[..shown].iter().map(row).collect::<Vec<Value>>(),
     })
+}
+
+/// [`section`] carrying every row it counted, for a block whose meaning
+/// depends on holding all of them.
+fn whole_section<T>(rows: &[T], row: impl Fn(&T) -> Value) -> Value {
+    section(rows, rows.len(), row)
 }
 
 /// [`section`] at the default bound, for a consequence a command names in

@@ -167,7 +167,7 @@ pub(super) fn listed_row(record: &Record, resolvable: &Resolver<'_>) -> ListedRe
 /// waits on and was born from, however far back, and what waits on it and
 /// was born inside it, however far forward.
 ///
-/// The walk is what lets a map answer for a notebook of thousands. Both
+/// The walk is what lets a graph answer for a notebook of thousands. Both
 /// directions are walked because a reader asking about one Task asks the
 /// same question twice — what has to settle before it, and what it releases.
 pub(super) fn neighbourhood<'a>(
@@ -220,10 +220,23 @@ fn walked<'a>(
 
 /// One Task as the map draws it: the tile's word, the edges it declares,
 /// and the record a reader opens on it.
-pub(super) fn graph_node(record: &Record, resolvable: &Resolver<'_>, epics: &[Epic]) -> GraphNode {
+pub(super) fn graph_node(
+    record: &Record,
+    resolvable: &Resolver<'_>,
+    epics: &[Epic],
+    queue: &[ReadyTask],
+) -> GraphNode {
     let row = listed_row(record, resolvable);
     let file = record.file();
     GraphNode {
+        kind: record.record_type(),
+        priority: file.field("priority").and_then(|value| value.parse().ok()),
+        created: file.field("created").unwrap_or_default().to_owned(),
+        // Only a Task still in play queues, so only there is the answer
+        // either yes or no. Saying `no` of a Decision would answer a
+        // question nobody can ask of it.
+        ready: (record.record_type() == Some(RecordType::Task) && !is_archived(record.path()))
+            .then(|| queue.iter().any(|waiting| waiting.id == row.id)),
         epic: epics.iter().find(|epic| epic.id == row.id).cloned(),
         archived: is_archived(record.path()),
         blocked_by: file.field_values("blocked-by").map(str::to_owned).collect(),
