@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>agent notebooks — {{ title }}</title>
+<style>{{ map_css }}</style>
+</head>
+<body>
+
+<svg id="stage" role="application" aria-label="the task graph">
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="7" markerHeight="5" orient="auto">
+      <path d="M0 0 L8 3 L0 6 Z"/>
+    </marker>
+  </defs>
+  <g id="viewport">
+    <g id="edges">{{ edges }}</g>
+    <g id="nodes">{{ nodes }}</g>
+  </g>
+</svg>
+
+<header id="chrome">
+  <h1>agent notebooks <span class="slice">{{ title }}</span></h1>
+  <div class="row">
+    <input id="search" type="search" placeholder="filter by id, title or text" autocomplete="off" spellcheck="false">
+    <span id="tally" class="tally"></span>
+  </div>
+  <div class="row" id="states"></div>
+  <div class="row">
+    <label class="toggle"><input type="checkbox" id="show-archived" checked> finished work</label>
+    <label class="toggle"><input type="checkbox" id="show-born" checked> born-from lines</label>
+  </div>
+  <div class="row">
+    <button data-layout="web" class="on">web</button>
+    <button data-layout="layered">layered</button>
+    <button id="fit">fit</button>
+  </div>
+</header>
+
+<aside id="record" hidden>
+  <button id="close" aria-label="close">×</button>
+  <div id="record-body"></div>
+</aside>
+
+<footer id="legend">
+  <span><i class="line waits"></i> waits on</span>
+  <span><i class="line born"></i> born from</span>
+  <span class="hint">click a tile · drag to pan · scroll to zoom</span>
+</footer>
+
+<script type="application/json" id="anb-data">{{ data }}</script>
+<script>{{ dagre }}</script>
+<script>{{ map_js }}</script>
+</body>
+</html>

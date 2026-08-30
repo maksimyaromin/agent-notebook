@@ -152,6 +152,8 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
+    /// The task graph: printed as data, or drawn into one HTML file.
+    Graph(GraphArgs),
     /// The whole notebook as one page, grouped by type.
     Overview {
         /// Every row; each section is bounded by default.
@@ -271,4 +273,43 @@ pub struct CloseArgs {
     /// The explicit waiver: close stating there is no proof.
     #[arg(long)]
     pub no_proof: bool,
+}
+
+#[derive(Args)]
+pub struct GraphArgs {
+    #[command(flatten)]
+    pub slice: SliceArgs,
+    /// Each record's envelope and body as well. The picture carries them
+    /// whatever this says: a tile there opens its record.
+    #[arg(long)]
+    pub full: bool,
+    /// Every row; each block is bounded by default. Nothing to lift under
+    /// `--out`: a drawing bounds nothing.
+    #[arg(long)]
+    pub all: bool,
+    /// Draw the map into this file instead of printing it.
+    #[arg(long, value_name = "PATH")]
+    pub out: Option<std::path::PathBuf>,
+}
+
+/// Which Tasks the graph holds. They travel together because a narrowing
+/// honoured while printing and dropped while drawing hands the reader a
+/// picture of another notebook.
+#[derive(Args)]
+pub struct SliceArgs {
+    /// Only the work this record's scope reaches: one epic's branch.
+    #[arg(long = "for", value_name = "ID")]
+    pub scope: Option<String>,
+    /// Only what can be started now: the ready lens.
+    #[arg(long)]
+    pub ready: bool,
+    /// Only this Task and the graph around it.
+    #[arg(long, value_name = "ID")]
+    pub focus: Option<String>,
+    /// How many edges out from `--focus` the graph reaches; 1 by default.
+    #[arg(long, value_name = "N", requires = "focus")]
+    pub depth: Option<usize>,
+    /// The archive too; by default only the work still in play.
+    #[arg(long)]
+    pub archive: bool,
 }

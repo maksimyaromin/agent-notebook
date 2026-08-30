@@ -2,3 +2,7 @@
 .claude/
 /target/
 *.pending-snap
+
+# editor and script leftovers, never part of the source
+*.bak
+*.orig

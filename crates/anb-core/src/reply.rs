@@ -9,7 +9,7 @@ use crate::finding::Finding;
 use crate::record::{Record, RecordType};
 use crate::resolve::path_stem;
 use crate::{date, encode};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 /// A state move; on a replay `already` is true and `from` equals `to`.
@@ -235,6 +235,126 @@ pub struct Epic {
     pub closed: usize,
     pub total: usize,
     pub next: Option<String>,
+}
+
+/// One Task on the map: what its tile says, and the record a reader opens
+/// on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphNode {
+    pub id: String,
+    /// The state its tile is coloured by, `invalid` for a record its own
+    /// findings exclude — the listing's word, so one vocabulary answers
+    /// every surface.
+    pub state: String,
+    pub archived: bool,
+    pub title: Option<String>,
+    /// Where this hub stands, when the Task is one.
+    pub epic: Option<Epic>,
+    pub blocked_by: Vec<String>,
+    pub origin: Option<String>,
+    /// The envelope in file order and the body, for the record a reader
+    /// opens on a tile rather than for the tile.
+    pub fields: Vec<(String, String)>,
+    pub body: String,
+    pub mentions: Vec<String>,
+}
+
+/// Which Tasks a map is asked for. Every narrowing is a predicate over the
+/// same notebook, so asking for two asks for the intersection.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GraphSlice {
+    /// One epic's scope: the hub, what it waits on, and what was born
+    /// inside it.
+    pub hub: Option<String>,
+    /// What can be started now.
+    pub ready_only: bool,
+    /// One record and the graph around it.
+    pub focus: Option<Focus>,
+    /// Whether archived Tasks are on the map. Most of what a long-lived
+    /// notebook holds is finished, and drawing all of it buries the work in
+    /// flight, so the archive stays off until it is asked for.
+    pub archive: bool,
+}
+
+/// A record and how far around it the map reaches, counted in edges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Focus {
+    pub id: String,
+    pub depth: usize,
+}
+
+/// The map one call asked for: every Task the slice reaches, each with the
+/// edges it draws.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Graph {
+    /// What was asked for, carried back so a map says which slice it is.
+    pub slice: GraphSlice,
+    pub nodes: Vec<GraphNode>,
+}
+
+impl Graph {
+    /// The edges the map draws, each running the way work becomes possible:
+    /// out of what must settle first, into what waits on it or was born
+    /// from it. An edge whose far end is off the map is not one, since a
+    /// line has to land on a tile.
+    #[must_use]
+    pub fn edges(&self) -> Vec<GraphEdge<'_>> {
+        let on_the_map: BTreeSet<&str> = self.nodes.iter().map(|node| node.id.as_str()).collect();
+        let mut edges = Vec::new();
+        for node in &self.nodes {
+            for blocker in &node.blocked_by {
+                if on_the_map.contains(blocker.as_str()) {
+                    edges.push(GraphEdge {
+                        from: blocker,
+                        to: &node.id,
+                        kind: EdgeKind::BlockedBy,
+                    });
+                }
+            }
+            if let Some(origin) = node.origin.as_deref()
+                && on_the_map.contains(origin)
+            {
+                edges.push(GraphEdge {
+                    from: origin,
+                    to: &node.id,
+                    kind: EdgeKind::Origin,
+                });
+            }
+        }
+        edges
+    }
+
+    /// How many lines meet at each tile. A web reads by weight, and weight
+    /// is how much of the slice a Task holds together.
+    #[must_use]
+    pub fn degrees(&self) -> BTreeMap<&str, usize> {
+        let mut degrees: BTreeMap<&str, usize> = self
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), 0))
+            .collect();
+        for edge in self.edges() {
+            *degrees.entry(edge.from).or_default() += 1;
+            *degrees.entry(edge.to).or_default() += 1;
+        }
+        degrees
+    }
+}
+
+/// One line on the map, from what must settle first to what waits on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphEdge<'a> {
+    pub from: &'a str,
+    pub to: &'a str,
+    pub kind: EdgeKind,
+}
+
+/// Which of the two edges a record draws: what it waits on, and what it was
+/// born from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind {
+    BlockedBy,
+    Origin,
 }
 
 /// One type's slice of the overview page.

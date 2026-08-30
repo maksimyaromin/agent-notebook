@@ -1,19 +1,14 @@
 [package]
-name = "anb"
-description = "agent-notebook CLI: a project's working memory as typed records in plain files"
+name = "anb-graph"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
 anb-core.workspace = true
-anb-graph.workspace = true
-clap.workspace = true
-jiff.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-insta.workspace = true
 tempfile.workspace = true
 
 [lints]

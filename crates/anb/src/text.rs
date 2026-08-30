@@ -9,12 +9,13 @@
 
 use crate::json;
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, lifted, repair_command, shown};
+use crate::reply::{Reply, lifted, repair_command, shown, slice_command};
 use anb_core::date;
 use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
 use anb_core::{
-    FileFinding, ListedRecord, NotebookError, Overview, ReadyTask, View, counts_phrase, encode,
+    EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, ListedRecord, NotebookError, Overview,
+    ReadyTask, View, counts_phrase, encode,
 };
 use std::fmt::Write as _;
 
@@ -102,6 +103,10 @@ pub fn render(reply: &Reply, today: &str) -> String {
             &format!("anb search {} --all", shell_quoted(query)),
         ),
         Reply::Overviewed { overview, all } => overview_page(overview, *all),
+        Reply::Graphed { graph, full, all } => graph_blocks(graph, *full, *all),
+        Reply::Mapped { path, tasks, edges } => {
+            format!("ok: graph {path} — {tasks} tasks, {edges} edges\n")
+        }
         Reply::Status { status, hook } => {
             if *hook {
                 json::hook_payload(status)
@@ -318,6 +323,101 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
     }
     truncation_hint(&mut out, findings.len(), shown, "anb check --all");
     out
+}
+
+/// The graph as the rows a caller reads: the tiles, the lines between them,
+/// and — when the caller asked for the records whole — each record's
+/// envelope and body under them.
+fn graph_blocks(graph: &Graph, full: bool, all: bool) -> String {
+    let restore = format!("{} --all", slice_command(&graph.slice, full));
+    let mut out = String::new();
+    tiles_block(&mut out, graph, all, &restore);
+    edges_block(&mut out, &graph.edges(), all, &restore);
+    if full {
+        record_blocks(&mut out, &graph.nodes, all, &restore);
+    }
+    out
+}
+
+/// Every block a graph reply carries is headed, count and all: a reply
+/// that dropped an empty one would leave a reader unable to tell a slice
+/// with no lines from a slice the verb never drew.
+fn tiles_block(out: &mut String, graph: &Graph, all: bool, restore: &str) {
+    let degrees = graph.degrees();
+    let shown = shown(graph.nodes.len(), all);
+    let _ = writeln!(
+        out,
+        "nodes[{}]{{id,state,archived,degree,epic,title}}:",
+        graph.nodes.len()
+    );
+    for node in &graph.nodes[..shown] {
+        let _ = writeln!(
+            out,
+            "  {},{},{},{},{},{}",
+            node.id,
+            node.state,
+            if node.archived { "yes" } else { "no" },
+            degrees.get(node.id.as_str()).copied().unwrap_or_default(),
+            node.epic.as_ref().map_or_else(
+                || "-".to_owned(),
+                |epic| format!("{}/{}", epic.closed, epic.total)
+            ),
+            node.title
+                .as_deref()
+                .map_or_else(|| "-".to_owned(), quoted_if_delimited),
+        );
+    }
+    truncation_hint(out, graph.nodes.len(), shown, restore);
+}
+
+fn edges_block(out: &mut String, edges: &[GraphEdge<'_>], all: bool, restore: &str) {
+    let shown = shown(edges.len(), all);
+    let _ = writeln!(out, "edges[{}]{{from,to,kind}}:", edges.len());
+    for edge in &edges[..shown] {
+        let word = match edge.kind {
+            EdgeKind::BlockedBy => "waits",
+            EdgeKind::Origin => "born",
+        };
+        let _ = writeln!(out, "  {},{},{word}", edge.from, edge.to);
+    }
+    truncation_hint(out, edges.len(), shown, restore);
+}
+
+/// What a tile opens: each record's envelope a line at a time, and each
+/// body under its own id. A body carries newlines, which the quoting rule
+/// escapes, so one record is still one row.
+fn record_blocks(out: &mut String, nodes: &[GraphNode], all: bool, restore: &str) {
+    let envelope: Vec<(&str, &str, &str)> = nodes
+        .iter()
+        .flat_map(|node| {
+            node.fields
+                .iter()
+                .map(|(key, value)| (node.id.as_str(), key.as_str(), value.as_str()))
+        })
+        .collect();
+    let fields_shown = shown(envelope.len(), all);
+    let _ = writeln!(out, "fields[{}]{{id,key,value}}:", envelope.len());
+    for (id, key, value) in &envelope[..fields_shown] {
+        let _ = writeln!(
+            out,
+            "  {id},{key},{}",
+            quoted_if_delimited(&field_value(value, all))
+        );
+    }
+    truncation_hint(out, envelope.len(), fields_shown, restore);
+
+    let written: Vec<&GraphNode> = nodes.iter().filter(|node| !node.body.is_empty()).collect();
+    let bodies_shown = shown(written.len(), all);
+    let _ = writeln!(out, "bodies[{}]{{id,text}}:", written.len());
+    for node in &written[..bodies_shown] {
+        let _ = writeln!(
+            out,
+            "  {},{}",
+            node.id,
+            quoted_if_delimited(&field_value(&node.body, all))
+        );
+    }
+    truncation_hint(out, written.len(), bodies_shown, restore);
 }
 
 fn overview_page(overview: &Overview, all: bool) -> String {

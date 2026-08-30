@@ -1,0 +1,193 @@
+/* The look of the map: the ground a reader reads it on, the chrome around
+   it, and the graph itself.
+
+   A state's colour has one home — `--state`, keyed by `data-state` — and
+   a tile and the legend chip naming it both read it, so the two cannot
+   drift apart. */
+
+:root {
+  color-scheme: dark light;
+  --ink: #e7e9ee;
+  --ink-dim: #8b93a7;
+  --ground: #14161c;
+  --panel: #1b1e27cc;
+  --edge: #2b3040;
+  --accent: #6ea8fe;
+  --line: #5f6780;
+  --label: #c9d0de;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ink: #1b1e27;
+    --ink-dim: #5d6577;
+    --ground: #f7f8fa;
+    --panel: #ffffffd9;
+    --edge: #d8dce6;
+    --accent: #2f6feb;
+    --line: #9aa2b6;
+    --label: #3a4152;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ground);
+  color: var(--ink);
+  font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
+#stage { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#stage.panning { cursor: grabbing; }
+
+/* ---- the graph -------------------------------------------------------- */
+
+[data-state="open"] { --state: #6ea8fe; }
+[data-state="active"] { --state: #3fb950; }
+[data-state="review"] { --state: #d29922; }
+[data-state="closed"] { --state: #6b7280; }
+[data-state="invalid"] { --state: #f85149; }
+
+.node { --state: #6ea8fe; cursor: pointer; transition: opacity 120ms; }
+.node .tile { fill: var(--state); stroke: none; }
+/* Never painted, only aimed at: the geometry a pointer is tested against,
+   held at a size a hand can hit however small the tile inside it is. */
+.node .reach { fill: none; pointer-events: all; }
+.node text {
+  fill: var(--label);
+  font: 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-anchor: middle;
+  /* `y` is then the top of the name's own box, so the gap under a tile is
+     the gap a reader sees whatever font the browser found. */
+  dominant-baseline: hanging;
+  transition: opacity 140ms;
+}
+.node text.faded { opacity: 0; pointer-events: none; }
+.node.archived .tile { fill-opacity: .35; }
+.node.archived text { fill: #7b8296; }
+.node.hub .tile { stroke: var(--ink); stroke-width: 2; }
+.node.hub text { font-size: 10px; }
+
+.edge { fill: none; stroke: var(--line); stroke-width: 1.2; opacity: .8; transition: opacity 120ms; }
+.edge[data-kind="born"] { stroke-dasharray: 4 3; opacity: .5; }
+#arrow path { fill: var(--line); }
+
+.dim { opacity: .07; }
+.node.near .tile { stroke: var(--ink); stroke-width: 2; }
+.edge.near { opacity: 1; stroke-width: 2; stroke: #8fb8ff; }
+.node.picked .tile { stroke: var(--accent); stroke-width: 3; }
+.node.hit .tile { stroke: #d29922; stroke-width: 3; }
+
+/* ---- the chrome around it --------------------------------------------- */
+
+#chrome {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  width: 300px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+}
+
+h1 { margin: 0 0 10px; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+h1 .slice { color: var(--ink-dim); font-weight: 400; }
+
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+
+input[type="search"] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.tally { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+button {
+  padding: 5px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.on { border-color: var(--accent); color: var(--accent); }
+button:disabled { color: var(--ink-dim); cursor: default; }
+
+.toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-dim); cursor: pointer; }
+
+.chip {
+  --state: #6ea8fe;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.chip.on { color: var(--ink); border-color: currentColor; }
+.chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--state); }
+
+#record {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: min(420px, 40vw);
+  overflow: auto;
+  padding: 16px 18px;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+}
+#record h2 { margin: 0 24px 4px 0; font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+#record .lede { margin: 0 0 12px; color: var(--ink-dim); }
+#record dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 12px; }
+#record dt { color: var(--ink-dim); }
+#record dd { margin: 0; overflow-wrap: anywhere; }
+#record pre { margin: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+#record h3 { margin: 14px 0 6px; font-size: 12px; color: var(--ink-dim); font-weight: 600; }
+#record .ids { display: flex; flex-wrap: wrap; gap: 6px; }
+#record .ids button { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+#close { position: absolute; top: 12px; right: 12px; border: 0; font-size: 18px; line-height: 1; }
+
+#legend {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 7px 12px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-dim);
+  backdrop-filter: blur(12px);
+}
+#legend i.line { display: inline-block; width: 18px; border-top: 2px solid currentColor; vertical-align: middle; }
+#legend i.born { border-top-style: dashed; }
+#legend .hint { opacity: .7; }
+
+@media (max-width: 720px) {
+  #chrome { width: auto; right: 14px; }
+  #record { top: auto; width: auto; left: 14px; max-height: 50vh; }
+}

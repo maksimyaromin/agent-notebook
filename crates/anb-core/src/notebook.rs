@@ -45,7 +45,8 @@ use crate::record::{
 };
 use crate::reply::{
     Archived, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged, Edited, Expunged,
-    Held, ListedRecord, Overview, ReadyTask, Transitioned, TypeSection, View,
+    Focus, Graph, GraphSlice, Held, ListedRecord, Overview, ReadyTask, Transitioned, TypeSection,
+    View,
 };
 use crate::request::{Draft, Edit, Proof};
 use crate::resolve::{
@@ -373,6 +374,123 @@ impl<'a> Notebook<'a> {
             sections,
             archived: corpus.archive,
         })
+    }
+
+    /// The task graph as a map: every Task the slice reaches, each with the
+    /// edges it draws and the record a reader opens on its tile.
+    ///
+    /// Every slice reads the whole notebook. Narrowing changes what is
+    /// shown, never what is read: a tile's state, an epic's count, and the
+    /// queue are all settled against the whole notebook first, so a hub
+    /// still counts the closed children a slice leaves off the map.
+    ///
+    /// One id is one tile. Where an interrupted archive move left the same
+    /// id in both homes, the live file answers for it, as it does on every
+    /// other edge the notebook walks.
+    ///
+    /// The nodes arrive in one order for one notebook: live records before
+    /// archived ones, by file name within each. A drawing derives its
+    /// arrangement from this order, so two maps of an unchanged notebook
+    /// are the same map.
+    ///
+    /// # Errors
+    /// [`NotebookError::UnknownId`] when the slice names no record,
+    /// [`NotebookError::InvalidArgument`] on a malformed id or on a focus
+    /// the slice itself leaves off the map, or a storage failure.
+    pub fn graph(&self, slice: &GraphSlice) -> Result<Graph, NotebookError> {
+        if let Some(hub) = &slice.hub {
+            write::parsed_type(hub)?;
+            if self.holder_path(hub)?.is_none() {
+                return Err(NotebookError::UnknownId { id: hub.clone() });
+            }
+        }
+        let live = self.live_corpus()?;
+        let filed = self.filed_records()?;
+        let resolvable = live.resolver();
+        let queue = query::ready_rows(&live.records, &resolvable);
+        let epics = query::epic_rows(&live.records, &filed, &resolvable, &queue);
+        let scope = slice.hub.as_deref().map(|hub| {
+            query::MembershipIndex::of(&live.records, &filed)
+                .scope_of(hub)
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<BTreeSet<String>>()
+        });
+
+        let mut claimed = BTreeSet::new();
+        let drawable: Vec<&Record> = live
+            .records
+            .iter()
+            .chain(&filed)
+            .filter(|record| record.record_type() == Some(RecordType::Task))
+            .filter(|record| claimed.insert(path_stem(record.path())))
+            .filter(|record| slice.archive || !is_archived(record.path()))
+            .collect();
+        let near = match &slice.focus {
+            Some(focus) => Some(query::neighbourhood(
+                &drawable,
+                self.focusable(focus, slice.archive)?,
+                focus.depth,
+            )),
+            None => None,
+        };
+
+        let shown = |record: &Record| {
+            let id = path_stem(record.path());
+            scope.as_ref().is_none_or(|scope| scope.contains(id))
+                && (!slice.ready_only || queue.iter().any(|row| row.id == id))
+                && near.as_ref().is_none_or(|near| near.contains(id))
+        };
+        let nodes = drawable
+            .into_iter()
+            .filter(|record| shown(record))
+            .map(|record| query::graph_node(record, &resolvable, &epics))
+            .collect();
+        Ok(Graph {
+            slice: slice.clone(),
+            nodes,
+        })
+    }
+
+    /// The id a focus walk starts from, once it is a Task this slice keeps.
+    /// Both refusals replace an empty picture — which reads exactly like a
+    /// notebook with nothing in it — with the correction that fills it.
+    /// A focus narrowed away by `hub` or `ready_only` is still an empty
+    /// answer; those two say what they leave out by their own names.
+    fn focusable<'f>(&self, focus: &'f Focus, archive: bool) -> Result<&'f str, NotebookError> {
+        let refused = |reason: String| Err(NotebookError::InvalidArgument { reason });
+        if write::parsed_type(&focus.id)? != RecordType::Task {
+            return refused(format!(
+                "graph: `{}` is no Task, and a map draws Tasks",
+                focus.id
+            ));
+        }
+        let Some(path) = self.holder_path(&focus.id)? else {
+            return Err(NotebookError::UnknownId {
+                id: focus.id.clone(),
+            });
+        };
+        if is_archived(&path) && !archive {
+            return refused(format!(
+                "graph: `{}` is archived — add --archive to focus on it",
+                focus.id
+            ));
+        }
+        Ok(&focus.id)
+    }
+
+    /// Every archived record, read whole: the tiles a map draws for
+    /// finished work, and the lineage a live record's Origin reaches back
+    /// through.
+    fn filed_records(&self) -> Result<Vec<Record>, NotebookError> {
+        let mut filed = Vec::new();
+        for record_type in RecordType::ALL {
+            filed.extend(read_records_in(
+                self.storage,
+                &archive_of(record_type.directory()),
+            )?);
+        }
+        Ok(filed)
     }
 
     /// Read one record whole, live or archived: every envelope field in file

@@ -5,9 +5,9 @@ Guidance for coding agents (Claude Code, Codex, Pi, and others) working in this 
 
 ## Project
 
-**agent-notebook** (anb) stores a project's working memory as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.agent-notebook/` (CLI named `anb`, directory the full word — owner's call, 2026-08-25) — read and mutated by any agent through a Rust CLI (owner's call, 2026-08-25 — for fun; ADR 0006 supersedes 0003 Go). The backlog is the deepest-worked pattern of the notebook, not the whole of it.
+**agent notebooks** stores a project's working memory as typed records with lifecycles — Tasks, Decisions, Notes, Questions under `.agent-notebook/` (CLI named `anb`, directory the full word — owner's call, 2026-08-25) — read and mutated by any agent through a Rust CLI (owner's call, 2026-08-25 — for fun; ADR 0006 supersedes 0003 Go). The backlog is the deepest-worked pattern of the notebook, not the whole of it.
 
-Status: self-hosted. The backlog lives in the notebook itself (`.agent-notebook/`), read and mutated only through the anb CLI; the concept spec is grilled and frozen (2026-08-24).
+Status: self-hosted. The backlog lives in the notebook itself (`.agent-notebook/`), read and mutated only through the agent notebooks CLI; the concept spec is grilled and frozen (2026-08-24).
 
 Goals, in priority order:
 
@@ -22,7 +22,7 @@ Prior art to borrow ideas from, not code: `tasks-axi` (markdown backlog CLI, byt
 - `.tmp/` — git-ignored. Scratch space AND the standard home of all working documents at this stage: nothing under it may be moved or copied elsewhere in the repo. Never use `/tmp`.
 - `.claude/` — local agent config and skills, git-ignored.
 - `.agents/` — reserved for skills and agent config that must be committed and shared.
-- `.agent-notebook/` — the notebook: the source of truth for Tasks, Decisions, Notes, Questions. Mutate it only through the anb CLI, never by hand-editing the files. This project keeps it at the repo root and commits it by choice; where a notebook sits and whether it is committed are configuration (`--notebook`, `ANB_NOTEBOOK`), not something anb requires. `--global` names the user's own notebook in the home directory instead — knowledge that outlives one repository, and no place for this project's work.
+- `.agent-notebook/` — the notebook: the source of truth for Tasks, Decisions, Notes, Questions. Mutate it only through the agent notebooks CLI, never by hand-editing the files. This project keeps it at the repo root and commits it by choice; where a notebook sits and whether it is committed are configuration (`--notebook`, `ANB_NOTEBOOK`), not something agent notebooks requires. `--global` names the user's own notebook in the home directory instead — knowledge that outlives one repository, and no place for this project's work.
 
 ## Working documents (all under `.tmp/`, deliberately uncommitted)
 
@@ -38,7 +38,7 @@ Before writing any code: load `.tmp/docs/engineering-instruction.md` and every s
 
 ## Task protocol
 
-The project dogfoods its own tool: the backlog is the notebook, and every task-state change goes through the anb CLI, invoked from the repo root as `cargo run --quiet -- <command>` until a binary ships. Every CLI failure, bug, or friction met on the way is a finding — file it into the notebook (a comment on the task it burdens, or a new Task/Question born `--from` the current one) instead of working around it silently.
+The project dogfoods its own tool: the backlog is the notebook, and every task-state change goes through the agent notebooks CLI, invoked from the repo root as `cargo run --quiet -- <command>` until a binary ships. Every CLI failure, bug, or friction met on the way is a finding — file it into the notebook (a comment on the task it burdens, or a new Task/Question born `--from` the current one) instead of working around it silently.
 
 When the owner says **"continue the task"** (in any wording, any language), it means exactly this:
 
@@ -59,6 +59,7 @@ No formal task closure, no commit, and no push ever happens before the review pa
 
 - Lavish is never part of a coding task's review (owner's call, 2026-08-26; who reviews is stage 3's rule). Lavish is for brainstorming and design discussions only — there it runs through the **`grill-with-docs` skill** (`~/dev/skills/skills/engineering/grill-with-docs`), which defines the interview format; the artifact must be fully self-contained: digested proofs with their numbers, worked examples, and diagrams in place — never pointers into `.tmp/docs/research/`.
 - Language: code, comments, commit messages, and docs in English.
+- In prose the project is **agent notebooks**, never the abbreviation (owner's call, 2026-08-30). `anb` survives only where it is an identifier a reader types or a compiler reads: the command, the crate names, the `ANB_` variables, and record ids already minted.
 - Committed text is self-contained (owner's call, 2026-08-28): comments, docs, and test data never cite what only `.tmp/` holds — no spec §, research-report, ADR, user-story, or owner-ruling pointers. State the constraint itself; provenance stays in `.tmp/` reports.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Commit and push only when asked.
@@ -67,6 +68,10 @@ No formal task closure, no commit, and no push ever happens before the review pa
 ## Commands
 
 - `./scripts/check.sh` — the local gate: `cargo fmt --check`, `cargo clippy -D warnings`, all tests, doctests.
+
+## The map
+
+`crates/anb-graph/assets/` holds the look and behaviour of the emitted map as plain files — edit them there, never as strings in Rust. `cargo` compiles those files without ever running them, so what they do is proved by opening an emitted page in a browser: `cargo test -p anb-graph --test labels` does that for the two properties a machine can settle — no two names share a patch of screen, and every tile is big enough to point at — and skips when no browser is installed (`ANB_BROWSER` names one).
 
 ## Markdown authoring
 

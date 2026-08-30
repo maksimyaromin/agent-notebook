@@ -55,6 +55,7 @@ fn writes_work(command: &Command) -> bool {
         | Command::Archive { .. }
         | Command::Expunge { .. }
         | Command::Edit(_)
+        | Command::Graph(_)
         | Command::Overview { .. }
         | Command::Status { .. } => false,
     }
