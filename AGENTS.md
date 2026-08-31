@@ -63,11 +63,12 @@ No formal task closure, no commit, and no push ever happens before the review pa
 - Committed text is self-contained (owner's call, 2026-08-28): comments, docs, and test data never cite what only `.tmp/` holds — no spec §, research-report, ADR, user-story, or owner-ruling pointers. State the constraint itself; provenance stays in `.tmp/` reports.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
 - Commit and push only when asked.
+- main moves only by pull request with a green CI check, never by direct push (owner's call, 2026-08-31). This is a convention, not a server rule: the enforcing ruleset waits until the repo is public or the plan allows rulesets on private repos.
 - Keep this file short and current: update it when a convention or command changes, remove anything that stops being true.
 
 ## Commands
 
-- `./scripts/check.sh` — the local gate: `cargo fmt --check`, `cargo clippy -D warnings`, all tests, doctests.
+- `./scripts/check.sh` — the gate: `cargo fmt --check`, `cargo clippy -D warnings`, all tests, doctests. CI (`.github/workflows/ci.yml`) runs the same script on every push to main and every pull request.
 
 ## The graph
 
