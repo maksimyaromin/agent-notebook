@@ -869,28 +869,6 @@ mod archive_verb {
         assert!(storage.read("tasks/task.demo.md").is_ok());
     }
 
-    /// [`MemoryStorage`] whose `remove` always fails — the crash between an
-    /// archive's write and its remove.
-    struct RemoveFails(MemoryStorage);
-
-    impl Storage for RemoveFails {
-        fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
-            self.0.list(dir)
-        }
-        fn read(&self, path: &str) -> Result<String, StorageError> {
-            self.0.read(path)
-        }
-        fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
-            self.0.write(path, content)
-        }
-        fn remove(&mut self, path: &str) -> Result<(), StorageError> {
-            Err(StorageError::Io {
-                path: path.to_owned(),
-                detail: "refused".to_owned(),
-            })
-        }
-    }
-
     #[test]
     fn a_move_interrupted_after_its_write_loses_nothing_and_replays_clean() {
         let text = task_file("closed", &[]);

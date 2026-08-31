@@ -42,11 +42,12 @@ use crate::graph;
 use crate::mention;
 use crate::record::{
     REF_KEYS, Record, RecordType, TaskAction, TaskState, Transition, dangling_finding,
+    not_utf8_finding,
 };
 use crate::reply::{
     Archived, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged, Edited, Expunged,
-    Focus, Graph, GraphSlice, Held, ListedRecord, Overview, ReadyTask, Transitioned, TypeSection,
-    View,
+    Focus, Graph, GraphSlice, Held, ListedRecord, Overview, ReadyTask, Restored, Transitioned,
+    TypeSection, View,
 };
 use crate::request::{Draft, Edit, Proof};
 use crate::resolve::{
@@ -1153,6 +1154,82 @@ impl<'a> Notebook<'a> {
         Ok(moved)
     }
 
+    /// Move an archived record back into the working set: the move
+    /// `archive` makes, made back — same filename, same bytes, the record
+    /// alone. The reports the archive move carried are retired history and
+    /// stay history.
+    ///
+    /// No verb that corrects a record resolves an archived id — `expunge`
+    /// reaches the archive only to delete — so this move is how a finding
+    /// on an archived record becomes repairable at all. The bytes travel
+    /// unjudged past one bar, readability: a broken record must be able to
+    /// come back to where the repairing verbs are, but this verb promises
+    /// residence and cannot vouch it over bytes no parse can read — on
+    /// either side of the move, and on the replay, whose `already`
+    /// otherwise stands on the live file's existence alone, findings and
+    /// all.
+    ///
+    /// A live file under this id keeps its bytes whatever happens: the
+    /// live directory is the only editable home, so what stands there is
+    /// the record's current truth. When the archive also holds the id —
+    /// the leftover of a move interrupted in either direction — this call
+    /// finishes the move by removing that leftover, provided both files
+    /// answer for this record — the resume test `leftover_is_own` carries
+    /// the two tiers and their reasons; anything else holds the
+    /// destination, and the move refuses rather than guess.
+    ///
+    /// # Errors
+    /// [`NotebookError::UnknownId`] when neither home holds the id,
+    /// [`NotebookError::DuplicateId`] on a live destination taken by a
+    /// file this move cannot call its own, [`NotebookError::InvalidRecord`]
+    /// on bytes that cannot cross the seam, or a storage failure.
+    pub fn restore(&mut self, id: &str) -> Result<Restored, NotebookError> {
+        let record_type = write::parsed_type(id)?;
+        let moved = Restored {
+            id: id.to_owned(),
+            from: record_path(id, record_type, true),
+            to: record_path(id, record_type, false),
+            already: false,
+        };
+        match (self.held_at(&moved.from)?, self.held_at(&moved.to)?) {
+            (Holding::Unreadable, _) => Err(unreadable_record(&moved.from)),
+            (Holding::Absent, Holding::Absent) => {
+                Err(NotebookError::UnknownId { id: id.to_owned() })
+            }
+            (Holding::Absent, Holding::Unreadable) => Err(unreadable_record(&moved.to)),
+            (Holding::Absent, Holding::Bytes(_)) => Ok(Restored {
+                already: true,
+                ..moved
+            }),
+            (Holding::Bytes(source), Holding::Absent) => {
+                self.storage.write(&moved.to, &source)?;
+                self.storage.remove(&moved.from)?;
+                Ok(moved)
+            }
+            (Holding::Bytes(source), Holding::Bytes(standing))
+                if leftover_is_own(&moved, &source, &standing) =>
+            {
+                self.storage.remove(&moved.from)?;
+                Ok(moved)
+            }
+            (Holding::Bytes(_), _) => Err(NotebookError::DuplicateId {
+                id: id.to_owned(),
+                holder: moved.to,
+            }),
+        }
+    }
+
+    /// What one home holds for a move that judges names and bytes, never
+    /// states: the file's text, nothing, or bytes no parse can read.
+    fn held_at(&self, path: &str) -> Result<Holding, NotebookError> {
+        match self.storage.read(path) {
+            Ok(text) => Ok(Holding::Bytes(text)),
+            Err(StorageError::NotFound { .. }) => Ok(Holding::Absent),
+            Err(StorageError::NotUtf8 { .. }) => Ok(Holding::Unreadable),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     /// The reports `filed` carries that this move may take with it, each
     /// read and judged before a single byte moves — the whole cascade is
     /// decided first, so a report the notebook cannot move refuses the
@@ -1715,6 +1792,37 @@ impl Corpus {
 }
 
 /// A report an archive move carries, judged before the first byte moves.
+/// What one home holds, as [`Notebook::held_at`] reads it.
+enum Holding {
+    Absent,
+    Bytes(String),
+    Unreadable,
+}
+
+/// The refusal for bytes that cannot cross the seam, named as the record
+/// they occupy.
+fn unreadable_record(path: &str) -> NotebookError {
+    NotebookError::InvalidRecord {
+        path: path.to_owned(),
+        findings: vec![not_utf8_finding()],
+    }
+}
+
+/// The resume test for a restore that finds its id in both homes: the two
+/// files are the same record when they are byte-identical — an untouched
+/// interrupted copy, however broken — or when each answers for the id on
+/// its own. The standing file answers by parsing clean, because a
+/// canonical live path admits no clean record but the id's own and `add`
+/// refuses an id the archive claims; the leftover answers by declaring the
+/// id in its bytes, because bytes under this filename that declare another
+/// record are somebody's only copy, and removing them unread would destroy
+/// it.
+fn leftover_is_own(moved: &Restored, source: &str, standing: &str) -> bool {
+    source == standing
+        || (!Record::parse(&moved.to, standing).has_errors()
+            && Record::parse(&moved.from, source).id() == Some(&moved.id))
+}
+
 struct Report {
     path: String,
     record: Record,

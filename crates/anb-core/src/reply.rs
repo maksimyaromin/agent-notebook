@@ -187,8 +187,8 @@ pub fn carriers_of(blockers: &[Blocker]) -> impl Iterator<Item = &str> {
 }
 
 /// A record removed as a mistake, and every file that is gone. One id can
-/// claim two files after an interrupted archive move; leaving no trace
-/// means leaving neither.
+/// claim two files after a move interrupted in either direction; leaving
+/// no trace means leaving neither.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Expunged {
     pub id: String,
@@ -204,6 +204,15 @@ pub struct Archived {
     /// The report Notes this call filed alongside, in the order the record
     /// names them.
     pub carried: Vec<String>,
+    pub already: bool,
+}
+
+/// A record moved back out of the archive; `already` marks the replay.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Restored {
+    pub id: String,
+    pub from: String,
+    pub to: String,
     pub already: bool,
 }
 
@@ -491,8 +500,9 @@ impl FileFinding {
 ///
 /// The host spells it as a command. A finding on a line no verb writes
 /// carries none, and neither does one on a file no verb can reach by id —
-/// a record in the archive, in the wrong directory, or under a filename
-/// that is no id.
+/// a record in the wrong directory, or under a filename that is no id. On
+/// an archived file only the move that brings the record back is named;
+/// its other findings wait for the record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Repair {
     /// Erase the optional field on the finding's line.
@@ -503,6 +513,8 @@ pub enum Repair {
     Unhold,
     /// File the settled record where it belongs.
     Archive,
+    /// Bring the record back where the verbs can reach it.
+    Restore,
 }
 
 #[cfg(test)]

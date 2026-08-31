@@ -537,47 +537,6 @@ fn a_line_in_many_cycles_is_named_once() {
 mod unreadable_files {
     use crate::*;
 
-    /// [`MemoryStorage`] holds strings, so the adapter's duty is simulated:
-    /// the marked paths answer reads with [`StorageError::NotUtf8`].
-    struct BinaryHolding {
-        inner: MemoryStorage,
-        binary: Vec<String>,
-    }
-
-    impl BinaryHolding {
-        fn with_binary_at(path: &str, files: &[(&str, &str)]) -> Self {
-            let mut all: Vec<(&str, &str)> = files.to_vec();
-            all.push((path, ""));
-            BinaryHolding {
-                inner: MemoryStorage::from_files(all),
-                binary: vec![path.to_owned()],
-            }
-        }
-    }
-
-    impl Storage for BinaryHolding {
-        fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
-            self.inner.list(dir)
-        }
-
-        fn read(&self, path: &str) -> Result<String, StorageError> {
-            if self.binary.iter().any(|held| held == path) {
-                return Err(StorageError::NotUtf8 {
-                    path: path.to_owned(),
-                });
-            }
-            self.inner.read(path)
-        }
-
-        fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
-            self.inner.write(path, content)
-        }
-
-        fn remove(&mut self, path: &str) -> Result<(), StorageError> {
-            self.inner.remove(path)
-        }
-    }
-
     #[test]
     fn check_names_the_file_with_the_not_utf8_finding() {
         let storage = &mut BinaryHolding::with_binary_at("tasks/task.binary.md", &[]);

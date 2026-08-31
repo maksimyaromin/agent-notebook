@@ -12,11 +12,12 @@ mod dependencies;
 mod edit;
 mod lifecycle;
 mod queries;
+mod restore;
 mod status;
 
 use anb_core::{
     Blocker, Budget, CitedProof, DebtSignal, Draft, Edit, FindingCode, Link, MemoryStorage,
-    Notebook, NotebookError, Proof, RecordType, Storage, StorageError, Transitioned,
+    Notebook, NotebookError, Proof, RecordType, Repair, Storage, StorageError, Transitioned,
 };
 
 const TODAY: &str = "2026-08-27";
@@ -53,5 +54,68 @@ fn moved(id: &str, from: &'static str, to: &'static str) -> Transitioned {
         from,
         to,
         already: false,
+    }
+}
+
+/// [`MemoryStorage`] whose `remove` always fails — the crash between a
+/// move's write and its remove.
+struct RemoveFails(MemoryStorage);
+
+impl Storage for RemoveFails {
+    fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
+        self.0.list(dir)
+    }
+    fn read(&self, path: &str) -> Result<String, StorageError> {
+        self.0.read(path)
+    }
+    fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
+        self.0.write(path, content)
+    }
+    fn remove(&mut self, path: &str) -> Result<(), StorageError> {
+        Err(StorageError::Io {
+            path: path.to_owned(),
+            detail: "refused".to_owned(),
+        })
+    }
+}
+
+/// [`MemoryStorage`] holds strings, so the adapter's duty is simulated:
+/// the marked paths answer reads with [`StorageError::NotUtf8`].
+struct BinaryHolding {
+    inner: MemoryStorage,
+    binary: Vec<String>,
+}
+
+impl BinaryHolding {
+    fn with_binary_at(path: &str, files: &[(&str, &str)]) -> Self {
+        let mut all: Vec<(&str, &str)> = files.to_vec();
+        all.push((path, ""));
+        BinaryHolding {
+            inner: MemoryStorage::from_files(all),
+            binary: vec![path.to_owned()],
+        }
+    }
+}
+
+impl Storage for BinaryHolding {
+    fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
+        self.inner.list(dir)
+    }
+
+    fn read(&self, path: &str) -> Result<String, StorageError> {
+        if self.binary.iter().any(|held| held == path) {
+            return Err(StorageError::NotUtf8 {
+                path: path.to_owned(),
+            });
+        }
+        self.inner.read(path)
+    }
+
+    fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
+        self.inner.write(path, content)
+    }
+
+    fn remove(&mut self, path: &str) -> Result<(), StorageError> {
+        self.inner.remove(path)
     }
 }

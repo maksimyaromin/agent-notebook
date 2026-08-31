@@ -93,6 +93,7 @@ pub fn render(reply: &Reply) -> String {
         }
         Reply::Checked { findings, all } => checked_value(findings, *all),
         Reply::Archived(moved) => archived_value(moved),
+        Reply::Restored(moved) => restored_value(moved),
         Reply::Expunged(gone) => json!({"ok": "expunge", "id": gone.id, "paths": gone.paths}),
         Reply::Edited(edited) => edited_value(edited),
         Reply::Searched { rows, all, .. } => json!({
@@ -231,6 +232,16 @@ fn archived_value(moved: &anb_core::Archived) -> Value {
         ("from", json!(moved.from)),
         ("to", json!(moved.to)),
         ("carried", consequence(&moved.carried, |id| json!(id))),
+        ("already", json!(moved.already)),
+    ]))
+}
+
+fn restored_value(moved: &anb_core::Restored) -> Value {
+    Value::Object(fields([
+        ("ok", json!("restore")),
+        ("id", json!(moved.id)),
+        ("from", json!(moved.from)),
+        ("to", json!(moved.to)),
         ("already", json!(moved.already)),
     ]))
 }

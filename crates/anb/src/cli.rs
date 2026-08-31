@@ -142,6 +142,8 @@ pub enum Command {
     },
     /// Move a settled record into the archive; history moves with it.
     Archive { id: String },
+    /// Move an archived record back into the working set: same filename, same bytes.
+    Restore { id: String },
     /// Delete a record born by mistake; refuses while anything cites it.
     Expunge { id: String },
     /// Correct a live record's own fields; state stays a command's move.
