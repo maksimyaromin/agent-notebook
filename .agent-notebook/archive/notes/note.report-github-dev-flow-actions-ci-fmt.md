@@ -1,7 +1,7 @@
 ---
 id: note.report-github-dev-flow-actions-ci-fmt
 type: note
-state: active
+state: retired
 title: Report: GitHub dev-flow: Actions CI (fmt + clippy + tests)
 by: Maksim Yaromin
 from: task.github-dev-flow-actions-ci-fmt-clippy-te
