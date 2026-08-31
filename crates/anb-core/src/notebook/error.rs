@@ -16,7 +16,7 @@ pub enum NotebookError {
         id: String,
     },
     /// The record exists only in the archive; archived records are read,
-    /// never mutated in place.
+    /// never mutated in place — `restore` moves one back.
     Archived {
         id: String,
     },

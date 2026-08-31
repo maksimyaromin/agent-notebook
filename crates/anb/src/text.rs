@@ -82,6 +82,7 @@ pub fn render(reply: &Reply, today: &str) -> String {
         Reply::Viewed { view, all } => single_record(view, *all),
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
         Reply::Archived(moved) => archive_lines(moved),
+        Reply::Restored(moved) => restore_lines(moved),
         Reply::Expunged(gone) => format!(
             "ok: expunge {} — {} removed\n",
             gone.id,
@@ -184,13 +185,23 @@ fn archive_lines(moved: &anb_core::Archived) -> String {
     let mut out = if moved.already {
         format!("ok: archive {} — archived (already)\n", moved.id)
     } else {
-        format!(
-            "ok: archive {} — {}\u{2192}{}\n",
-            moved.id, moved.from, moved.to
-        )
+        move_line("archive", &moved.id, &moved.from, &moved.to)
     };
     named_line(&mut out, "carried", &moved.carried, ROW_BOUND, None);
     out
+}
+
+fn restore_lines(moved: &anb_core::Restored) -> String {
+    if moved.already {
+        format!("ok: restore {} — live (already)\n", moved.id)
+    } else {
+        move_line("restore", &moved.id, &moved.from, &moved.to)
+    }
+}
+
+/// The move line `archive` and `restore` share: one record, one direction.
+fn move_line(verb: &str, id: &str, from: &str, to: &str) -> String {
+    format!("ok: {verb} {id} — {from}\u{2192}{to}\n")
 }
 
 /// Body text under its `body: |` header: every line indented, and an empty

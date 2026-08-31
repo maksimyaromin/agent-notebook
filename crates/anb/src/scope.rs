@@ -53,6 +53,7 @@ fn writes_work(command: &Command) -> bool {
         | Command::Ready { .. }
         | Command::Check { .. }
         | Command::Archive { .. }
+        | Command::Restore { .. }
         | Command::Expunge { .. }
         | Command::Edit(_)
         | Command::Graph(_)

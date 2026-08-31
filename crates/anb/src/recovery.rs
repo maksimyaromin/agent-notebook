@@ -41,6 +41,7 @@ pub fn subject(command: &Command) -> Subject {
         Command::Status { .. } => ("status", None),
         Command::Check { .. } => ("check", None),
         Command::Archive { id } => ("archive", Some(id)),
+        Command::Restore { id } => ("restore", Some(id)),
         Command::Expunge { id } => ("expunge", Some(id)),
         Command::Edit(args) => ("edit", Some(&args.id)),
         Command::Search { .. } => ("search", None),
@@ -89,7 +90,14 @@ impl Recovery {
                 }
                 recovery.tries.push("anb list".to_owned());
             }
-            NotebookError::Archived { id } | NotebookError::WrongType { id, .. } => {
+            // `view` leads: it is right on every archived record, while
+            // `restore` pulls settled history back into the working set —
+            // right only when the reader means to.
+            NotebookError::Archived { id } => {
+                recovery.tries.push(format!("anb view {id}"));
+                recovery.tries.push(format!("anb restore {id}"));
+            }
+            NotebookError::WrongType { id, .. } => {
                 recovery.tries.push(format!("anb view {id}"));
             }
             NotebookError::InvalidRecord { path, findings } => {

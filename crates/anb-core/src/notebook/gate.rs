@@ -1,6 +1,9 @@
 //! The mutation gate: how a verb gets from an id to bytes it may write.
 //!
-//! Every write passes through here, and it leaves by one of two doors. A
+//! Every write derived from a record the notebook read passes through
+//! here, and it leaves by one of two doors. `restore` writes outside the
+//! gate — it moves bytes it never reads as a record — which is how a
+//! record carrying error findings can stand at a live path at all. A
 //! [`LoadedLive`] is a record cleared for mutation — the verb splices and
 //! writes it itself. A [`Repairing`] is a record read *over* its error
 //! findings, for the verbs that erase them; it keeps those findings and

@@ -1,15 +1,16 @@
 ---
 id: decision.a-repair-is-progress-not-perfection
 type: decision
-state: active
+state: superseded
 kind: rule
 title: A repair is progress, not perfection
 by: Maksim Yaromin
 via: claude-code
 from: decision.a-check-finding-names-the-move-that
 tags: cli
+superseded-by: decision.a-repair-is-progress-and-the-archive-has
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-08-31
 ---
 
 Refines decision.a-check-finding-names-the-move-that, which is archived and cannot be superseded in place. Two clauses were wrong there and one was missing.

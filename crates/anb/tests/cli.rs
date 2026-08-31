@@ -550,7 +550,7 @@ mod task_cycle_replies {
     }
 
     #[test]
-    fn an_archived_record_suggests_viewing_it() {
+    fn an_archived_record_suggests_viewing_it_and_the_way_back() {
         let mut storage = storage_with(&[(
             "archive/tasks/task.done.md".to_owned(),
             record_file("task.done", "task", "closed", "Shipped work", &[], ""),
@@ -560,6 +560,7 @@ mod task_cycle_replies {
             @r"
         error[archived]: `task.done` is archived
         try: anb view task.done
+        try: anb restore task.done
         "
         );
     }
@@ -1663,13 +1664,15 @@ fn every_command_the_tool_offers_can_be_typed_back() {
         anb_core::Repair::Unblock("task.other".to_owned()),
         anb_core::Repair::Unhold,
         anb_core::Repair::Archive,
+        anb_core::Repair::Restore,
     ];
     for repair in &repairs {
         match repair {
             anb_core::Repair::Clear(_)
             | anb_core::Repair::Unblock(_)
             | anb_core::Repair::Unhold
-            | anb_core::Repair::Archive => {}
+            | anb_core::Repair::Archive
+            | anb_core::Repair::Restore => {}
         }
     }
     let command = Cli::command();
@@ -1850,18 +1853,16 @@ mod maintenance_replies {
         }
     }
 
-    /// A verb resolves an id to the one live path its type dictates, so a
-    /// record it could never arrive at is a record it cannot repair — and a
-    /// row that named a command anyway would send an agent in a circle.
+    /// A correcting verb resolves an id to the one live path its type
+    /// dictates, and the archive is reached only to be moved back or
+    /// deleted — so a record at neither canonical path is a record no verb
+    /// can repair, and a row that named a command anyway would send an
+    /// agent in a circle.
     #[test]
     fn a_finding_on_a_record_no_verb_can_reach_names_no_repair() {
         let broken =
             |id: &str| record_file(id, "task", "open", "A demo record", &["priority: 9"], "");
         let mut storage = storage_with(&[
-            (
-                "archive/tasks/task.filed.md".to_owned(),
-                broken("task.filed"),
-            ),
             ("notes/task.stray.md".to_owned(), broken("task.stray")),
             ("tasks/weird.md".to_owned(), broken("task.nameless")),
         ]);
@@ -1873,6 +1874,41 @@ mod maintenance_replies {
                 "no verb reaches this file: {finding}"
             );
         }
+    }
+
+    /// The archive is reachable by exactly one verb, so the only repair
+    /// named on an archived file is the residence move itself; what is
+    /// broken deeper inside gets its repair once the record is back.
+    #[test]
+    fn an_archived_record_names_restore_for_its_residence_finding_alone() {
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.filed.md".to_owned(),
+            record_file(
+                "task.filed",
+                "task",
+                "open",
+                "A demo record",
+                &["priority: 9"],
+                "",
+            ),
+        )]);
+        let report: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["check", "--json", "--all"])).unwrap();
+        let repair_of = |code: &str| {
+            report["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|finding| finding["code"] == code)
+                .unwrap_or_else(|| panic!("{code} must be reported"))
+                .get("repair")
+                .cloned()
+        };
+        assert_eq!(
+            repair_of("archived-live-record"),
+            Some(serde_json::json!("anb restore task.filed"))
+        );
+        assert_eq!(repair_of("bad-value"), None);
     }
 
     /// The first finding that names a repair, as the command line to run.
@@ -1943,6 +1979,25 @@ mod maintenance_replies {
         assert_snapshot!(
             ok(&mut storage, &["archive", "task.demo"]),
             @"ok: archive task.demo — archived (already)"
+        );
+    }
+
+    #[test]
+    fn a_restore_is_the_archive_move_made_back() {
+        let mut storage = storage_with(&[closed_task("task.demo")]);
+        ok(&mut storage, &["archive", "task.demo"]);
+        assert_snapshot!(
+            ok(&mut storage, &["restore", "task.demo"]),
+            @"ok: restore task.demo — archive/tasks/task.demo.md→tasks/task.demo.md"
+        );
+    }
+
+    #[test]
+    fn a_replayed_restore_answers_already() {
+        let mut storage = storage_with(&[closed_task("task.demo")]);
+        assert_snapshot!(
+            ok(&mut storage, &["restore", "task.demo"]),
+            @"ok: restore task.demo — live (already)"
         );
     }
 
@@ -3112,6 +3167,18 @@ mod json_maintenance_surface {
     }
 
     #[test]
+    fn restore_confirms_the_move_back() {
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.demo.md".to_owned(),
+            record_file("task.demo", "task", "closed", "A demo record", &[], ""),
+        )]);
+        assert_eq!(
+            ok(&mut storage, &["restore", "task.demo", "--json"]),
+            r#"{"ok":"restore","id":"task.demo","from":"archive/tasks/task.demo.md","to":"tasks/task.demo.md","already":false}"#
+        );
+    }
+
+    #[test]
     fn edit_names_what_changed_and_the_nudge() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         assert_eq!(
@@ -3178,13 +3245,15 @@ mod the_global_scope {
 
     /// The verbs the rule admits beyond those, each for a reason the
     /// Global Notebook would be crippled without: knowledge corrected in
-    /// place and verified, settled knowledge filed and mistakes erased, and
-    /// the two whole-notebook reads. Their rows are empty of tasks and
-    /// questions rather than absent, so the output contract is one contract.
+    /// place and verified, settled knowledge filed and brought back,
+    /// mistakes erased, and the whole-notebook reads. Their rows are empty
+    /// of tasks and questions rather than absent, so the output contract
+    /// is one contract.
     const ALSO_ADMITTED: &[&[&str]] = &[
         &["edit", "note.demo", "--title", "A sharper fact"],
         &["check"],
         &["archive", "note.demo"],
+        &["restore", "note.demo"],
         &["expunge", "note.demo"],
         &["overview"],
         &["status"],

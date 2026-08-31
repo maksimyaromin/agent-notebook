@@ -110,6 +110,7 @@ fn writes(command: &Command) -> bool {
         | Command::Answer { .. }
         | Command::Retire { .. }
         | Command::Archive { .. }
+        | Command::Restore { .. }
         | Command::Expunge { .. }
         | Command::Edit(_) => true,
         Command::Ready { .. }
