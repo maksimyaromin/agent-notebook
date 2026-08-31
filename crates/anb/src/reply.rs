@@ -10,8 +10,8 @@ use anb_core::encode::ROW_BOUND;
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited,
     Expunged, FileFinding, Focus, Graph, GraphSlice, Held, Link, ListedRecord, Notebook,
-    NotebookError, Overview, Proof, ReadyTask, RecordType, Repair, Status, Storage, StorageError,
-    Transitioned, View, path_stem,
+    NotebookError, Overview, Proof, ReadyTask, RecordType, Repair, Restored, Status, Storage,
+    StorageError, Transitioned, View, path_stem,
 };
 use std::fmt::Write as _;
 
@@ -43,6 +43,7 @@ pub fn repair_command(repair: &Repair, path: &str) -> String {
         Repair::Unblock(on) => format!("anb unblock {id} {on}"),
         Repair::Unhold => format!("anb unhold {id}"),
         Repair::Archive => format!("anb archive {id}"),
+        Repair::Restore => format!("anb restore {id}"),
     }
 }
 
@@ -96,6 +97,7 @@ pub enum Reply {
         all: bool,
     },
     Archived(Archived),
+    Restored(Restored),
     Expunged(Expunged),
     Edited(Edited),
     Searched {
@@ -244,6 +246,7 @@ pub fn execute(
             all,
         }),
         Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id, today)?)),
+        Command::Restore { id } => Ok(Reply::Restored(notebook.restore(&id)?)),
         Command::Expunge { id } => Ok(Reply::Expunged(notebook.expunge(&id)?)),
         Command::Edit(args) => edited(&mut notebook, args, today),
         Command::Search { query, all } => Ok(Reply::Searched {

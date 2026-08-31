@@ -13,7 +13,7 @@ use crate::record::{
 };
 use crate::reply::{FileFinding, Repair};
 use crate::request::CLEARABLE;
-use crate::resolve::{Resolver, path_stem, record_path, type_of};
+use crate::resolve::{Resolver, canonical_paths, is_archived, path_stem};
 use crate::storage::StorageError;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -75,10 +75,11 @@ impl Notebook<'_> {
 
 /// Name the move that erases each finding, where the notebook has one.
 ///
-/// A repair is only ever named on a file a verb can reach: every mutation
-/// resolves an id to the live path its type dictates, so a record in the
-/// archive, in the wrong directory, or under a filename that is no id has
-/// no move at all — whatever is wrong inside it.
+/// A repair is only ever named on a file a verb can reach: every
+/// correcting verb resolves an id to the one live path its type dictates,
+/// and the archived path is reached only to be moved back or deleted — so
+/// a record in the wrong directory or under a filename that is no id has
+/// no move at all, whatever is wrong inside it.
 fn name_repairs(located: &mut [FileFinding], records: &[Record]) {
     let by_path: BTreeMap<&str, &Record> = records
         .iter()
@@ -94,13 +95,19 @@ fn name_repairs(located: &mut [FileFinding], records: &[Record]) {
 
 /// Whether a verb naming this file's stem would arrive at this very file.
 fn reachable_by_id(path: &str) -> bool {
-    let id = path_stem(path);
-    type_of(id).is_some_and(|record_type| record_path(id, record_type, false) == path)
+    canonical_paths(path_stem(path)).any(|canonical| canonical == path)
 }
 
-/// A settled record still in the working set is filed by `archive`; every
-/// other repair is the verb that erases the line the finding sits on.
+/// A record on the wrong side of the residence axis is moved home by
+/// `archive` or `restore`; every other repair is the verb that erases the
+/// line the finding sits on. On an archived file the only move worth
+/// naming is `restore`, and it erases only the residence disagreement — a
+/// finding deeper inside becomes repairable when the record is back, so
+/// naming its eraser here would name a command that refuses to run.
 fn repair_of(finding: &Finding, record: &Record) -> Option<Repair> {
+    if is_archived(record.path()) {
+        return (finding.code == FindingCode::ArchivedLiveRecord).then_some(Repair::Restore);
+    }
     match finding.code {
         FindingCode::UnarchivedSettledRecord => Some(Repair::Archive),
         _ => eraser_of(record, finding.line?),

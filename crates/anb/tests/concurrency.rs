@@ -208,6 +208,7 @@ fn the_lock_is_taken_by_every_writing_verb_and_by_no_reading_one() {
         &["answer", "question.absent", "--drop", "moot"],
         &["retire", "decision.absent"],
         &["archive", "task.absent"],
+        &["restore", "task.absent"],
         &["expunge", "task.absent"],
         &["edit", "task.absent", "--title", "New"],
     ];

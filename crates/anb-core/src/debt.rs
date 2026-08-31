@@ -121,9 +121,9 @@ impl DebtSignal {
 /// among them may resolve to — existence checks run against the resolver,
 /// never against storage.
 pub(crate) struct DebtSources<'a> {
-    /// The live records. Every clock and every hint is about what a reader
-    /// can act on today, and no verb reaches into the archive, so no signal
-    /// here opens a filed record — the resolver answers for them by name.
+    /// The live records. Every clock and every hint is about the work
+    /// still in play, and a filed record is not that, so no signal here
+    /// opens one — the resolver answers for them by name.
     pub records: &'a [Record],
     pub resolvable: &'a Resolver<'a>,
     pub today_day: i64,

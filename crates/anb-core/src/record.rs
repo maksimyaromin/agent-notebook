@@ -405,9 +405,10 @@ fn semantic_findings(file: &RecordFile) -> Vec<Finding> {
 /// Reading is not the axis — the archive is history, and history is meant
 /// to be readable. Moving is: a verb that acts on an existing record
 /// resolves its id against the live directory and refuses an archived one.
-/// So a record that binds from inside the archive can never be settled,
-/// corrected, or filed, while a settled record still in the working set is
-/// one command from its home. That gap is the whole severity split.
+/// So a record that binds from inside the archive cannot be settled,
+/// corrected, or filed until `restore` brings it back, while a settled
+/// record still in the working set is one command from its home. That gap
+/// is the whole severity split.
 fn residence_finding(path: &str, file: &RecordFile) -> Option<Finding> {
     let type_word = file.field("type")?;
     let record_type = RecordType::from_word(type_word)?;
