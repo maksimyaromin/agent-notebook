@@ -5,6 +5,7 @@ state: open
 title: Claude Code skill: the notebook drawn and decided on in one page
 by: Maksim Yaromin
 from: task.graph-the-data-surface-every-drawing-is
+blocked-by: task.improvements
 created: 2026-08-30
 updated: 2026-08-31
 ---
