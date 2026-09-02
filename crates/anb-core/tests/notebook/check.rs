@@ -564,6 +564,28 @@ mod unreadable_files {
         }
     }
 
+    /// Bytes no parse can read hold their place as a foreign record's
+    /// would: the move is refused, and the live record stays where it was.
+    #[test]
+    fn a_live_record_does_not_move_onto_unreadable_bytes() {
+        let text = task_file("closed", &[]);
+        let storage = &mut BinaryHolding::with_binary_at(
+            "archive/tasks/task.demo.md",
+            &[("tasks/task.demo.md", &text)],
+        );
+        let refusal = Notebook::new(storage)
+            .archive("task.demo", TODAY)
+            .unwrap_err();
+        assert!(
+            matches!(
+                refusal,
+                NotebookError::DuplicateId { ref holder, .. } if holder == "archive/tasks/task.demo.md"
+            ),
+            "{refusal:?}"
+        );
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+    }
+
     #[test]
     fn the_listing_shows_the_file_as_invalid_instead_of_aborting() {
         let text = record_file("task.a", "task", "open", &[], "");

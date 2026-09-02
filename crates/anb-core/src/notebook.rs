@@ -1106,10 +1106,11 @@ impl<'a> Notebook<'a> {
     ///
     /// # Errors
     /// [`NotebookError::InvalidTransition`] on a record still live, naming
-    /// the commands that settle it, [`NotebookError::InvalidRecord`] or
-    /// [`NotebookError::DuplicateId`] on a report that cannot be filed —
-    /// answered before anything moves — plus the resolution errors of
-    /// [`Notebook::close`].
+    /// the commands that settle it; [`NotebookError::InvalidRecord`] or
+    /// [`NotebookError::DuplicateId`] on a report that cannot be filed, and
+    /// [`NotebookError::DuplicateId`] on a destination held by anything but
+    /// this record's own copy — both answered before anything moves; plus
+    /// the resolution errors of [`Notebook::close`].
     pub fn archive(&mut self, id: &str, today: &str) -> Result<Archived, NotebookError> {
         write::guard_today(today)?;
         let record_type = write::parsed_type(id)?;
