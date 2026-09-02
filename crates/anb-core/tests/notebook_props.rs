@@ -71,11 +71,14 @@ fn verb() -> impl Strategy<Value = Verb> {
 }
 
 /// A parseable task in any state, with the quirks the splice must preserve:
-/// an unknown field, an optional standing hold, assorted body shapes, CRLF.
-fn generated_task() -> impl Strategy<Value = String> {
+/// an unknown field, an optional standing hold, an optional edge onto the
+/// blocker, assorted body shapes, CRLF. Whether the edge stands is answered
+/// beside the text, because the edge verbs are held to it.
+fn generated_task() -> impl Strategy<Value = (String, bool)> {
     let state = prop_oneof![Just("open"), Just("active"), Just("review"), Just("closed")];
     let custom = proptest::option::of("[a-zA-Z0-9 ]{0,12}");
     let held = any::<bool>();
+    let blocked = any::<bool>();
     let body = prop_oneof![
         Just(""),
         Just("body\n"),
@@ -83,30 +86,35 @@ fn generated_task() -> impl Strategy<Value = String> {
         Just("---\nfake: envelope\n---\n")
     ];
     let crlf = any::<bool>();
-    (state, custom, held, body, crlf).prop_map(|(state, custom, held, body, crlf)| {
-        let mut text = format!("---\nid: task.demo\ntype: task\nstate: {state}\n");
-        if let Some(custom) = custom {
-            text.push_str("custom: ");
-            text.push_str(&custom);
-            text.push('\n');
-        }
-        text.push_str("title: A generated task\n");
-        if held {
-            text.push_str("hold: a standing reason\n");
-        }
-        text.push_str("created: 2026-08-24\n---\n");
-        if crlf {
-            text = text.replace('\n', "\r\n");
-        }
-        text.push_str(body);
-        text
-    })
+    (state, custom, held, blocked, body, crlf).prop_map(
+        |(state, custom, held, blocked, body, crlf)| {
+            let mut text = format!("---\nid: task.demo\ntype: task\nstate: {state}\n");
+            if let Some(custom) = custom {
+                text.push_str("custom: ");
+                text.push_str(&custom);
+                text.push('\n');
+            }
+            text.push_str("title: A generated task\n");
+            if blocked {
+                text.push_str("blocked-by: task.blocker\n");
+            }
+            if held {
+                text.push_str("hold: a standing reason\n");
+            }
+            text.push_str("created: 2026-08-24\n---\n");
+            if crlf {
+                text = text.replace('\n', "\r\n");
+            }
+            text.push_str(body);
+            (text, blocked)
+        },
+    )
 }
 
 proptest! {
     #[test]
     fn a_replayed_verb_changes_no_byte_and_never_touches_a_bystander(
-        task in generated_task(),
+        (task, _) in generated_task(),
         verb in verb(),
     ) {
         let mut storage = MemoryStorage::from_files([
@@ -147,6 +155,32 @@ proptest! {
             storage.read(BLOCKER_PATH).unwrap(),
             BLOCKER,
             "an edge lives on the dependent alone; the blocker's bytes stay"
+        );
+    }
+}
+
+fn edge_verb() -> impl Strategy<Value = Verb> {
+    prop_oneof![Just(Verb::Block), Just(Verb::Unblock)]
+}
+
+proptest! {
+    /// The edge verbs answer for the edge as the file carries it: `block`
+    /// finds one already standing, `unblock` erases one that stands. Replay
+    /// identity alone cannot tell an edge a quirk hid from the verb apart
+    /// from a replay, since both leave every byte alone and answer
+    /// `already`.
+    #[test]
+    fn an_edge_verb_answers_for_the_edge_the_file_carries(
+        (task, carries_edge) in generated_task(),
+        verb in edge_verb(),
+    ) {
+        let mut storage =
+            MemoryStorage::from_files([(TASK_PATH, task.as_str()), (BLOCKER_PATH, BLOCKER)]);
+        let leaves_it_standing = matches!(verb, Verb::Block);
+        prop_assert_eq!(
+            apply(&mut storage, verb),
+            Ok(carries_edge == leaves_it_standing),
+            "an edge verb answers for the edge the file carries"
         );
     }
 }

@@ -1,7 +1,21 @@
 //! anb-core — the rules of the game.
 //!
 //! The Core runs with no filesystem, git, or network access: all data flows
-//! through the [`Storage`] seam, fed by the host.
+//! through the [`Storage`] seam, fed by the host. A host embeds it by handing
+//! a [`Notebook`] an adapter and the day's date:
+//!
+//! ```
+//! use anb_core::{Draft, MemoryStorage, Notebook, NotebookError, RecordType};
+//!
+//! let today = "2026-09-02";
+//! let mut storage = MemoryStorage::new();
+//! let mut notebook = Notebook::new(&mut storage);
+//! let created = notebook.create(&Draft::new(RecordType::Task, "Parse the fences"), today)?;
+//! assert_eq!(created.id, "task.parse-the-fences");
+//! notebook.start(&created.id, today)?;
+//! assert_eq!(notebook.record(&created.id)?.state(), Some("active"));
+//! # Ok::<(), NotebookError>(())
+//! ```
 
 // Every name a host can reach has exactly one path: the flat re-export
 // below, or one of these two namespaces a caller reads as one.

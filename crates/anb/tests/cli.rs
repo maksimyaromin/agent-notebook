@@ -876,6 +876,20 @@ mod knowledge_replies {
         );
     }
 
+    /// `add` mints Tasks alone: a dangling reference to another type has
+    /// no command that would create it, so none is offered.
+    #[test]
+    fn a_dangling_reference_to_another_type_offers_no_creating_command() {
+        let mut storage = MemoryStorage::new();
+        assert_snapshot!(
+            refused(&mut storage, &["ask", "A doubt", "--from", "note.ghost"]),
+            @r"
+        error[dangling-ref]: from: `note.ghost` names no record
+        try: anb list
+        "
+        );
+    }
+
     #[test]
     fn answer_routes_the_question_into_what_its_answer_became() {
         let mut storage = storage_with(&[
