@@ -916,6 +916,69 @@ mod epics {
         );
     }
 
+    /// A scope narrows what is shown, never what is read: a row inside
+    /// it is resolved against every record, so an Origin lying outside
+    /// the scope is a record the notebook holds, not a dangling one.
+    #[test]
+    fn a_scoped_row_is_resolved_against_the_whole_notebook() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.epic.md",
+                &record_file(
+                    "task.epic",
+                    "task",
+                    "open",
+                    &["blocked-by: task.child", "blocked-by: task.adopted"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.child.md",
+                &record_file("task.child", "task", "open", &["from: task.epic"], ""),
+            ),
+            (
+                "tasks/task.adopted.md",
+                &record_file(
+                    "task.adopted",
+                    "task",
+                    "open",
+                    &["from: task.elsewhere"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.elsewhere.md",
+                &record_file("task.elsewhere", "task", "open", &[], ""),
+            ),
+        ]);
+        let notebook = Notebook::new(&mut storage);
+        let states: Vec<(String, String)> = notebook
+            .list_for("task.epic")
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.id, row.state))
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                ("task.adopted".to_owned(), "open".to_owned()),
+                ("task.child".to_owned(), "open".to_owned()),
+                ("task.epic".to_owned(), "open".to_owned()),
+            ],
+            "an Origin outside the scope is still a record the notebook holds"
+        );
+        assert_eq!(
+            notebook
+                .ready_for("task.epic")
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<Vec<String>>(),
+            vec!["task.adopted", "task.child"],
+            "the verdict is the unscoped queue's, narrowed"
+        );
+    }
+
     #[test]
     fn a_tier_assembled_from_the_hub_side_is_still_reached() {
         // The shape of an epic older than the edit surface: the middle tier

@@ -927,4 +927,30 @@ mod archive_verb {
         assert!(storage.read("archive/notes/note.loop.md").is_ok());
         assert!(storage.read("notes/note.loop.md").is_err());
     }
+
+    /// A link hand-edited into duplicates names one report, and the
+    /// cascade files it once: a move per line would have the second one
+    /// fail on a source the first had already removed.
+    #[test]
+    fn a_report_linked_twice_is_carried_once() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.demo.md",
+                &task_file(
+                    "closed",
+                    &["link: note note.report", "link: note note.report"],
+                ),
+            ),
+            (
+                "notes/note.report.md",
+                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
+            ),
+        ]);
+
+        let moved = Notebook::new(&mut storage)
+            .archive("task.demo", TODAY)
+            .unwrap();
+
+        assert_eq!(moved.carried, ["note.report"]);
+    }
 }
