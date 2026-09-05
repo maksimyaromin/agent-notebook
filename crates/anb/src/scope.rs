@@ -63,6 +63,7 @@ fn writes_work(command: &Command) -> bool {
         | Command::Graph(_)
         | Command::Overview { .. }
         | Command::Status { .. }
-        | Command::Setup { .. } => false,
+        | Command::Setup { .. }
+        | Command::Skill { .. } => false,
     }
 }

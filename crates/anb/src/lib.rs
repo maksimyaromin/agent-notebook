@@ -13,4 +13,5 @@ pub mod recovery;
 pub mod reply;
 pub mod scope;
 pub mod setup;
+pub mod skill;
 pub mod text;
