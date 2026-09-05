@@ -7,9 +7,28 @@ metadata:
 
 # anb refusals
 
-Generated from the binary — the same definitions `anb --help` prints, every example run on a scratch notebook; a committed copy is checked against this rendering in CI.
+Generated from the binary: the same definitions `anb --help` prints, and every example run on a scratch notebook. A committed copy is checked against this rendering in CI.
 
-Every refusal is `error[<code>]: <message>` and then `try:` lines — commands that run as printed. The codes are stable; the messages name the record and the fact.
+## Contents
+
+- The scratch notebook
+- unknown-id
+- invalid-transition
+- invalid-argument
+- dangling-ref
+- would-cycle
+- duplicate-id
+- wrong-type
+- still-referenced
+- cannot-supersede
+- archived
+- invalid-record
+- Codes without an example
+- Check findings
+
+Every refusal is `error[<code>]: <message>` followed by `try:` lines, which are commands that run as printed. The codes are stable; the messages name the record and the fact.
+
+## The scratch notebook
 
 The scratch notebook the refusals below run against:
 
@@ -33,7 +52,9 @@ $ anb add note Fence --kind term
 ok: add note.fence — notes/note.fence.md
 ```
 
-`unknown-id`: no record carries the id.
+## unknown-id
+
+No record carries the id.
 
 ```
 $ anb start task.parser
@@ -41,7 +62,9 @@ error[unknown-id]: no record `task.parser`
 try: anb list
 ```
 
-`invalid-transition`: the record's state does not allow the move; the valid moves are listed, each with its command.
+## invalid-transition
+
+The record's state does not allow the move; the valid moves are listed, each with its command.
 
 ```
 $ anb close task.ship-the-parser --no-proof
@@ -50,7 +73,9 @@ try: anb start task.ship-the-parser
 try: anb close task.ship-the-parser --reason "<why>"
 ```
 
-`invalid-argument`: a flag or value is malformed or foreign to the record; the retry shape is given.
+## invalid-argument
+
+A flag or value is malformed or foreign to the record; the retry shape is given.
 
 ```
 $ anb add decision Tabs --priority 2
@@ -66,7 +91,9 @@ try: anb close task.ship-the-parser --no-proof
 try: anb close task.ship-the-parser --reason "<why>"
 ```
 
-`dangling-ref`: an envelope reference names a record that does not exist.
+## dangling-ref
+
+An envelope reference names a record that does not exist.
 
 ```
 $ anb add task "A child" --from task.ghost
@@ -75,7 +102,9 @@ try: anb add task "<title>" --id task.ghost
 try: anb list
 ```
 
-`would-cycle`: the edge would close a dependency cycle, which is walked in full.
+## would-cycle
+
+The edge would close a dependency cycle, which is walked in full.
 
 ```
 $ anb block task.ship-the-parser task.grammar-parser-accepts-fences
@@ -88,7 +117,9 @@ error[would-cycle]: the edge would close a dependency cycle: task.grammar-parser
 try: anb unblock task.ship-the-parser task.grammar-parser-accepts-fences
 ```
 
-`duplicate-id`: ids are never reused, the archive included.
+## duplicate-id
+
+Ids are never reused, the archive included.
 
 ```
 $ anb add task "Ship the parser again" --id task.ship-the-parser
@@ -97,7 +128,9 @@ try: anb show task.ship-the-parser
 try: anb add task "<title>"
 ```
 
-`wrong-type`: the id names a type the command does not act on.
+## wrong-type
+
+The id names a type the command does not act on.
 
 ```
 $ anb comment note.fence "a line"
@@ -105,7 +138,9 @@ error[wrong-type]: `note.fence` is not a task
 try: anb show note.fence
 ```
 
-`still-referenced`: a delete would leave the notebook pointing at nothing; every holder is named.
+## still-referenced
+
+A delete would leave the notebook pointing at nothing; every holder is named.
 
 ```
 $ anb delete task.ship-the-parser
@@ -114,7 +149,9 @@ error[still-referenced]: `task.ship-the-parser` is still referenced by 1 record
 try: anb show task.grammar-parser-accepts-fences
 ```
 
-`cannot-supersede`: the record named by `--supersedes` cannot die by supersession.
+## cannot-supersede
+
+The record named by `--supersedes` cannot die by supersession.
 
 ```
 $ anb retire decision.fences-never-nest
@@ -126,7 +163,9 @@ $ anb add decision "Fences nest once" --kind rule --supersedes decision.fences-n
 error[cannot-supersede]: cannot supersede `decision.fences-never-nest`: its state is `retired`, not active
 ```
 
-`archived`: an archived record is read, never mutated in place; `restore` brings it back.
+## archived
+
+An archived record is read, never mutated in place; `restore` brings it back.
 
 ```
 $ anb archive decision.fences-never-nest
@@ -140,7 +179,9 @@ try: anb show decision.fences-never-nest
 try: anb restore decision.fences-never-nest
 ```
 
-`invalid-record`: the file carries error findings, which close it to every verb until `check` is answered.
+## invalid-record
+
+The file carries error findings, which close it to every verb until `check` is answered.
 
 ```
 $ anb start task.broken
@@ -148,6 +189,8 @@ error[invalid-record]: tasks/task.broken.md is invalid (1 findings)
   line 4: bad-value state: `bogus` is not one of open, active, review, closed for a task
 try: anb show task.broken
 ```
+
+## Codes without an example
 
 Three more codes reach the command line without a notebook to show them on: `unknown-command` (a verb anb does not have; the reply offers `anb --help`), `storage` (the file system failed the read or write, in the message) and `not-utf8` (a record file is not UTF-8; `anb check` names it).
 

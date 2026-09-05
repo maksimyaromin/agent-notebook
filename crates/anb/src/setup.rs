@@ -108,6 +108,9 @@ enum Pending {
     Text(PathBuf, String),
     Settings(PathBuf, Value),
     Delete(PathBuf),
+    /// A file under a directory setup owns whole: the file goes, and so does
+    /// every directory this leaves empty, up to and including that one.
+    DeleteUnder(PathBuf, PathBuf),
 }
 
 /// Install into, or remove from, the project at `project`. Every file is
@@ -170,7 +173,10 @@ fn plan_skill_file(
         return Ok(left_alone(shown, Outcome::Yours));
     }
     let (outcome, pending) = match (remove, existing) {
-        (true, Some(_)) => (Outcome::Removed, Some(Pending::Delete(path))),
+        (true, Some(_)) => (
+            Outcome::Removed,
+            Some(Pending::DeleteUnder(path, project.join(dir))),
+        ),
         (true, None) => (Outcome::Absent, None),
         (false, Some(text)) if text == rendered => (Outcome::Already, None),
         (false, _) => (
@@ -191,15 +197,10 @@ fn perform(pending: Pending) -> Result<(), NotebookError> {
     match pending {
         Pending::Text(path, text) => write_text(&path, &text),
         Pending::Settings(path, settings) => write_settings(&path, &settings),
-        Pending::Delete(path) => {
+        Pending::Delete(path) => fs::remove_file(&path).map_err(|error| io_failure(&path, &error)),
+        Pending::DeleteUnder(path, root) => {
             fs::remove_file(&path).map_err(|error| io_failure(&path, &error))?;
-            // A skill directory setup emptied is setup's leftover; a directory
-            // holding anything else stays.
-            if let Some(dir) = path.parent()
-                && dir.ends_with("skills/anb")
-            {
-                let _ = fs::remove_dir(dir);
-            }
+            remove_emptied_dirs(&path, &root);
             Ok(())
         }
     }
@@ -503,6 +504,18 @@ fn read_settings(path: &Path, file: &str) -> Result<Value, NotebookError> {
     serde_json::from_str(&text).map_err(|error| NotebookError::InvalidArgument {
         reason: format!("setup: {file} is not JSON ({error}) — fix it or move it aside"),
     })
+}
+
+/// A directory setup emptied is setup's leftover; one holding anything else
+/// stays, and nothing above `root` is ever touched.
+fn remove_emptied_dirs(file: &Path, root: &Path) {
+    let mut dir = file.parent();
+    while let Some(emptied) = dir.filter(|dir| dir.starts_with(root)) {
+        if fs::remove_dir(emptied).is_err() || emptied == root {
+            return;
+        }
+        dir = emptied.parent();
+    }
 }
 
 fn write_text(path: &Path, text: &str) -> Result<(), NotebookError> {

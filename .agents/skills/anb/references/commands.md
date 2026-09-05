@@ -7,7 +7,35 @@ metadata:
 
 # anb commands
 
-Generated from the binary — the same definitions `anb --help` prints, every example run on a scratch notebook; a committed copy is checked against this rendering in CI.
+Generated from the binary: the same definitions `anb --help` prints, and every example run on a scratch notebook. A committed copy is checked against this rendering in CI.
+
+## Contents
+
+- anb add
+- anb start
+- anb submit
+- anb close
+- anb reopen
+- anb hold
+- anb unhold
+- anb block
+- anb unblock
+- anb comment
+- anb retire
+- anb ready
+- anb list
+- anb show
+- anb status
+- anb check
+- anb archive
+- anb restore
+- anb delete
+- anb edit
+- anb search
+- anb graph
+- anb overview
+- anb setup
+- anb skill
 
 Global flags on every command: `--json` (compact JSON instead of text), `--notebook <PATH>` (where the notebook lives, outranking `ANB_NOTEBOOK`), `--global` (the user's notebook in the home directory; refused beside `--notebook`).
 
