@@ -25,7 +25,7 @@ A notebook with nothing to say says so in one line and stops:
 
 ```
 $ anb status
-ok: notebook quiet — 2 tasks, 1 decisions, 0 notes, 0 questions. anb --help when needed.
+ok: notebook quiet — 2 tasks, 1 decision, 0 notes, 0 questions. anb --help when needed.
 ```
 
 A held Task is not in flight, so it never prints as `active:`; it waits in `held` with its reason. Over budget, sections collapse one rung at a time, counts before rows, and the first `active:` line survives every rung. `--budget <N>` sets the ceiling for one call, `0` lifts it; the `budget` key in `.agent-notebook/config` sets the default of 1500. The [Status reference](../reference/status.md) has the rungs and the Debt clocks.

@@ -5,6 +5,7 @@ use crate::encode;
 use crate::finding::Finding;
 use crate::record::RecordType;
 use crate::reply::{Blocker, carriers_of};
+use crate::status::counted;
 use crate::storage::StorageError;
 
 /// One variant per outcome a caller tells apart; the CLI turns each into a
@@ -100,7 +101,11 @@ impl std::fmt::Display for NotebookError {
             NotebookError::UnknownId { id } => write!(f, "no record `{id}`"),
             NotebookError::Archived { id } => write!(f, "`{id}` is archived"),
             NotebookError::InvalidRecord { path, findings } => {
-                write!(f, "{path} is invalid ({} findings)", findings.len())
+                write!(
+                    f,
+                    "{path} is invalid ({})",
+                    counted(findings.len(), "finding")
+                )
             }
             NotebookError::WrongType { id, expected } => {
                 write!(f, "`{id}` is not {expected}")
@@ -117,9 +122,8 @@ impl std::fmt::Display for NotebookError {
                 write!(f, "`{id}` already exists at {holder}")
             }
             NotebookError::StillReferenced { id, blockers } => {
-                let records = carriers_of(blockers).count();
-                let unit = if records == 1 { "record" } else { "records" };
-                write!(f, "`{id}` is still referenced by {records} {unit}")
+                let records = counted(carriers_of(blockers).count(), "record");
+                write!(f, "`{id}` is still referenced by {records}")
             }
             NotebookError::DanglingRef { field, target } => {
                 write!(f, "{field}: `{target}` names no record")

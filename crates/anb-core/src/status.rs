@@ -269,9 +269,22 @@ fn quiet_line(counts: &Counts) -> String {
 #[must_use]
 pub fn counts_phrase(counts: &Counts) -> String {
     format!(
-        "{} tasks, {} decisions, {} notes, {} questions",
-        counts.tasks, counts.decisions, counts.notes, counts.questions
+        "{}, {}, {}, {}",
+        counted(counts.tasks, "task"),
+        counted(counts.decisions, "decision"),
+        counted(counts.notes, "note"),
+        counted(counts.questions, "question")
     )
+}
+
+/// Regular nouns only: every noun a reply counts takes a plain `s`.
+#[must_use]
+pub fn counted(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
 }
 
 /// One full render under a ladder state, budget line included. The spent

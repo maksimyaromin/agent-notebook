@@ -69,7 +69,7 @@ Status is what a session opens with: the active Task with its last log line, the
 
 ```
 $ anb status
-ok: notebook — 1 tasks, 1 decisions, 0 notes, 0 questions
+ok: notebook — 1 task, 1 decision, 0 notes, 0 questions
 active: task.parser-accepts-fenced-bodies "Parser accepts fenced bodies"
 log: "- 2026-09-05 Alex: fences parse; the indented-body case is next"
 rules[1]:
@@ -154,7 +154,7 @@ $ anb hold task.negative-corpus-wired-into-ci --reason "waits for the corpus lic
 ok: hold task.negative-corpus-wired-into-ci — held
 
 $ anb status
-ok: notebook quiet — 2 tasks, 1 decisions, 0 notes, 0 questions. anb --help when needed.
+ok: notebook quiet — 2 tasks, 1 decision, 0 notes, 0 questions. anb --help when needed.
 ```
 
 Tables like `ready[1]{id,priority,age,title}:` name their columns once and print comma rows. Listings are bounded; `--all` lifts the bound, and `--json` on any command gives the same data as compact JSON.

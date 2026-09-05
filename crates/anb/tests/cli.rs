@@ -540,7 +540,7 @@ mod task_cycle_replies {
         assert_snapshot!(
             refused(&mut storage, &["start", "task.demo"]),
             @r"
-        error[invalid-record]: tasks/task.demo.md is invalid (1 findings)
+        error[invalid-record]: tasks/task.demo.md is invalid (1 finding)
           line 4: bad-value state: `cancelled` is not one of open, active, review, closed for a task
         try: anb show task.demo
         "
@@ -1369,7 +1369,7 @@ mod session_status {
         )]);
         assert_eq!(
             ok(&mut storage, &["status"]),
-            "ok: notebook quiet — 1 tasks, 0 decisions, 0 notes, 0 questions. anb --help when needed.\n"
+            "ok: notebook quiet — 1 task, 0 decisions, 0 notes, 0 questions. anb --help when needed.\n"
         );
     }
 
@@ -2558,12 +2558,12 @@ mod overview_reply {
         assert_snapshot!(
             ok(&mut storage, &["overview"]),
             @r"
-        notebook: 1 tasks, 1 decisions, 0 notes, 0 questions
+        notebook: 1 task, 1 decision, 0 notes, 0 questions
         tasks[1]{id,state,priority,title}:
           task.a,open,-,A demo record
         decisions[1]{id,state,priority,title}:
           decision.d,active,-,A ruling
-        archive: 1 tasks, 0 decisions, 0 notes, 0 questions
+        archive: 1 task, 0 decisions, 0 notes, 0 questions
         "
         );
     }

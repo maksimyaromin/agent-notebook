@@ -71,7 +71,7 @@ What the next session opens with:
 
 ```
 $ anb status
-ok: notebook — 1 tasks, 1 decisions, 0 notes, 0 questions
+ok: notebook — 1 task, 1 decision, 0 notes, 0 questions
 active: task.parser-accepts-fenced-bodies "Parser accepts fenced bodies"
 log: "- 2026-09-05 Alex: fences parse; the indented-body case is next"
 rules[1]:

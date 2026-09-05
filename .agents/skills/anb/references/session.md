@@ -133,7 +133,7 @@ Status opens the session with the active Task and its last log line, the rules, 
 
 ```
 $ anb status --budget 0
-ok: notebook — 3 tasks, 2 decisions, 1 notes, 0 questions
+ok: notebook — 3 tasks, 2 decisions, 1 note, 0 questions
 active: task.grammar-parser-accepts-fences "Grammar parser accepts fences"
 log: "- 2026-01-15 Ada: fences parse; the indented-body case is next"
 rules[2]:
@@ -141,7 +141,7 @@ rules[2]:
   decision.fences-never-nest: "Fences never nest"
 epics[1]:
   task.ship-the-parser: 0/2 closed — nothing ready
-budget: ~122 tokens (no ceiling)
+budget: ~121 tokens (no ceiling)
 ```
 
 ## Closing a Task
