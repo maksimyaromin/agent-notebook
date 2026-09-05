@@ -1091,3 +1091,189 @@ mod reconciliation {
         );
     }
 }
+
+/// `setup` through the real binary: the files an agent reads at session
+/// start, written into the project, patched in place, and taken out again
+/// leaving no trace of their own.
+mod setup {
+    use super::*;
+    use std::process::{Command, Output};
+
+    fn anb(project: &Path, line: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_anb"))
+            .args(line)
+            .current_dir(project)
+            .env("HOME", project)
+            .env_remove("ANB_NOTEBOOK")
+            .output()
+            .expect("the binary runs")
+    }
+
+    fn ok(project: &Path, line: &[&str]) -> String {
+        let output = anb(project, line);
+        assert!(
+            output.status.success(),
+            "`anb {}` failed: {}",
+            line.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("output is UTF-8")
+    }
+
+    fn read(project: &Path, file: &str) -> String {
+        fs::read_to_string(project.join(file)).unwrap_or_else(|_| panic!("{file} is there"))
+    }
+
+    #[test]
+    fn setup_writes_the_snippet_and_both_hooks_and_a_second_run_changes_nothing() {
+        let project = TempDir::new().unwrap();
+        let first = ok(project.path(), &["setup"]);
+        assert_eq!(
+            first,
+            "ok: setup — 4 files\n  AGENTS.md: written\n  CLAUDE.md: written\n  .claude/settings.json: written\n  .codex/hooks.json: written\nnotice: Codex runs a project hook after you review it: run /hooks in Codex from this directory\n"
+        );
+        assert!(read(project.path(), "AGENTS.md").contains("<!-- anb:begin -->"));
+        assert!(read(project.path(), "CLAUDE.md").contains("<!-- anb:begin -->"));
+        let settings: serde_json::Value =
+            serde_json::from_str(&read(project.path(), ".claude/settings.json")).unwrap();
+        assert_eq!(
+            settings["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            serde_json::json!("anb status --hook")
+        );
+        let codex: serde_json::Value =
+            serde_json::from_str(&read(project.path(), ".codex/hooks.json")).unwrap();
+        assert_eq!(
+            codex["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            serde_json::json!("anb status --hook")
+        );
+
+        let agents_before = read(project.path(), "AGENTS.md");
+        let second = ok(project.path(), &["setup"]);
+        assert_eq!(
+            second,
+            "ok: setup — 4 files\n  AGENTS.md: already\n  CLAUDE.md: already\n  .claude/settings.json: already\n  .codex/hooks.json: already\n",
+            "a re-run finds its own lines and adds nothing"
+        );
+        assert_eq!(read(project.path(), "AGENTS.md"), agents_before);
+    }
+
+    #[test]
+    fn setup_keeps_what_other_tools_wrote_and_remove_takes_out_only_its_own() {
+        let project = TempDir::new().unwrap();
+        fs::write(
+            project.path().join("AGENTS.md"),
+            "# Our guide\n\nRead the docs.\n",
+        )
+        .unwrap();
+        fs::create_dir_all(project.path().join(".claude")).unwrap();
+        fs::write(
+            project.path().join(".claude/settings.json"),
+            "{\n  \"permissions\": {\"allow\": [\"Bash(ls)\"]},\n  \"hooks\": {\"SessionStart\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"other-tool prime\"}]}]}\n}\n",
+        )
+        .unwrap();
+        ok(project.path(), &["setup"]);
+        let agents = read(project.path(), "AGENTS.md");
+        assert!(
+            agents.starts_with("# Our guide\n\nRead the docs.\n"),
+            "{agents}"
+        );
+        let settings: serde_json::Value =
+            serde_json::from_str(&read(project.path(), ".claude/settings.json")).unwrap();
+        assert_eq!(
+            settings["permissions"]["allow"][0],
+            serde_json::json!("Bash(ls)")
+        );
+        assert_eq!(
+            settings["hooks"]["SessionStart"].as_array().unwrap().len(),
+            2
+        );
+
+        let removed = ok(project.path(), &["setup", "--remove"]);
+        assert_eq!(
+            removed,
+            "ok: setup --remove — 4 files\n  AGENTS.md: removed\n  CLAUDE.md: removed\n  .claude/settings.json: removed\n  .codex/hooks.json: removed\n"
+        );
+        assert_eq!(
+            read(project.path(), "AGENTS.md"),
+            "# Our guide\n\nRead the docs.\n"
+        );
+        assert!(
+            !project.path().join("CLAUDE.md").exists(),
+            "a file setup alone filled is gone"
+        );
+        let settings: serde_json::Value =
+            serde_json::from_str(&read(project.path(), ".claude/settings.json")).unwrap();
+        assert_eq!(
+            settings["hooks"]["SessionStart"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            settings["permissions"]["allow"][0],
+            serde_json::json!("Bash(ls)")
+        );
+        assert!(!project.path().join(".codex/hooks.json").exists());
+
+        let again = ok(project.path(), &["setup", "--remove"]);
+        assert!(again.contains("AGENTS.md: absent"), "{again}");
+    }
+
+    #[test]
+    fn a_claude_file_linked_to_the_agents_file_gets_one_line_not_two() {
+        let project = TempDir::new().unwrap();
+        fs::write(project.path().join("AGENTS.md"), "# Guide\n").unwrap();
+        std::os::unix::fs::symlink("AGENTS.md", project.path().join("CLAUDE.md")).unwrap();
+        let reply = ok(project.path(), &["setup"]);
+        assert!(reply.contains("CLAUDE.md: links AGENTS.md"), "{reply}");
+        assert_eq!(
+            read(project.path(), "AGENTS.md")
+                .matches("<!-- anb:begin -->")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_claude_file_importing_the_agents_file_is_left_alone() {
+        let project = TempDir::new().unwrap();
+        fs::write(
+            project.path().join("CLAUDE.md"),
+            "@AGENTS.md\n\n## Claude Code\n",
+        )
+        .unwrap();
+        let reply = ok(project.path(), &["setup"]);
+        assert!(reply.contains("CLAUDE.md: imports AGENTS.md"), "{reply}");
+        assert_eq!(
+            read(project.path(), "CLAUDE.md"),
+            "@AGENTS.md\n\n## Claude Code\n"
+        );
+    }
+
+    #[test]
+    fn a_settings_file_that_is_not_json_refuses_the_whole_setup_and_moves_nothing() {
+        let project = TempDir::new().unwrap();
+        fs::create_dir_all(project.path().join(".claude")).unwrap();
+        fs::write(project.path().join(".claude/settings.json"), "{ not json").unwrap();
+        let refused = anb(project.path(), &["setup"]);
+        assert!(!refused.status.success());
+        let payload = String::from_utf8(refused.stderr).unwrap();
+        assert!(
+            payload
+                .starts_with("error[invalid-argument]: setup: .claude/settings.json is not JSON"),
+            "{payload}"
+        );
+        assert_eq!(read(project.path(), ".claude/settings.json"), "{ not json");
+    }
+
+    #[test]
+    fn setup_refuses_the_users_notebook() {
+        let project = TempDir::new().unwrap();
+        let refused = anb(project.path(), &["setup", "--global"]);
+        assert!(!refused.status.success());
+        assert!(
+            String::from_utf8(refused.stderr)
+                .unwrap()
+                .contains("setup: installs into the project"),
+        );
+        assert!(!project.path().join("AGENTS.md").exists());
+    }
+}

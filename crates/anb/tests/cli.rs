@@ -67,6 +67,7 @@ fn run_behind(
         read_report,
         lost_proofs: &nothing_lost,
         user_notebook,
+        project_dir: std::path::Path::new("."),
         today: TODAY,
     };
     match execute(cli.command, storage, host) {
@@ -91,6 +92,7 @@ fn undated_host() -> Host<'static> {
         read_report: &missing_report,
         lost_proofs: &nothing_lost,
         user_notebook: None,
+        project_dir: std::path::Path::new("."),
         today: "not-a-date",
     }
 }
@@ -1710,6 +1712,8 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "list", "--global"],
         vec!["anb", "graph"],
         vec!["anb", "graph", "--for", "task.epic", "--ready"],
+        vec!["anb", "setup"],
+        vec!["anb", "setup", "--remove"],
         vec![
             "anb",
             "edit",
@@ -2027,6 +2031,7 @@ mod maintenance_replies {
                 read_report: &missing_report,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
+                project_dir: std::path::Path::new("."),
                 today: TODAY,
             },
         )
@@ -2056,6 +2061,7 @@ mod maintenance_replies {
                 read_report: &missing_report,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
+                project_dir: std::path::Path::new("."),
                 today: TODAY,
             },
         )
@@ -3354,6 +3360,11 @@ mod the_global_scope {
         &["graph"],
     ];
 
+    /// The verb refused the user's notebook for a reason of its own: setup
+    /// installs where a session starts, and no session starts in the
+    /// user's home notebook.
+    const NO_HOME: &[&[&str]] = &[&["setup"]];
+
     /// Every verb that creates or moves a task or a question.
     const WORK: &[&[&str]] = &[
         &["add", "task", "A task"],
@@ -3400,7 +3411,7 @@ mod the_global_scope {
 
     #[test]
     fn a_verb_that_writes_work_is_refused_the_users_notebook() {
-        for line in WORK {
+        for line in WORK.iter().chain(NO_HOME) {
             let refused = anb::scope::refused_globally(&parsed(line), true)
                 .unwrap_or_else(|| panic!("`anb {} --global` must be refused", line.join(" ")));
             assert_eq!(refused.code(), "invalid-argument");
@@ -3415,7 +3426,7 @@ mod the_global_scope {
     /// same command line is the project's to serve.
     #[test]
     fn no_verb_is_refused_the_project() {
-        for line in WORK.iter().chain(NAMED).chain(ALSO_ADMITTED) {
+        for line in WORK.iter().chain(NAMED).chain(ALSO_ADMITTED).chain(NO_HOME) {
             assert!(
                 anb::scope::refused_globally(&parsed(line), false).is_none(),
                 "`anb {}` names no scope and must not be refused one",
@@ -3432,6 +3443,7 @@ mod the_global_scope {
             .iter()
             .chain(ALSO_ADMITTED)
             .chain(WORK)
+            .chain(NO_HOME)
             .map(|line| line[0])
             .collect();
         let surface = Cli::command();

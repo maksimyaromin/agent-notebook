@@ -112,7 +112,8 @@ fn writes(command: &Command) -> bool {
         | Command::Graph(_)
         | Command::Check { .. }
         | Command::Search { .. }
-        | Command::Overview { .. } => false,
+        | Command::Overview { .. }
+        | Command::Setup { .. } => false,
     }
 }
 
