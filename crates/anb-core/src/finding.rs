@@ -55,6 +55,35 @@ pub enum FindingCode {
 }
 
 impl FindingCode {
+    /// Every code, in the order the grammar and the record model raise
+    /// them, for a surface that lists the vocabulary rather than one file's
+    /// findings.
+    pub const ALL: [FindingCode; 23] = [
+        FindingCode::NoEnvelope,
+        FindingCode::UnclosedEnvelope,
+        FindingCode::BadEnvelopeLine,
+        FindingCode::DuplicateField,
+        FindingCode::UnknownField,
+        FindingCode::MissingField,
+        FindingCode::BadValue,
+        FindingCode::BadDate,
+        FindingCode::BadId,
+        FindingCode::IdFilenameMismatch,
+        FindingCode::TypeDirMismatch,
+        FindingCode::ArchivedLiveRecord,
+        FindingCode::UnarchivedSettledRecord,
+        FindingCode::OrphanField,
+        FindingCode::DanglingRef,
+        FindingCode::BlockCycle,
+        FindingCode::OriginCycle,
+        FindingCode::DuplicateId,
+        FindingCode::BrokenSupersession,
+        FindingCode::NotUtf8,
+        FindingCode::Crlf,
+        FindingCode::Bom,
+        FindingCode::NoFinalNewline,
+    ];
+
     /// Where the line falls: a record whose finding closes it to the verbs
     /// that act on it is in error, while a record that stays usable as it
     /// is carries a warning, however untidy. An unfiled settled record
@@ -164,5 +193,50 @@ impl Finding {
             line,
             message: crate::encode::bounded_text(message),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_code_is_listed_once() {
+        // The match is exhaustive over the enum: a variant added without
+        // its entry in ALL fails to compile here, beside the list it joins.
+        for code in FindingCode::ALL {
+            match code {
+                FindingCode::NoEnvelope
+                | FindingCode::UnclosedEnvelope
+                | FindingCode::BadEnvelopeLine
+                | FindingCode::DuplicateField
+                | FindingCode::UnknownField
+                | FindingCode::MissingField
+                | FindingCode::BadValue
+                | FindingCode::BadDate
+                | FindingCode::BadId
+                | FindingCode::IdFilenameMismatch
+                | FindingCode::TypeDirMismatch
+                | FindingCode::ArchivedLiveRecord
+                | FindingCode::UnarchivedSettledRecord
+                | FindingCode::OrphanField
+                | FindingCode::DanglingRef
+                | FindingCode::BlockCycle
+                | FindingCode::OriginCycle
+                | FindingCode::DuplicateId
+                | FindingCode::BrokenSupersession
+                | FindingCode::NotUtf8
+                | FindingCode::Crlf
+                | FindingCode::Bom
+                | FindingCode::NoFinalNewline => {}
+            }
+        }
+        let distinct: std::collections::HashSet<FindingCode> =
+            FindingCode::ALL.into_iter().collect();
+        assert_eq!(
+            distinct.len(),
+            FindingCode::ALL.len(),
+            "a code is listed twice"
+        );
     }
 }

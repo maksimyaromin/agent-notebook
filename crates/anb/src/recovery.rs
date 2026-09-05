@@ -51,6 +51,7 @@ pub fn subject(command: &Command) -> Subject {
         Command::Graph(_) => ("graph", None),
         Command::Overview { .. } => ("overview", None),
         Command::Setup { .. } => ("setup", None),
+        Command::Skill { .. } => ("skill", None),
     };
     Subject {
         verb,

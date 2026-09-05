@@ -1,12 +1,16 @@
 //! `setup`: wire an agent's session start to the notebook, in the project.
 //!
-//! Two mechanisms, both marker-bounded so a re-run patches in place and
+//! Three mechanisms, each bounded so a re-run patches in place and
 //! `--remove` takes out only what setup put in: one descriptive line in the
 //! instruction files every agent reads — `AGENTS.md`, and `CLAUDE.md`, which
-//! Claude Code reads instead — and one `SessionStart` hook group in the
-//! settings Claude Code and Codex run hooks from. Other tools' lines and
-//! hook groups in the same files are never touched.
+//! Claude Code reads instead — between markers; one `SessionStart` hook
+//! group in the settings Claude Code and Codex run hooks from; and the anb
+//! skill files where each agent looks for skills, known as setup's own by
+//! the generated mark in their frontmatter. Other tools' lines and hook
+//! groups in the same files are never touched; a skill file the user made
+//! theirs is theirs.
 
+use crate::skill;
 use anb_core::{NotebookError, StorageError};
 use serde_json::{Map, Value, json};
 use std::fs;
@@ -33,6 +37,9 @@ const AGENTS_FILE: &str = "AGENTS.md";
 const CLAUDE_FILE: &str = "CLAUDE.md";
 const CLAUDE_SETTINGS: &str = ".claude/settings.json";
 const CODEX_HOOKS: &str = ".codex/hooks.json";
+/// Where each host looks for skills: Claude Code in its own directory,
+/// Codex and Pi in the shared one.
+const SKILL_DIRS: [&str; 2] = [".claude/skills/anb", ".agents/skills/anb"];
 
 /// What Codex asks of a project hook before it runs it, printed so a
 /// silent first session is not mistaken for a broken install.
@@ -54,6 +61,9 @@ pub enum Outcome {
     /// The file is a link to somewhere else. Writing through it would edit a
     /// file the project does not own, so setup leaves it as it found it.
     Linked,
+    /// A skill file whose frontmatter no longer says setup generated it: the
+    /// user made it theirs, and setup neither rewrites nor removes it.
+    Yours,
 }
 
 impl Outcome {
@@ -67,13 +77,14 @@ impl Outcome {
             Outcome::Imports => "imports AGENTS.md",
             Outcome::Links => "links AGENTS.md",
             Outcome::Linked => "a link, left alone",
+            Outcome::Yours => "yours, left alone",
         }
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Wired {
-    pub path: &'static str,
+    pub path: String,
     pub outcome: Outcome,
 }
 
@@ -108,12 +119,18 @@ enum Pending {
 /// instruction file carries a stray marker — setup rewrites nothing it
 /// cannot read back — or a storage failure on any read or write.
 pub fn apply(project: &Path, remove: bool) -> Result<SetUp, NotebookError> {
-    let plans = [
+    let mut plans = vec![
         plan_snippet(project, AGENTS_FILE, remove)?,
         plan_claude_file(project, remove)?,
         plan_hook(project, CLAUDE_SETTINGS, remove)?,
         plan_hook(project, CODEX_HOOKS, remove)?,
     ];
+    let rendered = skill::render();
+    for dir in SKILL_DIRS {
+        for (file, text) in rendered.files() {
+            plans.push(plan_skill_file(project, dir, file, text, remove)?);
+        }
+    }
     let mut files = Vec::new();
     for Planned { wired, pending } in plans {
         if let Some(pending) = pending {
@@ -131,11 +148,60 @@ pub fn apply(project: &Path, remove: bool) -> Result<SetUp, NotebookError> {
     })
 }
 
+/// A generated skill file: written where absent or stale, left alone once
+/// the user has made it theirs by dropping the generated mark.
+fn plan_skill_file(
+    project: &Path,
+    dir: &str,
+    file: &str,
+    rendered: &str,
+    remove: bool,
+) -> Result<Planned, NotebookError> {
+    let shown = format!("{dir}/{file}");
+    let path = project.join(dir).join(file);
+    if is_link(&path) {
+        return Ok(left_alone(shown, Outcome::Linked));
+    }
+    let existing = read_text(&path)?;
+    if existing
+        .as_deref()
+        .is_some_and(|text| !skill::is_generated(text))
+    {
+        return Ok(left_alone(shown, Outcome::Yours));
+    }
+    let (outcome, pending) = match (remove, existing) {
+        (true, Some(_)) => (Outcome::Removed, Some(Pending::Delete(path))),
+        (true, None) => (Outcome::Absent, None),
+        (false, Some(text)) if text == rendered => (Outcome::Already, None),
+        (false, _) => (
+            Outcome::Written,
+            Some(Pending::Text(path, rendered.to_owned())),
+        ),
+    };
+    Ok(Planned {
+        wired: Wired {
+            path: shown,
+            outcome,
+        },
+        pending,
+    })
+}
+
 fn perform(pending: Pending) -> Result<(), NotebookError> {
     match pending {
         Pending::Text(path, text) => write_text(&path, &text),
         Pending::Settings(path, settings) => write_settings(&path, &settings),
-        Pending::Delete(path) => fs::remove_file(&path).map_err(|error| io_failure(&path, &error)),
+        Pending::Delete(path) => {
+            fs::remove_file(&path).map_err(|error| io_failure(&path, &error))?;
+            // A skill directory setup emptied is setup's leftover; a directory
+            // holding anything else stays.
+            if let Some(dir) = path.parent()
+                && dir.ends_with("skills/anb")
+            {
+                let _ = fs::remove_dir(dir);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -163,7 +229,7 @@ fn plan_snippet(
     };
     Ok(Planned {
         wired: Wired {
-            path: file,
+            path: file.to_owned(),
             outcome,
         },
         pending,
@@ -189,10 +255,10 @@ fn plan_claude_file(project: &Path, remove: bool) -> Result<Planned, NotebookErr
     plan_snippet(project, CLAUDE_FILE, remove)
 }
 
-fn left_alone(file: &'static str, outcome: Outcome) -> Planned {
+fn left_alone(file: impl Into<String>, outcome: Outcome) -> Planned {
     Planned {
         wired: Wired {
-            path: file,
+            path: file.into(),
             outcome,
         },
         pending: None,
@@ -242,7 +308,7 @@ fn plan_hook(project: &Path, file: &'static str, remove: bool) -> Result<Planned
     };
     Ok(Planned {
         wired: Wired {
-            path: file,
+            path: file.to_owned(),
             outcome,
         },
         pending,

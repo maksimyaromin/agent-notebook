@@ -3,7 +3,8 @@
 //! programmatically. Pretty JSON is never emitted.
 
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, repair_command, shown};
+use crate::reply::{Reply, SkillReply, repair_command, shown};
+use crate::setup::SetUp;
 use anb_core::{
     Cited, Counts, DebtSignal, EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, GraphSlice,
     ListedRecord, NotebookError, Overview, ReadyTask, RecordType, SECTION_ROWS, Status, View,
@@ -14,20 +15,7 @@ use serde_json::{Map, Value, json};
 #[must_use]
 pub fn render(reply: &Reply) -> String {
     let value = match reply {
-        Reply::Created { command, created } => Value::Object(fields([
-            ("ok", json!(command)),
-            ("id", json!(created.id)),
-            ("path", json!(created.path)),
-            ("superseded", json!(created.superseded)),
-            (
-                "may-conflict",
-                consequence(&created.may_conflict, cited_value),
-            ),
-            (
-                "dangling-mention",
-                dangling_mentions(&created.dangling_mentions),
-            ),
-        ])),
+        Reply::Created { command, created } => created_value(command, created),
         Reply::Moved {
             command,
             transition,
@@ -82,20 +70,8 @@ pub fn render(reply: &Reply) -> String {
         Reply::Archived(moved) => archived_value(moved),
         Reply::Restored(moved) => restored_value(moved),
         Reply::Deleted(gone) => json!({"ok": "delete", "id": gone.id, "paths": gone.paths}),
-        Reply::SetUp(done) => Value::Object(fields([
-            ("ok", json!("setup")),
-            ("removed", json!(done.removed)),
-            (
-                "files",
-                json!(
-                    done.files
-                        .iter()
-                        .map(|wired| json!({"path": wired.path, "outcome": wired.outcome.word()}))
-                        .collect::<Vec<Value>>()
-                ),
-            ),
-            ("notice", json!(done.notice)),
-        ])),
+        Reply::Skill(skill) => skill_value(skill),
+        Reply::SetUp(done) => setup_value(done),
         Reply::Edited(edited) => edited_value(edited),
         Reply::Searched { rows, all, .. } => json!({
             "count": rows.len(),
@@ -148,6 +124,52 @@ pub fn hook_payload(status: &Status) -> String {
         }
     })
     .to_string()
+}
+
+fn created_value(command: &str, created: &anb_core::Created) -> Value {
+    Value::Object(fields([
+        ("ok", json!(command)),
+        ("id", json!(created.id)),
+        ("path", json!(created.path)),
+        ("superseded", json!(created.superseded)),
+        (
+            "may-conflict",
+            consequence(&created.may_conflict, cited_value),
+        ),
+        (
+            "dangling-mention",
+            dangling_mentions(&created.dangling_mentions),
+        ),
+    ]))
+}
+
+fn skill_value(skill: &SkillReply) -> Value {
+    match skill {
+        SkillReply::Printed(text) => json!({"ok": "skill", "skill": text}),
+        SkillReply::Written { dir, files } => json!({"ok": "skill", "dir": dir, "files": files}),
+        SkillReply::Checked { dir, drift } => json!({
+            "ok": "skill",
+            "dir": dir,
+            "drift": drift
+                .iter()
+                .map(|drift| json!({"file": drift.file, "reason": drift.reason}))
+                .collect::<Vec<Value>>(),
+        }),
+    }
+}
+
+fn setup_value(done: &SetUp) -> Value {
+    let files = done
+        .files
+        .iter()
+        .map(|wired| json!({"path": wired.path, "outcome": wired.outcome.word()}))
+        .collect::<Vec<Value>>();
+    Value::Object(fields([
+        ("ok", json!("setup")),
+        ("removed", json!(done.removed)),
+        ("files", json!(files)),
+        ("notice", json!(done.notice)),
+    ]))
 }
 
 fn closed_value(closed: &anb_core::Closed) -> Value {

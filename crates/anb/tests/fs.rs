@@ -1130,7 +1130,7 @@ mod setup {
         let first = ok(project.path(), &["setup"]);
         assert_eq!(
             first,
-            "ok: setup — 4 files\n  AGENTS.md: written\n  CLAUDE.md: written\n  .claude/settings.json: written\n  .codex/hooks.json: written\nnotice: Codex runs a project hook after you review it: run /hooks in Codex from this directory\n"
+            "ok: setup — 12 files\n  AGENTS.md: written\n  CLAUDE.md: written\n  .claude/settings.json: written\n  .codex/hooks.json: written\n  .claude/skills/anb/SKILL.md: written\n  .claude/skills/anb/commands.md: written\n  .claude/skills/anb/session.md: written\n  .claude/skills/anb/refusals.md: written\n  .agents/skills/anb/SKILL.md: written\n  .agents/skills/anb/commands.md: written\n  .agents/skills/anb/session.md: written\n  .agents/skills/anb/refusals.md: written\nnotice: Codex runs a project hook after you review it: run /hooks in Codex from this directory\n"
         );
         assert!(read(project.path(), "AGENTS.md").contains("<!-- anb:begin -->"));
         assert!(read(project.path(), "CLAUDE.md").contains("<!-- anb:begin -->"));
@@ -1151,7 +1151,7 @@ mod setup {
         let second = ok(project.path(), &["setup"]);
         assert_eq!(
             second,
-            "ok: setup — 4 files\n  AGENTS.md: already\n  CLAUDE.md: already\n  .claude/settings.json: already\n  .codex/hooks.json: already\n",
+            "ok: setup — 12 files\n  AGENTS.md: already\n  CLAUDE.md: already\n  .claude/settings.json: already\n  .codex/hooks.json: already\n  .claude/skills/anb/SKILL.md: already\n  .claude/skills/anb/commands.md: already\n  .claude/skills/anb/session.md: already\n  .claude/skills/anb/refusals.md: already\n  .agents/skills/anb/SKILL.md: already\n  .agents/skills/anb/commands.md: already\n  .agents/skills/anb/session.md: already\n  .agents/skills/anb/refusals.md: already\n",
             "a re-run finds its own lines and adds nothing"
         );
         assert_eq!(read(project.path(), "AGENTS.md"), agents_before);
@@ -1191,7 +1191,7 @@ mod setup {
         let removed = ok(project.path(), &["setup", "--remove"]);
         assert_eq!(
             removed,
-            "ok: setup --remove — 4 files\n  AGENTS.md: removed\n  CLAUDE.md: removed\n  .claude/settings.json: removed\n  .codex/hooks.json: removed\n"
+            "ok: setup --remove — 12 files\n  AGENTS.md: removed\n  CLAUDE.md: removed\n  .claude/settings.json: removed\n  .codex/hooks.json: removed\n  .claude/skills/anb/SKILL.md: removed\n  .claude/skills/anb/commands.md: removed\n  .claude/skills/anb/session.md: removed\n  .claude/skills/anb/refusals.md: removed\n  .agents/skills/anb/SKILL.md: removed\n  .agents/skills/anb/commands.md: removed\n  .agents/skills/anb/session.md: removed\n  .agents/skills/anb/refusals.md: removed\n"
         );
         assert_eq!(
             read(project.path(), "AGENTS.md"),
@@ -1212,6 +1212,10 @@ mod setup {
             serde_json::json!("Bash(ls)")
         );
         assert!(!project.path().join(".codex/hooks.json").exists());
+        assert!(
+            !project.path().join(".agents/skills/anb").exists(),
+            "a skill directory setup emptied is gone with its files"
+        );
 
         let again = ok(project.path(), &["setup", "--remove"]);
         assert!(again.contains("AGENTS.md: absent"), "{again}");
@@ -1275,5 +1279,98 @@ mod setup {
                 .contains("setup: installs into the project"),
         );
         assert!(!project.path().join("AGENTS.md").exists());
+    }
+}
+
+/// The skill through the real binary: rendered into a directory, checked
+/// against it, and installed by setup where each agent looks.
+mod skill {
+    use super::*;
+    use std::process::{Command, Output};
+
+    fn anb(project: &Path, line: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_anb"))
+            .args(line)
+            .current_dir(project)
+            .env("HOME", project)
+            .env_remove("ANB_NOTEBOOK")
+            .output()
+            .expect("the binary runs")
+    }
+
+    fn stdout(output: &Output) -> String {
+        String::from_utf8(output.stdout.clone()).expect("output is UTF-8")
+    }
+
+    #[test]
+    fn the_skill_is_written_checked_and_found_drifted_when_edited() {
+        let project = TempDir::new().unwrap();
+        let written = anb(project.path(), &["skill", "skills/anb"]);
+        assert!(written.status.success());
+        assert_eq!(
+            stdout(&written),
+            "ok: skill — 4 files written into skills/anb\n"
+        );
+        assert!(
+            fs::read_to_string(project.path().join("skills/anb/SKILL.md"))
+                .unwrap()
+                .starts_with("---\nname: anb\n")
+        );
+
+        let checked = anb(project.path(), &["skill", "skills/anb", "--check"]);
+        assert!(checked.status.success());
+        assert_eq!(
+            stdout(&checked),
+            "ok: skill — skills/anb matches the rendering\n"
+        );
+
+        let path = project.path().join("skills/anb/refusals.md");
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, text + "\nan edit by hand\n").unwrap();
+        fs::remove_file(project.path().join("skills/anb/SKILL.md")).unwrap();
+        let drifted = anb(project.path(), &["skill", "skills/anb", "--check"]);
+        assert!(
+            !drifted.status.success(),
+            "drift is a failing exit, so CI stops on it"
+        );
+        assert_eq!(
+            stdout(&drifted),
+            "skill: skills/anb has drifted from the rendering\n  SKILL.md: missing\n  refusals.md: differs from the rendering\ntry: anb skill skills/anb\n"
+        );
+
+        let as_json = anb(
+            project.path(),
+            &["--json", "skill", "skills/anb", "--check"],
+        );
+        assert!(!as_json.status.success());
+        assert_eq!(
+            stdout(&as_json),
+            r#"{"ok":"skill","dir":"skills/anb","drift":[{"file":"SKILL.md","reason":"missing"},{"file":"refusals.md","reason":"differs from the rendering"}]}
+"#
+        );
+    }
+
+    #[test]
+    fn a_skill_file_the_user_made_theirs_is_left_alone_by_setup() {
+        let project = TempDir::new().unwrap();
+        anb(project.path(), &["setup"]);
+        let path = project.path().join(".claude/skills/anb/SKILL.md");
+        let text = fs::read_to_string(&path).unwrap();
+        let theirs = text.replace("  generated: anb\n", "") + "\nOur team's own rule.\n";
+        fs::write(&path, &theirs).unwrap();
+
+        let rerun = stdout(&anb(project.path(), &["setup"]));
+        assert!(
+            rerun.contains(".claude/skills/anb/SKILL.md: yours, left alone"),
+            "{rerun}"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+
+        let removed = stdout(&anb(project.path(), &["setup", "--remove"]));
+        assert!(
+            removed.contains(".claude/skills/anb/SKILL.md: yours, left alone"),
+            "{removed}"
+        );
+        assert!(path.exists(), "a file the user owns is never deleted");
     }
 }

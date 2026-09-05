@@ -148,14 +148,25 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Wire the agents' session start to the notebook, in this directory:
-    /// the one-line snippet in `AGENTS.md` and `CLAUDE.md`, and the
-    /// `SessionStart` hook for Claude Code and Codex. Re-running patches in
-    /// place.
+    /// Wire the agents to the notebook, in this directory: the one-line
+    /// snippet in `AGENTS.md` and `CLAUDE.md`, the `SessionStart` hook for
+    /// Claude Code and Codex, and the anb skill where each agent looks for
+    /// skills. Re-running patches in place.
     Setup {
         /// Take out what setup put in, and nothing else.
         #[arg(long)]
         remove: bool,
+    },
+    /// The skill an agent learns the tool from, rendered from the binary:
+    /// printed, written into a directory, or checked against one.
+    Skill {
+        /// The skill directory to write `SKILL.md` and its references into;
+        /// omitted, `SKILL.md` prints.
+        dir: Option<std::path::PathBuf>,
+        /// Compare the directory with the rendering instead of writing it;
+        /// a difference is a failing exit, for CI.
+        #[arg(long, requires = "dir")]
+        check: bool,
     },
 }
 

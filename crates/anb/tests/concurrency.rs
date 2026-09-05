@@ -225,6 +225,7 @@ fn the_lock_is_taken_by_every_writing_verb_and_by_no_reading_one() {
         &["overview"],
         &["graph"],
         &["setup"],
+        &["skill"],
     ];
     every_verb_is_classified(&writes, &reads);
 
