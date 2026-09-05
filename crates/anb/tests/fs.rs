@@ -1130,7 +1130,7 @@ mod setup {
         let first = ok(project.path(), &["setup"]);
         assert_eq!(
             first,
-            "ok: setup — 12 files\n  AGENTS.md: written\n  CLAUDE.md: written\n  .claude/settings.json: written\n  .codex/hooks.json: written\n  .claude/skills/anb/SKILL.md: written\n  .claude/skills/anb/references/commands.md: written\n  .claude/skills/anb/references/session.md: written\n  .claude/skills/anb/references/refusals.md: written\n  .agents/skills/anb/SKILL.md: written\n  .agents/skills/anb/references/commands.md: written\n  .agents/skills/anb/references/session.md: written\n  .agents/skills/anb/references/refusals.md: written\nnotice: Codex runs a project hook after you review it: run /hooks in Codex from this directory\n"
+            "ok: setup — 18 files\n  AGENTS.md: written\n  CLAUDE.md: written\n  .claude/settings.json: written\n  .codex/hooks.json: written\n  .claude/skills/anb/SKILL.md: written\n  .claude/skills/anb/references/commands.md: written\n  .claude/skills/anb/references/session.md: written\n  .claude/skills/anb/references/refusals.md: written\n  .claude/skills/anb-atlas/SKILL.md: written\n  .claude/skills/anb-atlas/references/drawing.md: written\n  .claude/skills/anb-atlas/references/intent-loop.md: written\n  .agents/skills/anb/SKILL.md: written\n  .agents/skills/anb/references/commands.md: written\n  .agents/skills/anb/references/session.md: written\n  .agents/skills/anb/references/refusals.md: written\n  .agents/skills/anb-atlas/SKILL.md: written\n  .agents/skills/anb-atlas/references/drawing.md: written\n  .agents/skills/anb-atlas/references/intent-loop.md: written\nnotice: Codex runs a project hook after you review it: run /hooks in Codex from this directory\n"
         );
         assert!(read(project.path(), "AGENTS.md").contains("<!-- anb:begin -->"));
         assert!(read(project.path(), "CLAUDE.md").contains("<!-- anb:begin -->"));
@@ -1151,7 +1151,7 @@ mod setup {
         let second = ok(project.path(), &["setup"]);
         assert_eq!(
             second,
-            "ok: setup — 12 files\n  AGENTS.md: already\n  CLAUDE.md: already\n  .claude/settings.json: already\n  .codex/hooks.json: already\n  .claude/skills/anb/SKILL.md: already\n  .claude/skills/anb/references/commands.md: already\n  .claude/skills/anb/references/session.md: already\n  .claude/skills/anb/references/refusals.md: already\n  .agents/skills/anb/SKILL.md: already\n  .agents/skills/anb/references/commands.md: already\n  .agents/skills/anb/references/session.md: already\n  .agents/skills/anb/references/refusals.md: already\n",
+            "ok: setup — 18 files\n  AGENTS.md: already\n  CLAUDE.md: already\n  .claude/settings.json: already\n  .codex/hooks.json: already\n  .claude/skills/anb/SKILL.md: already\n  .claude/skills/anb/references/commands.md: already\n  .claude/skills/anb/references/session.md: already\n  .claude/skills/anb/references/refusals.md: already\n  .claude/skills/anb-atlas/SKILL.md: already\n  .claude/skills/anb-atlas/references/drawing.md: already\n  .claude/skills/anb-atlas/references/intent-loop.md: already\n  .agents/skills/anb/SKILL.md: already\n  .agents/skills/anb/references/commands.md: already\n  .agents/skills/anb/references/session.md: already\n  .agents/skills/anb/references/refusals.md: already\n  .agents/skills/anb-atlas/SKILL.md: already\n  .agents/skills/anb-atlas/references/drawing.md: already\n  .agents/skills/anb-atlas/references/intent-loop.md: already\n",
             "a re-run finds its own lines and adds nothing"
         );
         assert_eq!(read(project.path(), "AGENTS.md"), agents_before);
@@ -1191,7 +1191,7 @@ mod setup {
         let removed = ok(project.path(), &["setup", "--remove"]);
         assert_eq!(
             removed,
-            "ok: setup --remove — 12 files\n  AGENTS.md: removed\n  CLAUDE.md: removed\n  .claude/settings.json: removed\n  .codex/hooks.json: removed\n  .claude/skills/anb/SKILL.md: removed\n  .claude/skills/anb/references/commands.md: removed\n  .claude/skills/anb/references/session.md: removed\n  .claude/skills/anb/references/refusals.md: removed\n  .agents/skills/anb/SKILL.md: removed\n  .agents/skills/anb/references/commands.md: removed\n  .agents/skills/anb/references/session.md: removed\n  .agents/skills/anb/references/refusals.md: removed\n"
+            "ok: setup --remove — 18 files\n  AGENTS.md: removed\n  CLAUDE.md: removed\n  .claude/settings.json: removed\n  .codex/hooks.json: removed\n  .claude/skills/anb/SKILL.md: removed\n  .claude/skills/anb/references/commands.md: removed\n  .claude/skills/anb/references/session.md: removed\n  .claude/skills/anb/references/refusals.md: removed\n  .claude/skills/anb-atlas/SKILL.md: removed\n  .claude/skills/anb-atlas/references/drawing.md: removed\n  .claude/skills/anb-atlas/references/intent-loop.md: removed\n  .agents/skills/anb/SKILL.md: removed\n  .agents/skills/anb/references/commands.md: removed\n  .agents/skills/anb/references/session.md: removed\n  .agents/skills/anb/references/refusals.md: removed\n  .agents/skills/anb-atlas/SKILL.md: removed\n  .agents/skills/anb-atlas/references/drawing.md: removed\n  .agents/skills/anb-atlas/references/intent-loop.md: removed\n"
         );
         assert_eq!(
             read(project.path(), "AGENTS.md"),
@@ -1356,7 +1356,7 @@ mod skill {
         anb(project.path(), &["setup"]);
         let path = project.path().join(".claude/skills/anb/SKILL.md");
         let text = fs::read_to_string(&path).unwrap();
-        let theirs = text.replace("  generated: anb\n", "") + "\nOur team's own rule.\n";
+        let theirs = text.replace("  managed-by: anb\n", "") + "\nOur team's own rule.\n";
         fs::write(&path, &theirs).unwrap();
 
         let rerun = stdout(&anb(project.path(), &["setup"]));
@@ -1410,30 +1410,34 @@ mod skill {
         assert!(project.path().join(".claude/skills").is_dir());
         assert!(project.path().join(".agents/skills").is_dir());
         assert!(!project.path().join(".claude/skills/anb").exists());
+        assert!(!project.path().join(".claude/skills/anb-atlas").exists());
     }
 
     #[test]
     fn a_reference_the_user_made_theirs_is_left_alone_too() {
-        let project = TempDir::new().unwrap();
-        anb(project.path(), &["setup"]);
-        let path = project
-            .path()
-            .join(".agents/skills/anb/references/commands.md");
-        let theirs = fs::read_to_string(&path)
-            .unwrap()
-            .replace("  generated: anb\n", "");
-        fs::write(&path, &theirs).unwrap();
+        for file in [
+            ".agents/skills/anb/references/commands.md",
+            ".claude/skills/anb-atlas/references/drawing.md",
+        ] {
+            let project = TempDir::new().unwrap();
+            anb(project.path(), &["setup"]);
+            let path = project.path().join(file);
+            let theirs = fs::read_to_string(&path)
+                .unwrap()
+                .replace("  managed-by: anb\n", "");
+            fs::write(&path, &theirs).unwrap();
 
-        let rerun = stdout(&anb(project.path(), &["setup"]));
-        assert!(
-            rerun.contains(".agents/skills/anb/references/commands.md: yours, left alone"),
-            "{rerun}"
-        );
-        let removed = stdout(&anb(project.path(), &["setup", "--remove"]));
-        assert!(
-            removed.contains(".agents/skills/anb/references/commands.md: yours, left alone"),
-            "{removed}"
-        );
-        assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+            let rerun = stdout(&anb(project.path(), &["setup"]));
+            assert!(
+                rerun.contains(&format!("{file}: yours, left alone")),
+                "{rerun}"
+            );
+            let removed = stdout(&anb(project.path(), &["setup", "--remove"]));
+            assert!(
+                removed.contains(&format!("{file}: yours, left alone")),
+                "{removed}"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+        }
     }
 }

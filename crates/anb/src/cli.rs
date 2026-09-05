@@ -150,7 +150,7 @@ pub enum Command {
     },
     /// Wire the agents to the notebook, in this directory: the one-line
     /// snippet in `AGENTS.md` and `CLAUDE.md`, the `SessionStart` hook for
-    /// Claude Code and Codex, and the anb skill where each agent looks for
+    /// Claude Code and Codex, and the anb skills where each agent looks for
     /// skills. Re-running patches in place.
     Setup {
         /// Take out what setup put in, and nothing else.

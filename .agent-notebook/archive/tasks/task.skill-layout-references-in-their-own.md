@@ -1,13 +1,15 @@
 ---
 id: task.skill-layout-references-in-their-own
 type: task
-state: review
+state: closed
 title: Skill layout: references in their own directory, SKILL.md in the standard sections
 by: Maksim Yaromin
 from: task.skills
 tags: cli
+link: note note.report-skill-layout-references-in-their
 created: 2026-09-05
 updated: 2026-09-05
+closed: 2026-09-05
 ---
 
 Owner note during the marathon (2026-09-05): the references were dumped at the skill root, and the preferred shape is the one skill writers converge on — SKILL.md at the root with a description that says only when to use the skill, the body in the standard sections (overview, when to use, quick reference, the method, common mistakes), and every reference under references/ with a contents list at the top of any long one. Both skills anb ships follow this layout; anb setup installs and removes the nested files, and an emptied skill directory goes with them.
