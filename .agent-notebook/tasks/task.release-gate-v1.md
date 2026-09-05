@@ -28,3 +28,4 @@ updated: 2026-09-05
 ---
 
 Full Definition of Done: anb self-hosts its own development; SessionStart hooks deliver Status within Budget in Claude Code and Codex; negative corpus green; npx zero-install works; README/docs published; skill CI-checked; why-Rust answers amended into ADR 0006.
+- 2026-09-05 Maksim Yaromin: Marathon of 2026-09-05 done: every child closed, main green on CI, docs and Pages. The hub's acceptance close is the release itself and stays with the owner: the Cloudflare secrets and the domain, the history push from .tmp/release, the tag v0.1.0, the first npm publish with scripts/release/publish.sh, the Trusted Publisher, the repository's visibility, the ruleset. The summary Note lists every pull request, hold and Question.
