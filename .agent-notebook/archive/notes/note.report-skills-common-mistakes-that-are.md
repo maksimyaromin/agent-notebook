@@ -11,7 +11,7 @@ updated: 2026-09-05
 
 # Skills: mistakes that are real, and a page that stays out of the map's way (2026-09-05)
 
-Report for task.skills-common-mistakes-that-are-real-and, filed on two rulings the owner made after reading the public skills and the page a fresh session drew by the atlas skill.
+Report for task.skills-common-mistakes-that-are-real-and, filed on two rulings the maintainer made after reading the public skills and the page a fresh session drew by the atlas skill.
 
 ## The `anb` skill
 
@@ -36,6 +36,6 @@ The page a fresh session drew by the skill was faithful to its rules and wrong a
 
 The gate is green, the skill drift check included, and the docs check passes.
 
-## Smoke check
+## Review
 
-Sonnet 5, once, reproducing every row of the `anb` table on a scratch notebook: all eight held, and the check judged none banal. One should-fix taken: the last row led with the `duplicate-id` refusal, which fires only when `--id` names the taken id; the common path, `add` with the same title, mints `<id>-00` beside the archived record without a word, and the row now says so. Two nits taken: the collapsed-section row used a bracket notation the tool does not print for a collapsed section, and the atlas sentence about legends now says which facts get one and that degree, read from size, needs none. The atlas rules were held to the reference page's principles and to the ruling; every rule follows, and the one deviation (the panel opening on the body rather than the envelope) is the ruling itself. The gate and the docs check passed under the check as well.
+One review pass, reproducing every row of the `anb` table on a scratch notebook: all eight held, and the check judged none banal. One should-fix taken: the last row led with the `duplicate-id` refusal, which fires only when `--id` names the taken id; the common path, `add` with the same title, mints `<id>-00` beside the archived record without a word, and the row now says so. Two nits taken: the collapsed-section row used a bracket notation the tool does not print for a collapsed section, and the atlas sentence about legends now says which facts get one and that degree, read from size, needs none. The atlas rules were held to the reference page's principles and to the ruling; every rule follows, and the one deviation (the panel opening on the body rather than the envelope) is the ruling itself. The gate and the docs check passed under the check as well.

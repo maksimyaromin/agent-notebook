@@ -16,6 +16,6 @@ Delivered in `crates/anb-core`: `src/finding.rs` (Finding/FindingCode/Severity, 
 
 Acceptance criteria: render(parse(x)) == x byte-exact on any input (property-tested); normalize idempotent (property + corpus); negative corpus green — every almost-valid file yields named findings, bytes never rewritten while invalid. Gate (`./scripts/check.sh`) green; deliberate can-it-fail red runs performed on all three test layers.
 
-Owner rulings folded into code and `spec-anb-format.md`: slug minimum one character; id-prefix-vs-type coherence as `bad-id`; `no-final-newline` only when the file ends inside the envelope; `bad-envelope-line` is an error; a present field must satisfy its form (`by` alone admits empty); `crlf` once per file; `updated` not required on read. `not-utf8`/UTF-16 deferred to the fs adapter with the LLM-transparency duty recorded on task l3.
+Maintainer rulings folded into code and the format spec: slug minimum one character; id-prefix-vs-type coherence as `bad-id`; `no-final-newline` only when the file ends inside the envelope; `bad-envelope-line` is an error; a present field must satisfy its form (`by` alone admits empty); `crlf` once per file; `updated` not required on read. `not-utf8`/UTF-16 deferred to the fs adapter with the LLM-transparency duty recorded on task l3.
 
 Deferred by design: mutation splicing and `already: true` (c2), graph findings (c2/c3), config parsing (first caller's ticket).

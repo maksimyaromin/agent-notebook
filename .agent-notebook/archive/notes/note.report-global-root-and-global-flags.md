@@ -25,7 +25,7 @@ The task named six accepting verbs (`decide`, `note`, `retire`, `view`, `list`, 
 
 Three reasons: without `edit` a global Note can never be corrected in place, and knowledge addressed by name is the whole use case; without `check` the one tool that can name a corruption cannot look at the user's notebook; and `ready` answering an empty queue is exactly as truthful as `status` and `overview` printing `0 tasks` in that scope, which they do either way — refusing one while the other two answer zero gives two answers to one question.
 
-`question.should-the-global-scope-accept-more-than` puts this to the owner with the narrower alternative.
+`question.should-the-global-scope-accept-more-than` puts this to the maintainer with the narrower alternative.
 
 ## The residual hole, named
 
@@ -35,7 +35,7 @@ No `ANB_GLOBAL_NOTEBOOK`: a user whose notebook is not at `~/.agent-notebook` re
 
 ## What the review found
 
-An independent Opus 5 review returned 13 items. The serious ones were mine.
+An independent review returned 13 items. The serious ones were mine.
 
 1. **A relative `HOME` was unguarded.** Reproduced: the personal note landed inside the git repository, and the same `--global` from a subdirectory read an empty notebook — both silently. This is the failure `notebook_root`'s own doc comment forbids for `ANB_NOTEBOOK`, and my defence ("consistent with the flag rung") did not transfer: a relative `--notebook` is typed by a caller who knows their cwd, while `HOME` is not typed at all. Now refused.
 2. **`chosen_root` was a shallow module.** It computed half a decision and left its single caller to compose the rest, and nothing stopped a later caller from calling `notebook_root` alone and dropping `--global`. Folded in: one interface, one `Result`, the whole precedence in one place.

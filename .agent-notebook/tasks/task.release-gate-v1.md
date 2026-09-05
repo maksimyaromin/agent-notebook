@@ -19,13 +19,11 @@ blocked-by: task.global-notebook
 blocked-by: task.skills
 blocked-by: task.readme-the-page-a-stranger-reads-first
 blocked-by: task.docs-site-full-usable-published-on
-blocked-by: task.commit-history-carries-no-agent
 blocked-by: task.agents-md-rewritten-for-a-public
-blocked-by: task.public-text-carries-no-internal
 blocked-by: task.skills-common-mistakes-that-are-real-and
 created: 2026-08-29
 updated: 2026-09-05
 ---
 
-Full Definition of Done: anb self-hosts its own development; SessionStart hooks deliver Status within Budget in Claude Code and Codex; negative corpus green; npx zero-install works; README/docs published; skill CI-checked; why-Rust answers amended into ADR 0006.
-- 2026-09-05 Maksim Yaromin: Marathon of 2026-09-05 done: every child closed, main green on CI, docs and Pages. The hub's acceptance close is the release itself and stays with the owner: the Cloudflare secrets and the domain, the history push from .tmp/release, the tag v0.1.0, the first npm publish with scripts/release/publish.sh, the Trusted Publisher, the repository's visibility, the ruleset. The summary Note lists every pull request, hold and Question.
+Full Definition of Done: anb self-hosts its own development; SessionStart hooks deliver Status within Budget in Claude Code and Codex; negative corpus green; npx zero-install works; README/docs published; skill CI-checked; why-Rust answers recorded.
+- 2026-09-05 Maksim Yaromin: Marathon of 2026-09-05 done: every child closed, main green on CI, docs and Pages. The hub's acceptance close is the release itself and stays with the maintainer: the Cloudflare secrets and the domain, the tag v0.1.0, the first npm publish with scripts/release/publish.sh, the Trusted Publisher, the repository's visibility, the ruleset.

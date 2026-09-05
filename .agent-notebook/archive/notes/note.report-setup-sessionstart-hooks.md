@@ -26,9 +26,9 @@ Report for task.setup-sessionstart-hooks: `anb setup` wires the agents' session 
 
 Rules the implementation keeps: every file is read and judged before the first is written, so a refusal leaves the project exactly as it was; a settings file that is not JSON, or an instruction file with a stray marker, refuses the whole run, since setup patches only what it can read back; a file that is a link to somewhere else is left alone and reported (`a link, left alone`), because writing through it would edit a file the project does not own; setup recognises its own hook by the command alone, so a timeout the user tuned keeps the group setup's; the snippet is descriptive, never imperative, and its markers are HTML comments, which Claude Code strips before injection; `setup --global` is refused with its own reason, because a session starts in a project and the user's notebook needs no hook; setup takes no notebook lock and needs no notebook to exist. The reply's first line counts files and names the verb; each file's line carries what happened to it, so the header cannot promise a write that did not happen.
 
-## Smoke check
+## Review
 
-Sonnet 5, once: seven findings, all taken. Two must-fix — the non-JSON refusal came after three files were already written (now every file is planned before any is written), and a `CLAUDE.md` linked to somewhere else was edited through the link (links are now left alone). Should-fix — a stray marker was patched around into a duplicate (now refused); the header said `4 files written` over four `already` lines (now it counts and names the verb); the "moves nothing" test asserted one file (now all four); a deletion comment claimed more than the code guaranteed (rewritten as the rule it is). One nit, a doc comment restating its body, deleted.
+One review pass: seven findings, all taken. Two must-fix — the non-JSON refusal came after three files were already written (now every file is planned before any is written), and a `CLAUDE.md` linked to somewhere else was edited through the link (links are now left alone). Should-fix — a stray marker was patched around into a duplicate (now refused); the header said `4 files written` over four `already` lines (now it counts and names the verb); the "moves nothing" test asserted one file (now all four); a deletion comment claimed more than the code guaranteed (rewritten as the rule it is). One nit, a doc comment restating its body, deleted.
 
 ## Verified live
 
@@ -37,7 +37,7 @@ Scratch projects with one active Task, `anb setup`, then the real binary on `PAT
 - **Claude Code** — `claude -p "…reply with the line that begins with active:"` answered `active: task.grammar-parser-accepts-fences "Grammar parser accepts fences"`: the project hook fired, the Status reached the model.
 - **Codex** — `codex exec` in an isolated `CODEX_HOME` whose `config.toml` trusts the project, with the hook reviewed (`--dangerously-bypass-hook-trust` stands in for the interactive `/hooks` review): the same line came back from the project `.codex/hooks.json` setup writes. Without the review step Codex answered `NO STATE` — the trust step is real, and the notice setup prints is what a user needs.
 
-Two traps met on the way, recorded for whoever verifies next: `codex exec` blocks forever when its stdin is not a terminal (run it with stdin closed), and the project's trust must stand in `config.toml` — a `-c projects.<dir>.trust_level` override did not load the project hooks. The owner's own `~/.codex` was not touched; the isolated home and its copied credential were deleted after the run.
+Two traps met on the way, recorded for whoever verifies next: `codex exec` blocks forever when its stdin is not a terminal (run it with stdin closed), and the project's trust must stand in `config.toml` — a `-c projects.<dir>.trust_level` override did not load the project hooks. The maintainer's own `~/.codex` was not touched; the isolated home and its copied credential were deleted after the run.
 
 ## Tests
 

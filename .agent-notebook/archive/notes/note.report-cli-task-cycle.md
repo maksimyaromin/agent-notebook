@@ -12,7 +12,7 @@ updated: 2026-08-29
 
 # l1 — CLI: task cycle — report
 
-Closed 2026-08-29. Delivered against the interaction spec (§2–§6), the record-model spec (§3, §7, §8, §10), and the l1 owner rulings recorded in the task body.
+Closed 2026-08-29. Delivered against the interaction spec (§2–§6), the record-model spec (§3, §7, §8, §10), and the l1 maintainer rulings recorded in the task body.
 
 ## What shipped
 
@@ -25,20 +25,20 @@ Closed 2026-08-29. Delivered against the interaction spec (§2–§6), the recor
 - `fs_storage.rs` — the fs adapter (atomic temp+rename writes, non-UTF-8 read is a named Io error) and `resolve_root`: nearest ancestor with `.agent-notebook`, the walk bounded by the first `.git` — a notebook above the repository is another project's.
 - `main.rs` — wiring only: cwd, `jiff` local date, lazy `git config user.name` (forked only for `add`/`comment`), exit codes, trailing-newline termination.
 
-**Output contract** (interaction spec §2–§3): leading `ok:` with the transition and computed consequences (`unblocked[...]`, `open-questions[...]`, `superseded:`); replay renders `(already)`; flat lists as `count:` + header+rows tables with the one-line truncation hint; `view` as kv in envelope order + `body: |` + `mentions`/`mentioned-by`; `--json` compact everywhere (`preserve_order` so `ok` leads every object; absent fields omitted). Every error is `error[<code>]: message` + detail lines + `try:` commands computed from state (valid transitions, the cycle's own edges, the colliding id, the missing target), stderr, exit 1.
+**Output contract**: leading `ok:` with the transition and computed consequences (`unblocked[...]`, `open-questions[...]`, `superseded:`); replay renders `(already)`; flat lists as `count:` + header+rows tables with the one-line truncation hint; `view` as kv in envelope order + `body: |` + `mentions`/`mentioned-by`; `--json` compact everywhere (`preserve_order` so `ok` leads every object; absent fields omitted). Every error is `error[<code>]: message` + detail lines + `try:` commands computed from state (valid transitions, the cycle's own edges, the colliding id, the missing target), stderr, exit 1.
 
 **`anb status`**: `--budget <n>` outranks the config key, `0` = no ceiling on both surfaces; `--json` carries the model; `--hook` emits the Claude Code SessionStart payload with the data-framing line and fails soft — any internal error yields empty output, exit 0.
 
 **Core additions** (`anb-core`): `Notebook::comment` (log convention `- <date> <author>: <text>`, author = via else git identity else `-`; idempotent through the trail's tail; state does not gate the log), `Notebook::list` (live valid records, type-major order), `Notebook::view` (envelope in file order, body, mention blocks; a record never enters its own blocks; `mentioned-by` reads live records only), `RecordFile::fields()`, `encode` module (shared quoting rule + the ready table with its age rule — one home for the row the Status and `anb ready` both print), `grammar::day_number` and `notebook::path_stem` made public for hosts.
 
-## Review (Opus 5, separate agent)
+## Review (separate agent)
 
 22 findings: 4 must-fix, 11 should-fix, 7 judgment calls. All fixed test-first except three held positions:
 
 - Must-fix fixed: `try:` lines for the invalid-argument/would-cycle/archived/wrong-type/invalid-record classes; the ready row + age duplication moved into Core `encode`; the false `preserve_order` comment; the glossary-forbidden `Dashboard` name replaced with `Status` in identifiers and `--help`.
 - Should-fix fixed: hook fail-soft into `execute`; stringly `command` tags split into variants; single `ROW_BOUND`/`shown` home; `Created.superseded` rendered; lazy git identity; split error arms; `path_stem` exported instead of re-derived; doc claims re-derived from the code; the test gaps (budget flag vs config key, hook fail-soft + contrast, `--json` bounding and field omission, block/unblock replies and replays, comment replay, invalid-record/archived/wrong-type payloads).
 - Judgment calls acted on: `app.rs`→`reply.rs`, `render.rs`→`text.rs`; root walk bounded at the repository.
-- Positions held, stated to the owner: CLI goldens keep pinning full payload text including Core message prose (the concept spec's testing decision makes stdout the behavior under the golden e2e pass); insta inline snapshots kept with hand-derived expectations; the command-vocabulary parse table kept as the one surface-contract guard.
+- Positions held, stated to the maintainer: CLI goldens keep pinning full payload text including Core message prose (the spec's testing decision makes stdout the behavior under the golden e2e pass); insta inline snapshots kept with hand-derived expectations; the command-vocabulary parse table kept as the one surface-contract guard.
 
 ## Verification
 
@@ -49,6 +49,6 @@ Closed 2026-08-29. Delivered against the interaction spec (§2–§6), the recor
 
 ## Decisions recorded along the way
 
-- `retire` gets a CLI surface in l2 (owner's call 2026-08-29); the concept spec's command vocabulary is amended, l2's body carries the ruling.
+- `retire` gets a CLI surface in l2 (maintainer's call 2026-08-29); the spec's command vocabulary is amended, l2's body carries the ruling.
 - Deliberately out of l1, flagged for later: lockfile concurrency (atomic write only for now — no ticket names the lockfile), `check`/`archive`/`search`/`overview` (l3), `decide`/`note`/`ask`/`answer` (l2), `via` auto-detection from host env (flag only; a skill/setup question for a1/a2).
 - Known drift left in place: pre-existing committed Core prose and test names still say "dashboard" (glossary Avoid-list) — predates this diff, worth one sweep in a later text pass.

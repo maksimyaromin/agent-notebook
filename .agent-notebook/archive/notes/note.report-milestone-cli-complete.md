@@ -39,7 +39,7 @@ One further condition was added to the phase after the hub was written — the s
 
 ## What the phase cost, and what it taught
 
-Seven tasks, sixteen commits, 495 tests green. Every task went through an independent Opus 5 review; every review found something real, and several found defects that unit tests could not have.
+Seven tasks, sixteen commits, 495 tests green. Every task went through an independent review; every review found something real, and several found defects that unit tests could not have.
 
 Four findings are worth carrying forward, because each was a class of mistake rather than a slip:
 

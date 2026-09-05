@@ -19,7 +19,7 @@ Report for task.readme-the-page-a-stranger-reads-first.
 
 Install is shown two ways, `npx -y @supolka/agent-notebook` and `cargo install --git`. The npm package publishes at release; the README describes the released state.
 
-Two files came with it. `LICENSE` is MIT with the owner's name, copied from codemode-executor: the repository had none, and a public repository needs one. The owner confirms the choice at the final review. The documentation link points at `agent-notebook.supolka.dev`, following the sibling's `codemode-executor.supolka.dev`; the owner sets the DNS record, or the docs task adjusts the address.
+Two files came with it. `LICENSE` is MIT with the maintainer's name, copied from a sibling project: the repository had none, and a public repository needs one. The maintainer confirms the choice at the final review. The documentation link points at `agent-notebook.supolka.dev`; the maintainer sets the DNS record, or the docs task adjusts the address.
 
 The prose follows the writing rule the skills follow: no dashes as connectives, plain sentences, sentence-case headings. The em dash inside the tool's own output stays, since the blocks are literal.
 
@@ -27,6 +27,6 @@ The prose follows the writing rule the skills follow: no dashes as connectives, 
 
 The quiet Status line prints "1 tasks, 1 decisions", a plural on one, and it is the first reply a stranger reads closely. Filed as task.status-counts-read-as-english-one-task, born from this task. A log entry written without a git identity renders its author as `-`; the README runs with an identity, so it does not show, and it is not filed: an author-less entry has nothing else honest to print.
 
-## Smoke check
+## Review
 
-Sonnet 5, once, running every command of the README in a fresh project and holding every claim to the code. One must-fix: the close step read `report.md`, and nothing in the walkthrough had written it, so a reader following the page could not close the Task. The page now writes the report first. One should-fix: "ids are never reused" was stated as a blanket rule, and `anb delete` frees an id; the sentence now scopes the promise to lifecycle moves and names `delete` for what it is. One nit: the gate's rustdoc build was missing from the development paragraph. Every other block reproduced byte for byte, and every claim held.
+One review pass, running every command of the README in a fresh project and holding every claim to the code. One must-fix: the close step read `report.md`, and nothing in the walkthrough had written it, so a reader following the page could not close the Task. The page now writes the report first. One should-fix: "ids are never reused" was stated as a blanket rule, and `anb delete` frees an id; the sentence now scopes the promise to lifecycle moves and names `delete` for what it is. One nit: the gate's rustdoc build was missing from the development paragraph. Every other block reproduced byte for byte, and every claim held.

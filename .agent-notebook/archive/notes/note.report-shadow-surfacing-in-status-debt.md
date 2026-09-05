@@ -38,7 +38,7 @@ A second root is read for a hint on somebody else's dashboard, so a root that ca
 
 ## What the review found
 
-An independent Opus 5 review returned 13 items; seven were reproduced defects.
+An independent review returned 13 items; seven were reproduced defects.
 
 1. **A broken user notebook hard-failed every project `status`.** A file where the directory should be, or an unreadable one, exited 1 with a message pointing at the user's home. The criterion "absence of a global root is not an error" was honoured for literal absence only. Now the hint is dropped instead, and `unusable_root` guards the second root as it does the first.
 2. **A shadow was silently lost when the project's own archive held the same id.** The guard asked `resolves`, which counts archived ids, so a rule this project retired hid the user's — and neither the pair nor the dangling signal picked it up. The criterion says *never silent*. The guard now asks for a live record of this notebook's own.
@@ -50,7 +50,7 @@ An independent Opus 5 review returned 13 items; seven were reproduced defects.
 
 Also fixed from the review: `Notebook` lost the `user` field and the `beside_the_user` constructor — a field one method read, on the handle that also runs `expunge` and `close`, under a name that promised "read beside"; `records_in` was a pure delegate that failed the deletion test and is gone; five comment claims were false or over-general; the tests moved into the `debt_signals` module that already owns the Debt contract and reuse its fixtures instead of duplicating them; and `process.rs`, `concurrency.rs` and `fs.rs`'s environment helper now pin `HOME`, which `status` reads on every run — a hermeticity regression this change introduced.
 
-**Kept as shipped, against the review:** a shadow stays a `DebtSignal`. The reviewer's point is fair — a shadow is not decay, it is permanent and correct, and Debt is the section a reader is trained to clear — but the criteria name "Status/Debt", and moving it would invent a section the phase did not ask for. Worth the owner's attention.
+**Kept as shipped, against the review:** a shadow stays a `DebtSignal`. The reviewer's point is fair — a shadow is not decay, it is permanent and correct, and Debt is the section a reader is trained to clear — but the criteria name "Status/Debt", and moving it would invent a section the phase did not ask for. Worth the maintainer's attention.
 
 ## The residual hole, named
 
@@ -59,7 +59,7 @@ Two write-side surfaces still read this notebook alone, and one of them is a gat
 - `decide`/`comment`/`edit` probe a body's citations against the project, so recording the very rule that shadows a global one answers `dangling: decision.x` while Status answers `shadow: … <-> global decision.x`.
 - `check` verifies a `link:` target that parses as an id, so declaring the edge — the natural reaction to a shadow row — makes `check` **exit failure** on an id that exists.
 
-`question.should-the-write-paths-and-check-see-the-users-notebook` puts both to the owner with three options. Shipping the nudge inconsistency alone would be defensible; shipping it beside a red `check` is the part that deserves a decision.
+`question.should-the-write-paths-and-check-see-the-users-notebook` puts both to the maintainer with three options. Shipping the nudge inconsistency alone would be defensible; shipping it beside a red `check` is the part that deserves a decision.
 
 ## Proof
 

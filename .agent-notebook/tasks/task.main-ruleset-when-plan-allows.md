@@ -8,7 +8,7 @@ via: claude-code
 from: task.github-dev-flow-actions-ci-fmt-clippy-te
 tags: dist
 priority: 3
-hold: waits for the repository to go public, which the owner does after README, the docs site and the history scrub are in place; the marathon leaves the ruleset script ready to run
+hold: waits for the repository to go public, which the maintainer does after README and the docs site are in place; the marathon leaves the ruleset script ready to run
 created: 2026-08-31
 updated: 2026-09-05
 ---

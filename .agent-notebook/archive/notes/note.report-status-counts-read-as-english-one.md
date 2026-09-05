@@ -21,6 +21,6 @@ Two refusal messages counted as well and were missed by the first pass: `is inva
 
 The test expectations that pinned the old spelling now pin the promise (one of each type reads singular), and the literal replies in the README, the front page, the quickstart and the session guide were re-rendered. The skill's worked session regenerated itself.
 
-## Smoke check
+## Review
 
-Sonnet 5, once, on a scratch notebook: one of each type reads singular in the quiet line, the Status header and the overview; two read plural; setup and skill report their file counts; no plural after a one remains anywhere in the tree. It found the `invalid-record` refusal still saying `(1 findings)`, now fixed, and showed that the singular branch of the lines marker could never run, now removed; the doc comment on the helper restated its body and now states the one constraint that matters, regular nouns only.
+One review pass, on a scratch notebook: one of each type reads singular in the quiet line, the Status header and the overview; two read plural; setup and skill report their file counts; no plural after a one remains anywhere in the tree. It found the `invalid-record` refusal still saying `(1 findings)`, now fixed, and showed that the singular branch of the lines marker could never run, now removed; the doc comment on the helper restated its body and now states the one constraint that matters, regular nouns only.

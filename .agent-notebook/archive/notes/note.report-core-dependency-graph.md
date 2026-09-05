@@ -20,8 +20,8 @@ Delivered in anb-core, all at the Notebook seam:
 - `ready()` (US9): open ∧ unblocked ∧ unheld; priority 0 first, unset = neutral 2, then oldest `created`, then id. Rows carry `created`; age is the caller's derivation (the Core holds no clock).
 - `check`: `dep-cycle` on every cycle member at its edge line; record-level findings for self-block (dep-cycle) and `blocked-by` into a non-Task (bad-value); corpus cases for both.
 
-Review: mandatory Opus 5 pass returned 17 findings (3 defects: unblock frozen out of its own repair, false module-doc invariant, overclaiming cycles() doc) — all fixed; 2 deliberate stands documented in the task body.
+Review: mandatory review pass returned 17 findings (3 defects: unblock frozen out of its own repair, false module-doc invariant, overclaiming cycles() doc) — all fixed; 2 deliberate stands documented in the task body.
 
-Open owner ruling: interaction spec §2 worked example orders ready younger-first within a priority; implementation (and reviewer) say oldest-first — the spec example should be re-sorted.
+Open maintainer ruling: the interaction spec worked example orders ready younger-first within a priority; implementation (and reviewer) say oldest-first — the spec example should be re-sorted.
 
 Gate: fmt, clippy -D warnings, 145 tests green; every new test proven able to fail via expectation-flip sweeps.
