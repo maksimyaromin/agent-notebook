@@ -35,7 +35,7 @@ export const sidebar = [
   },
   {
     label: 'Contributing',
-    items: [{ slug: 'contributing/development' }],
+    items: [{ slug: 'contributing/development' }, { slug: 'contributing/releasing' }],
   },
   { slug: 'llms' },
 ]

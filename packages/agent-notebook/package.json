@@ -1,0 +1,46 @@
+{
+  "name": "@supolka/agent-notebook",
+  "version": "0.1.0",
+  "description": "agent notebooks: a project's working memory as typed records in plain files, read and written by any coding agent through one CLI",
+  "license": "MIT",
+  "author": {
+    "name": "Maksim Yaromin",
+    "url": "https://github.com/maksimyaromin"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maksimyaromin/agent-notebook.git",
+    "directory": "packages/agent-notebook"
+  },
+  "homepage": "https://agent-notebook.supolka.dev",
+  "bugs": "https://github.com/maksimyaromin/agent-notebook/issues",
+  "keywords": [
+    "agent",
+    "cli",
+    "notebook",
+    "memory",
+    "tasks",
+    "decisions",
+    "claude-code",
+    "codex"
+  ],
+  "bin": {
+    "anb": "bin/anb.js"
+  },
+  "files": [
+    "bin/anb.js"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@supolka/agent-notebook-darwin-arm64": "0.1.0",
+    "@supolka/agent-notebook-darwin-x64": "0.1.0",
+    "@supolka/agent-notebook-linux-x64": "0.1.0",
+    "@supolka/agent-notebook-linux-arm64": "0.1.0",
+    "@supolka/agent-notebook-win32-x64": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
