@@ -3,7 +3,7 @@ title: Tasks and the shape of work
 description: 'The Task lifecycle, proofs on close, holds and dependency edges, and how hub Tasks carry an epic.'
 ---
 
-A Task is a piece of work with a log. Its state is always a command's move, never an edit.
+Use a Task for work you can finish and verify. Its log records progress; its dependencies determine when it is ready. Change its state with lifecycle commands.
 
 ## The lifecycle
 
@@ -19,7 +19,7 @@ stateDiagram-v2
     closed --> open: reopen
 ```
 
-`start` takes a Task into work, and takes it back from review. `submit` hands the work to a human when one accepts it; the human's `start` takes it back or their `close` accepts it. Review is optional: a solo agent closes straight from active. `reopen` is explicit and leaves a log entry. An invalid move is refused with the moves that are legal:
+`start` moves a Task into active work. Use `submit` when the result needs human acceptance, then `close` to accept it or `start` to continue work. Review is optional; you can close directly from active. `reopen` returns a closed Task to open and logs the transition. The CLI refuses an invalid move and lists valid alternatives:
 
 ```
 $ anb submit task.ship-the-parser
@@ -30,16 +30,16 @@ try: anb close task.ship-the-parser --reason "<why>"
 
 ## Closing with a proof
 
-Finished work stays auditable, so `close` carries a proof. The proofs are equals; one is the default because it travels with the notebook.
+Choose a proof that lets a later reader assess the result. `--note` is the recommended workflow because it imports the report into the notebook. You must pass the flag explicitly; the CLI does not select a proof for you.
 
 | Flag | Proof |
 |---|---|
-| `--note <file>` | the report file, ingested as a Note the notebook carries; the default route |
-| `--pr <url>` | the pull request that shipped the work |
-| `--sha <sha>` | the commit that shipped the work |
-| `--report <path>` | a file left where it lies: right for a living document, which a Note would freeze into a second source of truth |
-| `--no-proof` | the explicit waiver: done, nothing to show |
-| `--reason "<why>"` | work that will never happen, ended from any state, open included |
+| `--note <file>` | a report imported as a Note and linked to the Task |
+| `--pr <url>` | a pull request containing the work |
+| `--sha <sha>` | a commit containing the work |
+| `--report <path>` | a path to a report maintained outside the notebook |
+| `--no-proof` | an explicit statement that there is no proof |
+| `--reason "<why>"` | a reason to end work without completing it; also allowed from open |
 
 ```
 $ anb close task.parser-accepts-fenced-bodies --note report.md
@@ -47,26 +47,30 @@ ok: close task.parser-accepts-fenced-bodies — active→closed
 report: note.report-parser-accepts-fenced-bodies
 ```
 
-A close names what it unblocked, so the next Task is known without a second query, and names the Questions still attached to the Task, so a deferred doubt is not lost. `anb archive <id>` moves the closed Task into `archive/tasks/` with its log and carries the report Note along; a closed record left live is a leftover somebody else has to find.
+The reply lists newly unblocked Tasks and any Questions still open from this Task. Resolve those Questions or record why they remain open. Then run `anb archive <id>` to move the Task and its report Notes into the archive. The log and ids are preserved.
+
+The tool records evidence; it does not evaluate its quality. Write the report for someone who did not see the work happen.
 
 ## Holds
 
-A pause is deliberate and carries its reason; a hold without a reason is where work rots.
+Use a hold when work must pause for a reason that is not another Task:
 
 ```
 $ anb hold task.negative-corpus-wired-into-ci --reason "waits for the corpus license"
 ok: hold task.negative-corpus-wired-into-ci — held
 ```
 
-`--until <date>` adds a calendar date to resume on. A held Task leaves the queue and the `active:` line and waits in Status under `held`; a hold older than the `debt-hold-stale` clock (14 days by default) surfaces as Debt. `anb unhold <id>` resumes it.
+`--until <date>` records the intended resumption date. It does not lift the hold automatically: run `anb unhold <id>` when work can resume. Held Tasks leave the ready queue and the `active:` display. Status lists them under `held` when it prints a full summary, and stale holds become [Debt](../reference/status.md#debt).
 
 ## Dependencies
 
-`anb block <id> <on>` writes an edge: the first Task waits on the second. The edge is refused when it would close a cycle, and the refusal walks the cycle in full, so `ready` cannot silently empty forever. `anb unblock <id> <on>` erases it. A Task with an open edge is not ready; when the last Task it waits on closes, the close names it as unblocked.
+`anb block <id> <on>` makes the first Task wait on the second. The tool rejects an edge that would create a cycle and prints the cycle in the refusal. `anb unblock <id> <on>` removes the dependency.
+
+A dependency stops blocking when its Task closes. The edge remains as a record of the relationship. When the last dependency closes, the reply names the Task it unblocked.
 
 ## Hubs and epics
 
-Work is rarely a flat list, and the notebook has no fifth record type for an epic. An epic is a hub Task tagged `epic`; every Task born inside it is created `--from` the hub, and the hub is blocked by its children:
+The supplied workflow breaks larger work into a hub Task and child Tasks. Create each child `--from` the hub, then make the hub depend on it. The origin records why the child exists; the dependency records what must finish before the hub can close:
 
 ```
 $ anb add task "Ship the parser" --tag epic
@@ -79,8 +83,12 @@ $ anb block task.ship-the-parser task.negative-corpus-wired-into-ci
 ok: block task.ship-the-parser — waits on task.negative-corpus-wired-into-ci
 ```
 
-The hub becomes ready when its last child closes; closing it is the epic's acceptance. `anb ready --for <hub>` and `anb list --for <hub>` see one epic's work, and Status shows every hub's progress as `closed/total` with its next Task. Origin is written at `add` time, so create children this way from the start; `anb edit <id> --from <hub>` sets it later.
+You can use your own grouping convention; the automatic epic summary recognizes a hub by that pair of relationships: it depends on a Task whose origin points back to it. The `epic` tag helps you find the hub; it does not establish membership. If you missed an origin when creating a child, set it with `anb edit <id> --from <hub>`.
+
+Status reports how many of the hub's direct dependencies are closed and the next ready Task in its scope. `anb ready --for <hub>` and `anb list --for <hub>` follow that scope, including nested work. Once all dependencies close, the hub becomes ready for acceptance. Close and archive it when the overall result is complete.
 
 ## Correcting a record
 
-`anb edit <id>` corrects a live record's own fields: the title, the body, tags, the origin, the priority, a `review-by` date; `--clear <field>` erases an optional one. State is never edited, and a record carrying an error finding is not edited until the finding is repaired.
+Use `anb edit <id>` to correct a title, body, tags, origin, priority or `review-by` date. `--clear` removes an optional field supported by that flag. Lifecycle commands change state. If the record has an error finding, follow the repair command before editing it.
+
+To resume archived work, run `anb restore <id>` first, then `anb reopen <id>`. Restore changes where the file lives; reopen changes its state.

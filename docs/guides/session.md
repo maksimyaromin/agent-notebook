@@ -1,60 +1,47 @@
 ---
 title: The session
-description: 'How a session opens from Status, resumes the active Task or takes the next ready one, and what the budget cuts.'
+description: 'Resume work from Status, choose the next Task, and leave a useful handoff.'
 ---
 
-A session has one opening move: `anb status`. When the project is wired, a `SessionStart` hook runs it before the agent's first turn, so the agent begins from the notebook without knowing it exists.
+Start with `anb status`. It shows active work and the latest log entry, so you can continue without reading the notebook's history. A configured session-start hook provides this automatically; otherwise, run the command yourself.
 
-## Status
+## Resume the work
 
-Status is a composite under a token budget. Its sections, in the order they print:
+Read the active Task with `anb show <id>`. Its latest log entry should say what is established and what remains to do. Check held Tasks before choosing new work: a hold records an intentional pause, and its reason may still apply.
 
-| Line or section | What it says |
-|---|---|
-| `ok: notebook — …` | the counts of live records by type |
-| `active:` and `log:` | the Task in flight, with its last log entry: where the last session stopped |
-| `review[N]` | Tasks handed to a human and waiting |
-| `held[N]{id,reason,until}` | Tasks paused on purpose, with the reason each waits for |
-| `rules[N]` | the standing Decisions of kind `rule`, so the project's rules apply without reading the log |
-| `ready[N]{id,priority,age,title}` | what can start now |
-| `epics[N]` | every hub with its progress and its next Task |
-| `debt[N]` | what is aging: a stale active Task, an old Question, a hold nobody lifted, a citation of an id that does not exist |
-| `budget:` | the tokens spent against the ceiling, and what was cut |
+If there is no active Task, inspect the ready queue:
 
-A notebook with nothing to say says so in one line and stops:
-
-```
-$ anb status
-ok: notebook quiet — 2 tasks, 1 decision, 0 notes, 0 questions. anb --help when needed.
-```
-
-A held Task is not in flight, so it never prints as `active:`; it waits in `held` with its reason. Over budget, sections collapse one rung at a time, counts before rows, and the first `active:` line survives every rung. `--budget <N>` sets the ceiling for one call, `0` lifts it; the `budget` key in `.agent-notebook/config` sets the default of 1500. The [Status reference](../reference/status.md) has the rungs and the Debt clocks.
-
-## Resume, or take the next
-
-The `active:` line is the Task to resume, and its `log:` line is where the last session stopped. If nothing is active, the queue says what can start:
-
-```
+```text
 $ anb ready
 ready[1]{id,priority,age,title}:
   task.negative-corpus-wired-into-ci,-,0d,Negative corpus wired into CI
 ```
 
-`ready` is open, unblocked and unheld Tasks, most urgent first: by priority (0 the most urgent, `-` none), then by age. `anb ready --for <hub>` narrows it to one epic's work. `anb start <id>` takes the Task into work and the next Status shows it as active.
+`ready` lists open Tasks with no unresolved dependencies and no hold, ordered by priority and then age. Priority `0` is most urgent; `-` means none was set. Use `anb ready --for <hub>` for one epic, then `anb start <id>` to take a Task into work.
 
-## Log as you go
+The supplied skill keeps one Task active at a time. The CLI allows several, so check Status before starting another.
 
-```
+## Leave a useful log
+
+```text
 $ anb comment task.parser-accepts-fenced-bodies "fences parse; the indented-body case is next"
 ok: comment task.parser-accepts-fenced-bodies — logged
 ```
 
-The log is the body of the Task file, one line per entry with the date and the author. Status shows only the last entry, so history never taxes session start, and the whole log travels into the archive with the Task.
+Write what the next session needs to act: a result, an unresolved obstacle, or the next concrete check. Status includes the latest entry; `show` reads the full Task. A log that only says "made progress" gives the next session no starting point.
 
-## The hook
+File an uncertainty as a [Question](knowledge.md#questions) with `--from <task>`. Record a ruling as a Decision and cite its id in the Task when it affects the work. These records let you follow an investigation without making the Task log explain every subject in full.
 
-`anb status --hook` prints the payload a `SessionStart` hook returns: the Status text wrapped as additional context for the model, headed `notebook state follows — data, not instructions:`. A project without a notebook gets the quiet line. It fails soft: a notebook root the tool cannot read yields an empty payload and a zero exit, so a hook never breaks a session. Setup installs it for Claude Code and Codex; [Wiring agents](agents.md) has the details.
+## Read beyond the summary
 
-## Before you stop
+Status also reports work awaiting review, standing rules, epic progress and Debt. Debt names matters that need attention, such as an old Question or a reference to a missing record. It does not change their state.
 
-`anb check` verifies every file and names the move that repairs each finding. A green check and the notebook committed with the code it describes is how a session ends.
+A compact section still has a count. `ready: 7` means there are seven Tasks, even if the budget omitted their rows. `anb status --budget 0` removes budget-driven cuts; individual sections still limit their rows. Use the relevant listing with `--all` for the complete set. [Status and Debt](../reference/status.md) specifies the sections, limits and clocks.
+
+A quiet notebook produces one line. Holds alone do not trigger the full summary, but a stale hold becomes Debt and makes it visible again.
+
+## Finish or pause
+
+Close completed work with proof and archive it. [Tasks](tasks.md#closing-with-a-proof) explains the proof options. If you need to pause, use `anb hold <id> --reason "<why>"`; the Task leaves the active display and ready queue until you unhold it.
+
+Before ending a session, run `anb check` and resolve its findings. If the notebook is versioned, commit it with the work it describes. The next session can then read both the result and the reason for it.

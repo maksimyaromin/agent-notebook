@@ -1,24 +1,24 @@
 ---
 title: llms.txt and AGENTS.md
-description: 'What this site publishes for machines to read, and where an agent working inside a project should point itself.'
+description: 'Plain Markdown exports of the book and instructions for agents using or developing anb.'
 ---
 
-Language models read this documentation, some of them working in a project that keeps a notebook and some changing this repository. This page names a file for each.
+## Read the book as Markdown
 
-## Reading the documentation
-
-Three files on the published site are written for machines, plain Markdown with no navigation around the text, following the [llms.txt](https://llmstxt.org/) proposal:
+The published site provides exports following the [llms.txt](https://llmstxt.org/) proposal:
 
 | File | Contents |
 |---|---|
-| `/llms.txt` | the entry point: what the project is, links to the two files below, and the pages that answer a question on their own (the commands, the records, the replies, the refusals) |
-| `/llms-small.txt` | every page, abridged |
-| `/llms-full.txt` | every page, in full |
+| `/llms.txt` | An introduction and links to the documentation |
+| `/llms-small.txt` | An abridged copy of each page |
+| `/llms-full.txt` | The complete book |
 
-## Working in a project
+Use the index to choose a page, or the full export when the task needs the whole book.
 
-An agent working in a project that keeps a notebook needs none of this site. `anb setup` puts the `anb` skill where the agent looks for skills, and the skill carries the method with every command, a worked session and every refusal, rendered from the binary the agent runs. `anb status` at session start says where to resume; `anb --help` and `anb <verb> --help` say the rest.
+## Use a notebook in a project
 
-## Working on this repository
+`anb setup` installs the workflow skill and references alongside the agent instructions. Start with `anb status`, then read the active Task. Use `anb --help` or `anb <verb> --help` to look up commands. The installed skill provides a worked session and refusal examples without requiring access to this site.
 
-`AGENTS.md` at the repository root is the instruction file for agents changing this project, and `CLAUDE.md` links it. The project's own notebook is in `.agent-notebook/`.
+## Change this repository
+
+Read `AGENTS.md` at the repository root; `CLAUDE.md` links to it. The project's working history is in `.agent-notebook/`, and [Development](contributing/development.md) describes the workspace and checks.

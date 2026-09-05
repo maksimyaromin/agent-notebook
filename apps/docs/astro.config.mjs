@@ -45,7 +45,7 @@ export default defineConfig({
       markdown: { processedDirs: ['../../docs'] },
       title: 'agent notebooks',
       description:
-        'A project’s working memory as typed records in plain files, read and written by any coding agent through one CLI.',
+        'A dependable CLI for agent working memory, with skills you can make your own.',
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: repository }],
       editLink: { baseUrl: `${repository}/edit/main/` },
@@ -55,9 +55,9 @@ export default defineConfig({
         starlightLlmsTxt({
           projectName: 'agent notebooks',
           description:
-            'A CLI named anb keeps a project’s working memory as typed records with lifecycles, in markdown files committed with the code, for any coding agent to read and write.',
+            'agent notebooks gives coding agents a deterministic CLI for working memory. Skills define the workflow and can be rewritten or replaced; sharing the Markdown records through git is optional.',
           details:
-            'Four record types (Task, Decision, Note, Question), one file each under .agent-notebook/, every change through a command that answers in a few lines of plain text or JSON; a Status the agent starts from, a dispatch queue, hubs for epics, proofs on close, and a skill the binary renders from itself.',
+            'Tasks, Decisions, Notes and Questions have explicit lifecycles and relationships. Commands check changes and report results or refusals in bounded text or JSON. The supplied skills cover session handoffs and interactive maps. Notebook location, git sharing and personal knowledge across projects are configurable choices.',
           optionalLinks: [
             {
               label: 'Commands',

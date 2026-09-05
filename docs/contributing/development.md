@@ -1,32 +1,64 @@
 ---
 title: Development
-description: 'The workspace, the gate, the tests, and how the project dogfoods its own notebook.'
+description: 'Workspace structure, verification, and the conventions for code and documentation changes.'
 ---
 
 ## The workspace
 
-Two crates. `anb-core` is the record model, the line grammar, the notebook and its verbs, Status and Debt, and `check`, behind a storage trait with no filesystem, git or network of its own; a local MCP server or another host reuses it unchanged. `anb` is the command line around it: clap, the filesystem storage, the text and JSON renderers, the recovery payloads, the lock, setup and the skill generator.
+`anb-core` owns the record model, grammar, notebook operations, queries and validation. It receives storage through a trait and has no filesystem, git or network access. Tests use an in-memory adapter; the CLI supplies filesystem storage.
+
+`anb` owns command-line parsing, text and JSON rendering, filesystem operations, locking, git reconciliation, setup and skill generation. Keep behavior in the layer that owns it: a record invariant belongs in the Core, while a platform or shell concern belongs in the CLI.
+
+The Rust toolchain is pinned in `rust-toolchain.toml`. Use the Node version in `.nvmrc` for documentation work.
+
+## Verify a change
 
 ```sh
 ./scripts/check.sh
 ```
 
-The gate runs `cargo fmt --check`, `cargo clippy` with warnings as errors, every test, the doctests, the rustdoc build with warnings as errors, the skill drift check (`anb skill .agents/skills/anb --check`) and the docs reference check (`./scripts/docs-reference.sh --check`). CI runs the same script on every pull request and every push to main.
+This is the CI gate. It checks formatting, clippy with warnings as errors, tests, doctests and rustdoc. It also compares the committed skill and generated reference pages with the binary's output.
+
+For documentation changes, run:
+
+```sh
+pnpm install
+pnpm docs:check
+```
+
+The docs check verifies sidebar coverage and relative links, builds the site, then checks that local links in the built pages resolve. `pnpm docs:dev` serves the site locally.
 
 ## Tests
 
-A test specifies one observable behaviour in one named situation through the interface callers use, so a behaviour-preserving change leaves the suite green. Expected values come from the promise, never from running the code. The Core is tested through the notebook API on an in-memory storage; the CLI end to end through the binary on a temporary directory; the grammar and the record model also by property tests over generated notebooks, which hold the byte-exact round-trip.
+A test specifies one observable behavior in a named situation through the interface callers use. Expected values come from the promised behavior, never from running the implementation. A refactor that preserves behavior should preserve the test.
+
+Core tests exercise notebook operations through the storage interface. CLI tests run the binary against temporary directories. Property tests verify grammar and record behavior, including byte preservation when unchanged files are parsed and rendered.
 
 ## Text
 
-Every text the tool prints, and every skill it renders, is read by a person as well as an agent. The reply shapes are the contract in [Replies](../reference/replies.md); the words are plain engineering English, one word per concept across every surface, sentence-case headings, and no dash as a connective in prose. The same rule holds for the book and for every comment in the code.
+Write code, comments and documentation in English. Use one word per concept across the CLI, skills and book. Headings use sentence case; prose uses no dash as a connective. Exact command output follows the [reply contract](../reference/replies.md).
 
-A comment states a fact a stranger can check and the code cannot say for itself, usually a why. A comment that restates the code, records the history of a decision or defends it against a reviewer is deleted on sight; the notebook is where decisions and their history live.
+Comments explain facts a reader cannot derive from the code, such as an external constraint or a failure mode. Remove comments that restate the implementation, narrate a change, or defend a design choice. Record decisions and their history in the notebook.
+
+A Markdown paragraph or list item occupies one physical line. Use editor soft wrapping. Committed text must be self-contained: describe the constraint without pointing to material outside this repository.
 
 ## The notebook
 
-This repository keeps its own backlog in `.agent-notebook/` at the root and changes it only through the tool. Every task, decision and question of the project is there, closed tasks in the archive with their reports as Notes. Reading it is the fastest way to learn why something is the way it is.
+Read `cargo run --quiet -- status` before working. The project's Tasks, Decisions and Questions live in `.agent-notebook/`; closed work and its reports are in the archive. Change these records through the CLI. [The session guide](../guides/session.md) describes the working method, and the repository's `AGENTS.md` gives contributor instructions.
 
-## The docs
+## Documentation sources
 
-The book lives in `docs/` and is rendered by the Astro Starlight app in `apps/docs`, which reads the tree where it lies, so GitHub renders the same files. Two pages are written by the binary: `./scripts/docs-reference.sh` renders the commands and the refusals from `anb skill`, and the gate fails when a committed page differs. `pnpm docs:check` verifies that the sidebar reaches every page and names no page that does not exist, that every relative link resolves, and that the built site references only files the build wrote; `pnpm docs:dev` serves it locally.
+The Astro Starlight app in `apps/docs` reads the Markdown files in `docs/`. The same files are readable on GitHub. Add new pages to `apps/docs/src/sidebar.js`; the check rejects both missing pages and pages unreachable from the sidebar.
+
+A behavior change updates the nearest guide or reference in the same pull request. When commands or replies change, regenerate the installed skill and reference pages:
+
+```sh
+cargo run --quiet -- skill .agents/skills/anb
+./scripts/docs-reference.sh
+```
+
+`docs/reference/commands.md` and `docs/reference/refusals.md` are generated. Edit their source in the binary, then regenerate them. The other book pages are authored directly.
+
+## Submit a change
+
+Use a conventional commit message in English. Commits name their author only, without agent attribution or co-author trailers. Main changes through pull requests with a green CI check; do not push changes directly to it.

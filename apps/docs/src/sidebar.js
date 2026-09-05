@@ -19,6 +19,7 @@ export const sidebar = [
       { slug: 'guides/tasks' },
       { slug: 'guides/knowledge' },
       { slug: 'guides/agents' },
+      { slug: 'guides/customization' },
       { slug: 'guides/atlas' },
       { slug: 'guides/your-own-notebook' },
     ],

@@ -1,43 +1,89 @@
 ---
 title: Quickstart
-description: 'Install anb, wire a project, and run one session from the first record to a clean check.'
+description: 'Install anb and use the supplied workflow, from the first Task to the next session.'
 ---
 
-## Install
+This guide uses the defaults: a notebook in your repository, the supplied skills, and memory committed with the code. You need Node.js 20 or later and a coding agent with shell access.
+
+## Install and set up
+
+Install the CLI:
+
+```sh
+npm install -g @supolka/agent-notebook
+```
+
+In the root of the repository where you want to work, run:
+
+```sh
+anb setup
+```
+
+Setup adds notebook instructions to `AGENTS.md` and `CLAUDE.md`, installs the `anb` and `anb-atlas` skills, and configures session-start hooks for Claude Code and Codex. It reports each file it writes or leaves alone. [Wiring agents](../guides/agents.md) lists the files.
+
+For Codex, trust the project and review the hook with `/hooks`. Start a new agent session in this repository so it can load the installed instructions and skills. With a compatible hook, Status arrives at session start. For another agent, ask it to read the installed `anb` skill and begin with `anb status`.
+
+Setup creates the integration files, but no records. You do not need to initialize the notebook or create a configuration file.
+
+## Give the agent work
+
+For example:
+
+> Use the anb skill to add support for fenced parser bodies. Keep the work in the notebook.
+
+The first record creates `.agent-notebook/` at the repository root. Each Task, Decision, Note and Question is a Markdown file under that directory. The agent changes records through `anb`; you can read them in your editor or inspect their diffs.
+
+The supplied skill defines this working cycle:
+
+| During the work | What the agent does |
+|---|---|
+| Starting | Resumes the active Task, or selects ready work when none is active. It keeps one Task in flight. |
+| Breaking down an idea | Creates a hub Task for the epic, creates child Tasks from it, and records the dependencies. |
+| Making progress | Logs what it established and what comes next. |
+| Learning | Records rulings as Decisions, reusable knowledge as Notes, and uncertainties as Questions with their origin. |
+| Resolving or pausing | Closes answered Questions. Holds a paused Task with a reason. |
+| Finishing | Closes the Task with proof, normally a report imported as a Note, then archives the Task and report. |
+| Ending the session | Leaves `anb check` clean and commits the notebook with the code it describes. |
+
+These are instructions to the agent. The CLI validates record changes; it does not implement your feature, assess the report, or run git commits itself. Your instructions and the agent's permissions still govern the work.
+
+## Pick it up next session
+
+Ask the agent to continue the Task or epic. It reads Status and the active Task's latest log entry to find where work stopped. If the Task is finished, it selects the next ready one. Dependencies keep blocked work out of that queue.
+
+Closed work stays in `.agent-notebook/archive/`, including its reports. `anb search` and `anb show` can still read it. With the notebook committed, another collaborator or another clone has the same records. An agent in a new checkout also needs `anb` installed and the project's skills and hook enabled.
+
+For a visual review, ask:
+
+> Use anb-atlas to show this epic and what is blocking it.
+
+The agent builds an HTML map. Open a record beside it, leave comments, and return them to the agent to apply through notebook commands. [Drawing the notebook](../guides/atlas.md) explains the review loop.
+
+## Change the defaults when you need to
+
+The default workflow is ready to use without customization. If you prefer private notes, another storage location, or a different working method, [follow the customization recipes](../guides/customization.md). The global notebook is separate and optional; use it for [personal knowledge across projects](../guides/your-own-notebook.md).
+
+## Other installation options
+
+To try the CLI without installing globally:
 
 ```sh
 npx -y @supolka/agent-notebook --help
 ```
 
-The package ships a binary for your platform. With a Rust toolchain you can build it instead:
+For subsequent commands, replace `anb` with `npx -y @supolka/agent-notebook`. To use the session hooks as installed by setup, install `anb` on your PATH.
+
+With a Rust toolchain, you can install from source instead:
 
 ```sh
 cargo install --git https://github.com/maksimyaromin/agent-notebook anb
 ```
 
-Either way the command is `anb`.
+## The same workflow through the CLI
 
-## Wire the project
+The agent uses these commands to maintain the notebook. You can run this example yourself to inspect the records and replies; you do not need to run it before giving your agent work.
 
-In the project's root:
-
-```
-$ anb setup
-ok: setup — 18 files
-  AGENTS.md: written
-  CLAUDE.md: written
-  .claude/settings.json: written
-  .codex/hooks.json: written
-  .claude/skills/anb/SKILL.md: written
-  ...
-notice: Codex runs a project hook after you review it: run /hooks in Codex from this directory
-```
-
-Setup writes one line into `AGENTS.md` and `CLAUDE.md`, a `SessionStart` hook for Claude Code and Codex that runs `anb status --hook`, and the two skills where each agent looks for them. Re-running patches in place; `anb setup --remove` takes out only what setup put in. [Wiring agents](../guides/agents.md) explains each file. You can skip this step: the notebook appears on the first record you add.
-
-## One session
-
-A Task, started and logged:
+Create a Task, start it, and log enough detail for someone else to continue:
 
 ```
 $ anb add task "Parser accepts fenced bodies" --tag parser
@@ -50,7 +96,7 @@ $ anb comment task.parser-accepts-fenced-bodies "fences parse; the indented-body
 ok: comment task.parser-accepts-fenced-bodies — logged
 ```
 
-A doubt met on the way, filed with its origin, and the ruling that settles it:
+Suppose the implementation raises a question about nested fences. Record it with the Task as its origin. Once you decide the rule, record the Decision and close the Question against it:
 
 ```
 $ anb add question "Do fences nest?" --from task.parser-accepts-fenced-bodies
@@ -67,7 +113,7 @@ $ anb archive question.do-fences-nest
 ok: archive question.do-fences-nest — questions/question.do-fences-nest.md→archive/questions/question.do-fences-nest.md
 ```
 
-What the next session opens with:
+Run Status to see what another session would receive. The date and author in your output reflect your own run:
 
 ```
 $ anb status
@@ -76,10 +122,10 @@ active: task.parser-accepts-fenced-bodies "Parser accepts fenced bodies"
 log: "- 2026-09-05 Alex: fences parse; the indented-body case is next"
 rules[1]:
   decision.fences-never-nest: "Fences never nest"
-budget: ~83/1500 tokens
+budget: ~82/1500 tokens
 ```
 
-The work closes with its report ingested as a Note, and the archive carries the Note along:
+When the work is finished, write a report of the result and its verification. This example uses a short report; a real one should contain enough evidence to assess the work. `--note` imports it into the notebook, and archiving the Task archives its report too:
 
 ```
 $ echo "The parser accepts fenced bodies; the indented case is covered by the corpus." > report.md
@@ -96,4 +142,4 @@ $ anb check
 count: 0
 ```
 
-That is the whole loop: [the session](../guides/session.md), [tasks](../guides/tasks.md) and [knowledge](../guides/knowledge.md) each take one part of it further.
+`count: 0` means the check found no problems. The supplied workflow commits `.agent-notebook/` with the code so collaborators and future clones share its history. For larger work, [group Tasks into an epic](../guides/tasks.md#hubs-and-epics); for subsequent sessions, [resume from Status](../guides/session.md).
