@@ -27,3 +27,4 @@ updated: 2026-09-05
 
 Full Definition of Done: anb self-hosts its own development; SessionStart hooks deliver Status within Budget in Claude Code and Codex; negative corpus green; npx zero-install works; README/docs published; skill CI-checked; why-Rust answers recorded.
 - 2026-09-05 Maksim Yaromin: Marathon of 2026-09-05 done: every child closed, main green on CI, docs and Pages. The hub's acceptance close is the release itself and stays with the maintainer: the Cloudflare secrets and the domain, the tag v0.1.0, the first npm publish with scripts/release/publish.sh, the Trusted Publisher, the repository's visibility, the ruleset.
+- 2026-09-05 Maksim Yaromin: Documentation site live: Cloudflare Pages project agent-notebook deploys from pages.yml on every push to main that touches the book; custom domain agent-notebook.supolka.dev attached with a proxied CNAME and serving.
