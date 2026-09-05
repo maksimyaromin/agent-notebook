@@ -1,6 +1,6 @@
 # Working in this repository
 
-agent notebooks keeps a project's working memory as typed records in plain files: Tasks, Decisions, Notes and Questions under `.agent-notebook/`, one markdown file each, read and written by any coding agent through the CLI named `anb`. The Core is a Rust library behind a storage trait; the command line is a thin shell around it.
+agent-notebook keeps a project's working memory as typed records in plain files: Tasks, Decisions, Notes and Questions under `.agent-notebook/`, one markdown file each, read and written by any coding agent through the CLI named `anb`. The Core is a Rust library behind a storage trait; the command line is a thin shell around it.
 
 This file is for whoever changes that code, human or agent, and follows the [AGENTS.md](https://agents.md/) format so that any tool looking for one finds it. `CLAUDE.md` links it. Using the tool is the subject of [the book](./docs/index.md); the [README](./README.md) is its short form.
 
@@ -44,7 +44,7 @@ cargo run --quiet -- --help     # every command
 | A comment states a fact a stranger can check; a comment that restates the code, records a decision's history or defends it is deleted. | [Development](./docs/contributing/development.md) |
 | Every text the tool prints, every skill it renders and every page of the book is plain engineering English: one word per concept across every surface, sentence-case headings, no dash as a connective in prose. The reply shapes are a contract of their own. | [Development](./docs/contributing/development.md), [Replies](./docs/reference/replies.md) |
 | Committed text is self-contained: it never points at a file outside this repository, and it states a constraint rather than citing where it was decided. | this file |
-| Code, comments, commit messages and docs are in English. In prose the project is agent notebooks; `anb` is the command, the crate names, the `ANB_` variables and the record ids. | this file |
+| Code, comments, commit messages and docs are in English. In prose the project is agent-notebook; `anb` is the command, the crate names, the `ANB_` variables and the record ids. | this file |
 | A commit message is a [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/). A commit names its author and nobody else: no agent attribution, no `Co-Authored-By`, no `Generated with`, in any commit message or pull request text. | this file |
 | main moves only by pull request with a green CI check, never by direct push. | this file |
 | A markdown paragraph or list item is one physical line, however long; editors soft-wrap, hard wraps corrupt diffs. | this file |

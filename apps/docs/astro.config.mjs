@@ -43,7 +43,7 @@ export default defineConfig({
       // Starlight runs its own Markdown transforms only on files under the
       // collection directory it expects; the book lives in `docs/` instead.
       markdown: { processedDirs: ['../../docs'] },
-      title: 'agent notebooks',
+      title: 'agent-notebook',
       description:
         'A dependable CLI for agent working memory, with skills you can make your own.',
       favicon: '/favicon.svg',
@@ -53,9 +53,9 @@ export default defineConfig({
       lastUpdated: true,
       plugins: [
         starlightLlmsTxt({
-          projectName: 'agent notebooks',
+          projectName: 'agent-notebook',
           description:
-            'agent notebooks gives coding agents a deterministic CLI for working memory. Skills define the workflow and can be rewritten or replaced; sharing the Markdown records through git is optional.',
+            'agent-notebook gives coding agents a deterministic CLI for working memory. Skills define the workflow and can be rewritten or replaced; sharing the Markdown records through git is optional.',
           details:
             'Tasks, Decisions, Notes and Questions have explicit lifecycles and relationships. Commands check changes and report results or refusals in bounded text or JSON. The supplied skills cover session handoffs and interactive maps. Notebook location, git sharing and personal knowledge across projects are configurable choices.',
           optionalLinks: [

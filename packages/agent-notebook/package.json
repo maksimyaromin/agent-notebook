@@ -1,7 +1,7 @@
 {
   "name": "@supolka/agent-notebook",
   "version": "0.1.0",
-  "description": "agent notebooks: a project's working memory as typed records in plain files, read and written by any coding agent through one CLI",
+  "description": "agent-notebook: a project's working memory as typed records in plain files, read and written by any coding agent through one CLI",
   "license": "MIT",
   "author": {
     "name": "Maksim Yaromin",

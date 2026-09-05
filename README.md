@@ -1,4 +1,4 @@
-<h1 align="center">agent notebooks</h1>
+<h1 align="center">agent-notebook</h1>
 
 <p align="center">Working memory for projects built with coding agents.</p>
 
@@ -11,7 +11,7 @@
 
 A project should get easier to work on as its agents learn about it. The next session should start from that knowledge, and changing agents or changing your process should not mean rebuilding it.
 
-agent notebooks pairs a deterministic CLI with a complete working method for coding agents. The skills teach an agent to organize work, record what it learns, and finish with evidence. The CLI checks every change to the notebook and reports the result. You can use the supplied method or write your own on the same foundation.
+agent-notebook pairs a deterministic CLI with a complete working method for coding agents. The skills teach an agent to organize work, record what it learns, and finish with evidence. The CLI checks every change to the notebook and reports the result. You can use the supplied method or write your own on the same foundation.
 
 ## Start using it
 
