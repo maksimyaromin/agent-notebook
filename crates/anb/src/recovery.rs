@@ -50,6 +50,7 @@ pub fn subject(command: &Command) -> Subject {
         Command::Search { .. } => ("search", None),
         Command::Graph(_) => ("graph", None),
         Command::Overview { .. } => ("overview", None),
+        Command::Setup { .. } => ("setup", None),
     };
     Subject {
         verb,

@@ -15,7 +15,15 @@ use anb_core::{NotebookError, RecordType};
 /// and the verb has nothing to reach there.
 #[must_use]
 pub fn refused_globally(command: &Command, global: bool) -> Option<NotebookError> {
-    if !global || !writes_work(command) {
+    if !global {
+        return None;
+    }
+    if matches!(command, Command::Setup { .. }) {
+        return Some(NotebookError::InvalidArgument {
+            reason: "setup: installs into the project, where a session starts — the user's notebook needs no hook".to_owned(),
+        });
+    }
+    if !writes_work(command) {
         return None;
     }
     let verb = subject(command).verb;
@@ -54,6 +62,7 @@ fn writes_work(command: &Command) -> bool {
         | Command::Edit(_)
         | Command::Graph(_)
         | Command::Overview { .. }
-        | Command::Status { .. } => false,
+        | Command::Status { .. }
+        | Command::Setup { .. } => false,
     }
 }

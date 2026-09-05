@@ -148,6 +148,15 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
+    /// Wire the agents' session start to the notebook, in this directory:
+    /// the one-line snippet in `AGENTS.md` and `CLAUDE.md`, and the
+    /// `SessionStart` hook for Claude Code and Codex. Re-running patches in
+    /// place.
+    Setup {
+        /// Take out what setup put in, and nothing else.
+        #[arg(long)]
+        remove: bool,
+    },
 }
 
 /// One creation command for every record type: the envelope flags all

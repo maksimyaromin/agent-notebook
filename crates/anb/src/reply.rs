@@ -4,6 +4,7 @@
 //! when a reply names one.
 
 use crate::cli::{AddArgs, CloseArgs, Command, EditArgs, GraphArgs, SliceArgs};
+use crate::setup::{self, SetUp};
 use anb_core::encode::ROW_BOUND;
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, Deleted, Draft, Edged, Edit, Edited,
@@ -12,6 +13,7 @@ use anb_core::{
     Transitioned, View, path_stem,
 };
 use std::fmt::Write as _;
+use std::path::Path;
 
 /// The first bounded prefix of a flat list; both renderers show the same
 /// rows, and `--all` is the one lift.
@@ -90,6 +92,7 @@ pub enum Reply {
     Archived(Archived),
     Restored(Restored),
     Deleted(Deleted),
+    SetUp(SetUp),
     Edited(Edited),
     Searched {
         query: String,
@@ -152,6 +155,9 @@ pub struct Host<'a> {
     /// holds as dangling, and `check` lets a link reach it. `None` names no
     /// such root, never an empty one.
     pub user_notebook: Option<&'a dyn Storage>,
+    /// Where the session starts: the directory `setup` writes the agents'
+    /// files into.
+    pub project_dir: &'a Path,
     pub today: &'a str,
 }
 
@@ -170,6 +176,7 @@ pub fn execute(
         read_report,
         lost_proofs,
         user_notebook,
+        project_dir,
         today,
     } = host;
     let mut notebook = Notebook::new(storage).with_user(user_notebook);
@@ -239,6 +246,7 @@ pub fn execute(
             all,
         }),
         Command::Graph(args) => graphed(&notebook, args),
+        Command::Setup { remove } => Ok(Reply::SetUp(setup::apply(project_dir, remove)?)),
         Command::Status { budget, hook } => {
             status_reply(&notebook, budget, hook, lost_proofs, today)
         }
