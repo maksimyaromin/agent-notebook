@@ -30,6 +30,11 @@ jobs:
     name: Build and deploy the documentation site
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The two secrets are the owner's: an API token with Pages edit rights and the account id. Until they are set
+    # the run builds the site and stops, so a push to main is never red for a deployment nobody has enabled yet.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,9 +49,9 @@ jobs:
 
       # Cloudflare serves a deployment as production only when its branch is the project's production branch; any
       # other name lands on a preview URL: https://developers.cloudflare.com/pages/configuration/branch-build-controls/
-      # The two secrets are the owner's: an API token with Pages edit rights and the account id.
       - name: Upload the site to Cloudflare Pages
+        if: env.CLOUDFLARE_API_TOKEN != ''
         run: pnpm dlx wrangler@4 pages deploy apps/docs/dist --project-name agent-notebook --branch main
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Say why nothing was deployed
+        if: env.CLOUDFLARE_API_TOKEN == ''
+        run: echo "::notice title=Built, not deployed::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as repository secrets to deploy the site."
