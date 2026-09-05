@@ -1,8 +1,9 @@
 name: Release
 
-# A tag v<version> builds the binary for every platform the npm packages ship, publishes the GitHub release for the
-# tag with one archive per platform and the tag's CHANGELOG.md entry as its notes, and publishes the npm packages,
-# platform packages first and the shim package last. Until the packages exist on the registry, the publish step is a dry run: the
+# A release is a date: the tag v2026.09.05 builds the binary for every platform the npm packages ship, publishes the
+# GitHub release named after the tag with one archive per platform and the tag's CHANGELOG.md entry as its notes, and
+# publishes the npm packages at the version the manifests carry, platform packages first and the shim package last.
+# Until the packages exist on the registry, the publish step is a dry run: the
 # first publish is made from a maintainer's machine with scripts/release/publish.sh, from the binaries this workflow
 # built (scripts/release/fetch-binaries.sh <run-id>). After that the maintainer adds a Trusted Publisher for this
 # repository and workflow on npm, sets the RELEASE_DRY_RUN repository variable to false, and the id-token below is
@@ -97,7 +98,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "agent notebooks $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
           gh release upload "$GITHUB_REF_NAME" assets/* --clobber
 
   publish:
@@ -127,13 +128,7 @@ jobs:
             case "$platform" in win32-*) name=anb.exe ;; *) name=anb ;; esac
             sh scripts/release/place-binary.sh "$platform" "binaries/anb-$platform/$name"
           done
-      # The version a tag names must be the version every manifest carries; a disagreement would surface as a
-      # wrong version on the registry.
-      - name: Check the tag against the manifests
-        if: startsWith(github.ref, 'refs/tags/')
-        run: sh scripts/release/check-versions.sh "$GITHUB_REF_NAME"
       - name: Check the manifests agree
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: sh scripts/release/check-versions.sh
       - name: Check the tag has a changelog entry
         if: startsWith(github.ref, 'refs/tags/')

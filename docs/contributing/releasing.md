@@ -13,14 +13,16 @@ The Cargo workspace, every npm package and the launcher's platform dependency pi
 sh scripts/release/check-versions.sh
 ```
 
-Pass a tag as an argument to check it against the package versions too. The Release workflow runs this check before publishing.
+The Release workflow runs this check before publishing.
 
 ## Publish a release
 
-1. Update `Cargo.toml` and every `packages/*/package.json`, including the launcher's `optionalDependencies`. Run the version check.
-2. Regenerate `CHANGELOG.md` from the commits: `pnpm dlx git-cliff --tag v<version> -o CHANGELOG.md`; its configuration lives in `Cargo.toml`. The workflow refuses a tag without an entry, and `sh scripts/release/changelog-notes.sh v<version>` prints the entry it will use.
-3. Merge through a pull request, then push `v<version>` on the merged commit.
-4. Inspect the Release workflow. It builds the platform binaries, creates the GitHub release for the tag with one archive per platform, a `SHA256SUMS` file and the changelog entry as its notes, checks versions against the tag and smoke-tests the launcher with the Linux binary. It publishes the platform packages before the launcher.
+A release is named by its date, `v2026.09.05`, and the packages carry their own version. Bump the package version only when the packages change; a release that ships the same packages again is refused by the registry, and the workflow runs to that point without harm.
+
+1. When the packages change, update `Cargo.toml` and every `packages/*/package.json`, including the launcher's `optionalDependencies`, and run the version check.
+2. Write the release's entry in `CHANGELOG.md` under a heading that ends with the tag, `## agent notebooks v2026.09.05`: a paragraph on what the release means for a user, then `New`, `Improved` and `Fixed` with the pull requests in parentheses, and the package version the release ships. The workflow refuses a tag without an entry; `sh scripts/release/changelog-notes.sh v<date>` prints the entry it will use.
+3. Merge through a pull request, then push `v<date>` on the merged commit.
+4. Inspect the Release workflow. It builds the platform binaries, creates the GitHub release named after the tag with one archive per platform, a `SHA256SUMS` file and the changelog entry as its notes, checks that the manifests agree and smoke-tests the launcher with the Linux binary. It publishes the platform packages before the launcher.
 
 The repository variable `RELEASE_DRY_RUN` controls publication. Unless its value is `false`, the workflow runs without publishing to npm.
 

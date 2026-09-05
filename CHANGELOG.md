@@ -1,68 +1,23 @@
 # Changelog
 
-## [0.1.0] - 2026-09-05
+## agent notebooks v2026.09.05
 
-### Added
+The first release. A project's working memory as typed records in plain markdown files, and one command, `anb`, that any coding agent runs to read and write them. Four kinds of record with lifecycles the tool enforces, a Status that fits a token budget, a check that names the repair for anything it finds, and a skill rendered from the binary so what agents learn cannot drift from what the tool does. Installs from npm with a native binary per platform, or with `cargo install`.
 
-- Scaffold the Rust workspace — anb-core behind the Storage seam + anb CLI
-- Grammar layer — total lossless parse, render, normalize, named findings, corpus
-- Record model — typed lifecycles, write-time invariants, idempotent mutations
-- Dependency graph — cycle rejection, unblocked on close, ready queue
-- Status + Budget — gated dashboard, full Debt, degradation ladder
-- CLI task cycle — fs adapter, output contract, recovery payloads, Status surface
-- CLI knowledge cycle — decide/note/ask/answer/retire, conflict nudge
-- Quotation rule — code spans and fences quote ids, mutating verbs nudge on dangling mentions
-- Check, archive, edit, search, overview — the CLI's maintenance surface
-- Name the state-vs-residence split, in both directions
-- Close --note ingests the report as the Note it links
-- Expunge removes a record born by mistake, guarded by its inbound edges
-- The notebook's location is the user's to choose
-- Epics are hub Tasks, with the queries and the dashboard to work them
-- Status names the proofs the world no longer holds
-- Check names the repair, view bounds a long body, and the storage seam stops at the root
-- The user's notebook, and the verbs that have nothing to do there
-- The rules behind a project, named beside the ones that shadow them
-- The notebook as a graph — data by default, a picture on request
-- The graph is data, and the drawing belongs to whoever asked for it
-- The gate runs on GitHub too — CI on every PR and push to main
-- The one corruption the tool can name is one it can undo ([#4](https://github.com/maksimyaromin/agent-notebook/pull/4))
-- The CLI speaks one plain word per concept, and a Task ends without work by reason ([#7](https://github.com/maksimyaromin/agent-notebook/pull/7))
-- The write paths and check read the user's notebook too ([#8](https://github.com/maksimyaromin/agent-notebook/pull/8))
-- Setup wires the agents' session start to the notebook ([#10](https://github.com/maksimyaromin/agent-notebook/pull/10))
-- The skill is rendered by the binary, installed by setup, and diffed in CI ([#11](https://github.com/maksimyaromin/agent-notebook/pull/11))
-- The atlas skill draws the notebook and turns the reader's comments into commands ([#13](https://github.com/maksimyaromin/agent-notebook/pull/13))
-- Npm distribution, the shim package and one package per platform ([#17](https://github.com/maksimyaromin/agent-notebook/pull/17))
-- A tag publishes a GitHub release with the binaries and the changelog entry as its notes ([#27](https://github.com/maksimyaromin/agent-notebook/pull/27))
+### New
 
-### Fixed
+- **Four kinds of record, one file each.** Tasks, Decisions, Notes and Questions live under `.agent-notebook/`: a fenced envelope of `key: value` lines the tool owns, then a body it never parses. A state moves only by command, no move deletes a file or frees an id, and the archive keeps every settled record together with its reports.
+- **The verbs of a session.** `add`, `start`, `submit`, `close` with a proof or a reason, `reopen`, `hold` and `unhold` with the reason on record, `block` and `unblock` with a cycle refused the moment it is written, `comment` as the Task's log, `retire` for a Decision or Note without a successor. A Question closes into the record that settled it. (#7)
+- **`ready` is the dispatch queue.** Open, unblocked, unheld Tasks, most urgent first, and `--for <hub>` narrows it to one epic. An epic is a hub Task: children are born `--from` it, and the hub waits on them until the last one closes.
+- **Status within a token budget.** A session opens on the active Task with its last log line, the standing rules, what waits on hold and the debt the notebook owes. The composite degrades in a fixed order to stay under the budget, 1500 tokens by default, and a held Task waits in its own section instead of posing as the active one. (#9)
+- **One reply shape for every command.** An `ok:` line with the verb, the id and what changed, or a refusal with its code, the fact and a command that runs as printed. Tables name their columns once, listings are bounded and `--all` lifts the bound, `--json` returns the same data everywhere, and a repeated command answers `(already)`. The vocabulary is one plain word per concept, judged term by term. (#7, #14, #23)
+- **`check` names the repair.** It reads every file, names each line it cannot accept and the command that fixes it, so a hand edit or a bad merge never silently drops a record. `edit --clear` erases a field, `restore` brings an archived record back byte for byte, and `delete` removes a record born by mistake but refuses while anything cites it. (#4)
+- **Two agents at once.** Writers and readers serialize on a lock at the notebook root, so nobody reads a cascade half finished.
+- **`setup` wires the agents.** One line in `AGENTS.md` and `CLAUDE.md` between markers, a `SessionStart` hook for Claude Code and Codex that runs `anb status --hook`, and the skills where each agent looks for them. Running it again patches in place, and `--remove` takes out only what setup wrote. (#10)
+- **A skill rendered from the binary.** `anb skill` prints the `anb` skill from the same definitions that print `--help`, with every example run on a scratch notebook, and CI diffs the committed copy against the rendering. Its references live under `references/`, and its common mistakes are the ones the tool makes easy. (#11, #12, #22)
+- **The atlas skill.** `anb graph --json` prints the notebook as records and edges, and `anb-atlas` teaches an agent to draw it as one self-contained page: a legend that filters, a side panel for the record, and comments that come back as lines the agent turns into commands. (#13, #22)
+- **Your own notebook.** `--global` names a notebook in the home directory for Decisions and Notes that outlive one repository; Tasks and Questions are refused there. The write paths and `check` read it too. (#8)
+- **Installs from npm or cargo.** `@supolka/agent-notebook` carries the launcher and one package per platform, macOS and Linux on x64 and arm64 and Windows on x64, with no postinstall download; `cargo install` builds from the repository. A tag builds every platform and publishes a GitHub release with the archives and their checksums. (#17, #18, #27)
+- **The book.** Documentation at agent-notebook.supolka.dev, with the command and refusal reference pages rendered from the binary and checked in CI, and a README with one default adoption path. (#15, #16, #20, #21, #26)
 
-- Mint ids that cut at a word boundary
-- Read a report proof's path from the project, not the notebook directory
-- A repair is progress, not perfection — and only where a verb can reach
-- What two reviews found — a live record answers for its own id, the gate's first hop is one hop, and the claims match the code
-- The protocol the type system now keeps, and a line a record could forge
-- Seven defects a correctness audit reproduced, none of them cheap
-- What the intake review found — one home for the archive prefix, and four comments that outran their subject
-- An interrupted move is recognised by identity, never by bytes
-- A browser that never opens the map is ended with the run that started it
-- A held Task waits in its own Status section, never as the active one ([#9](https://github.com/maksimyaromin/agent-notebook/pull/9))
-- The npm packages stay out of the pnpm workspace, so the frozen install holds ([#18](https://github.com/maksimyaromin/agent-notebook/pull/18))
-- The Pages workflow builds and stops until the Cloudflare secrets exist ([#19](https://github.com/maksimyaromin/agent-notebook/pull/19))
-- A count and its noun agree in number ([#23](https://github.com/maksimyaromin/agent-notebook/pull/23))
-
-### Changed
-
-- An audit pass — the walks stop overflowing, the dashboard stops reading history it has no epic for, and the suite guards what it claimed
-- Obligations the type system keeps, and one path to every name
-
-### Documentation
-
-- The README a stranger reads first, and the MIT license ([#15](https://github.com/maksimyaromin/agent-notebook/pull/15))
-- The documentation site, built from docs/ and deployed to Cloudflare Pages ([#16](https://github.com/maksimyaromin/agent-notebook/pull/16))
-- AGENTS.md says what a stranger's agent needs, and nothing that lives outside the repository ([#20](https://github.com/maksimyaromin/agent-notebook/pull/20))
-- Public text describes the tool and its scripts, never a maintainer's setup ([#21](https://github.com/maksimyaromin/agent-notebook/pull/21))
-- The skills name mistakes the tool makes easy, and the atlas page stays out of the map's way ([#22](https://github.com/maksimyaromin/agent-notebook/pull/22))
-- The README and the book rewritten for engineers, with a customization guide ([#26](https://github.com/maksimyaromin/agent-notebook/pull/26))
-
-[0.1.0]: https://github.com/maksimyaromin/agent-notebook/releases/tag/v0.1.0
-
+Packages in this release: `@supolka/agent-notebook@0.1.0` and its five platform packages at the same version.
