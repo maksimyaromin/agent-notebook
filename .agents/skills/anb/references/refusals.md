@@ -185,7 +185,7 @@ The file carries error findings, which close it to every verb until `check` is a
 
 ```
 $ anb start task.broken
-error[invalid-record]: tasks/task.broken.md is invalid (1 findings)
+error[invalid-record]: tasks/task.broken.md is invalid (1 finding)
   line 4: bad-value state: `bogus` is not one of open, active, review, closed for a task
 try: anb show task.broken
 ```

@@ -15,7 +15,7 @@ use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
 use anb_core::{
     EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, ListedRecord, NotebookError, Overview,
-    ReadyTask, RecordType, View, counts_phrase, encode,
+    ReadyTask, RecordType, View, counted, counts_phrase, encode,
 };
 use std::fmt::Write as _;
 
@@ -516,6 +516,7 @@ fn single_record(view: &View, all: bool) -> String {
         match encode::body_ends(&view.body).filter(|_| !all) {
             Some((head, dropped, tail)) => {
                 indented(&mut out, head);
+                // A cut drops two lines at the least, so the noun is always plural.
                 let _ = writeln!(
                     out,
                     "  \u{2026} {dropped} more lines: anb show {} --all",
@@ -549,7 +550,7 @@ fn setup_lines(done: &crate::setup::SetUp) -> String {
     } else {
         "setup"
     };
-    let mut out = format!("ok: {verb} — {} files\n", done.files.len());
+    let mut out = format!("ok: {verb} — {}\n", counted(done.files.len(), "file"));
     for wired in &done.files {
         let _ = writeln!(out, "  {}: {}", wired.path, wired.outcome.word());
     }
@@ -566,7 +567,10 @@ fn skill_lines(skill: &crate::reply::SkillReply) -> String {
     match skill {
         SkillReply::Printed(text) => text.clone(),
         SkillReply::Written { dir, files } => {
-            format!("ok: skill — {files} files written into {dir}\n")
+            format!(
+                "ok: skill — {} written into {dir}\n",
+                counted(*files, "file")
+            )
         }
         SkillReply::Checked { dir, drift } if drift.is_empty() => {
             format!("ok: skill — {dir} matches the rendering\n")
