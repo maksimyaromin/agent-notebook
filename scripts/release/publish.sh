@@ -1,26 +1,28 @@
 #!/bin/sh
-# Publish the npm packages from this machine, the way the first release goes
-# before Trusted Publishing exists:
+# Publish the npm packages from a maintainer's machine, the way the first
+# release of a package goes before Trusted Publishing exists:
 #   scripts/release/publish.sh            a dry run of every package
-#   scripts/release/publish.sh --publish  the real thing, npm asking for the OTP
+#   scripts/release/publish.sh --publish  the real thing; npm asks for a one-time code when the account requires one
 #
-# The token comes from this repository's git-ignored .env, line NPM_TOKEN=…,
-# read from the file and never from the environment: the shell may carry a
-# token of the same name for another account and another scope, and that one
-# must never publish here. The token is handed to npm through a temporary
-# user config, so the user's own ~/.npmrc plays no part, and the script
-# refuses unless npm answers `whoami` with the account that owns @supolka.
+# It needs two lines in a git-ignored .env at the repository root and reads
+# them from that file only, never from the environment:
+#   NPM_TOKEN=…        a token allowed to publish the @supolka packages
+#   NPM_PUBLISHER=…    the npm account the token belongs to
+# The token is handed to npm through a temporary user config, so the user's
+# own npm configuration plays no part, and the script refuses unless npm
+# answers `whoami` with the expected account.
 set -eu
 cd "$(dirname "$0")/../.."
 unset NPM_TOKEN NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG || true
 
-owner=maksimy
 mode=--dry-run
 [ "${1:-}" = "--publish" ] && mode=
 
-[ -f .env ] || { echo "no .env in the repository root; put the publish token there as NPM_TOKEN=…"; exit 1; }
+[ -f .env ] || { echo "no .env at the repository root; see the header of this script"; exit 1; }
 token=$(sed -n 's/^NPM_TOKEN=//p' .env | tr -d '"' | tr -d "'" | head -1)
 [ -n "$token" ] || { echo ".env has no NPM_TOKEN= line"; exit 1; }
+expected=$(sed -n 's/^NPM_PUBLISHER=//p' .env | tr -d '"' | tr -d "'" | head -1)
+[ -n "$expected" ] || { echo ".env has no NPM_PUBLISHER= line naming the account the token belongs to"; exit 1; }
 
 userconfig=$(mktemp)
 trap 'rm -f "$userconfig"' EXIT
@@ -28,8 +30,8 @@ chmod 600 "$userconfig"
 printf '//registry.npmjs.org/:_authToken=%s\n' "$token" > "$userconfig"
 
 who=$(npm whoami --userconfig "$userconfig" 2>/dev/null || true)
-if [ "$who" != "$owner" ]; then
-  echo "npm whoami answered '${who:-nobody}', not '$owner'; the token in .env is not the @supolka publish token"
+if [ "$who" != "$expected" ]; then
+  echo "npm whoami answered '${who:-nobody}', not '$expected'; the token in .env does not belong to the expected account"
   exit 1
 fi
 echo "ok: publishing as $who"

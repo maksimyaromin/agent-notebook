@@ -14,7 +14,7 @@ $ anb add decision "Fences never nest" --kind rule --tag parser --tag grammar --
 ok: add decision.fences-never-nest — decisions/decision.fences-never-nest.md
 ```
 
-Rules print in every Status, so the owner's taste applies without anyone reading the log. A Decision is never edited into a different ruling; it is replaced: `anb add decision "<title>" --supersedes <old>` writes the new one and flips the old to `superseded` in the same move, and `anb retire <id>` ends one that has no successor. A dead rule cannot be read as live.
+Rules print in every Status, so the project's standing rules apply without anyone reading the log. A Decision is never edited into a different ruling; it is replaced: `anb add decision "<title>" --supersedes <old>` writes the new one and flips the old to `superseded` in the same move, and `anb retire <id>` ends one that has no successor. A dead rule cannot be read as live.
 
 When a new Decision shares ground with a live one, the reply says so:
 
@@ -28,7 +28,7 @@ The nudge fires at write time when the new Decision shares two or more tags with
 
 ## Notes
 
-A Note is curated knowledge, kinds `fact`, `term` and `guide`. Unlike a Decision it is corrected in place with `anb edit`, because a fact that changed is the same fact, updated. A `term` defines a word of the project's domain language, so an agent names things the way the owner does. A report ingested by `anb close --note` is a Note too, born from the Task it closes.
+A Note is curated knowledge, kinds `fact`, `term` and `guide`. Unlike a Decision it is corrected in place with `anb edit`, because a fact that changed is the same fact, updated. A `term` defines a word of the project's domain language, so an agent names things the way the project does. A report ingested by `anb close --note` is a Note too, born from the Task it closes.
 
 ## Questions
 
