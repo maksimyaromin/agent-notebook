@@ -1,6 +1,9 @@
+# The docs app is the only pnpm project. The npm packages under packages/ are
+# published with npm from their own directories and stay out of the
+# workspace: the shim names its platform packages by registry version, which
+# pnpm cannot lock before they are published.
 packages:
   - 'apps/*'
-  - 'packages/*'
 
 # sharp arrives through the documentation site and compiles from source when no prebuild fits the machine. Nothing
 # here renders an image, so that compile is time spent for nothing.

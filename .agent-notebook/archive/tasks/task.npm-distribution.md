@@ -1,16 +1,18 @@
 ---
 id: task.npm-distribution
 type: task
-state: review
+state: closed
 title: npm distribution
 by: Maksim Yaromin
 via: claude-code
 tags: dist
+link: note note.report-npm-distribution
 blocked-by: task.cli-task-cycle
 blocked-by: task.milestone-cli-complete
 blocked-by: task.skills
 created: 2026-08-29
 updated: 2026-09-05
+closed: 2026-09-05
 ---
 
 Package @supolka/agent-notebook shipping platform Rust binaries (esbuild/turbo distribution pattern; swc/biome as Rust precedents); npx -y works from zero.
