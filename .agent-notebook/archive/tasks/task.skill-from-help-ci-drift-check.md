@@ -1,15 +1,17 @@
 ---
 id: task.skill-from-help-ci-drift-check
 type: task
-state: review
+state: closed
 title: Skill from help + CI drift check
 by: Maksim Yaromin
 via: claude-code
 tags: cli
+link: note note.report-skill-from-help-ci-drift-check
 blocked-by: task.setup-sessionstart-hooks
 blocked-by: task.github-dev-flow-actions-ci-fmt-clippy-te
 created: 2026-08-29
 updated: 2026-09-05
+closed: 2026-09-05
 ---
 
 Skill generated from the same source as CLI help; CI-checked against drift.

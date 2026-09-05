@@ -3,8 +3,8 @@
 //!
 //! `SKILL.md` carries the method — the session, the Task loop, the shape of
 //! work, knowledge, the user's notebook, the reply contract — in the words
-//! an agent reads once and keeps. Three references beside it carry the
-//! depth, one file per need so a session loads only the one it has: every
+//! an agent reads once and keeps. Three references under `references/` carry
+//! the depth, one file per need so a session loads only the one it has: every
 //! command with its flags from the same definitions `--help` prints, a
 //! worked session with every reply rendered by running the command, and the
 //! refusal catalog rendered the same way. A committed copy is diffed against
@@ -26,9 +26,9 @@ use std::path::Path;
 pub const GENERATED_MARK: &str = "generated: anb";
 
 pub const SKILL_FILE: &str = "SKILL.md";
-pub const COMMANDS_FILE: &str = "commands.md";
-pub const SESSION_FILE: &str = "session.md";
-pub const REFUSALS_FILE: &str = "refusals.md";
+pub const COMMANDS_FILE: &str = "references/commands.md";
+pub const SESSION_FILE: &str = "references/session.md";
+pub const REFUSALS_FILE: &str = "references/refusals.md";
 
 /// The day every example runs on, so the rendering is the same on every
 /// machine and the ages in it read as written.
@@ -91,9 +91,11 @@ pub fn render() -> Skill {
 /// # Errors
 /// The storage failure of the write.
 pub fn write_into(dir: &Path, skill: &Skill) -> Result<(), StorageError> {
-    fs::create_dir_all(dir).map_err(|error| io_failure(dir, &error))?;
     for (file, text) in skill.files() {
         let path = dir.join(file);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| io_failure(parent, &error))?;
+        }
         fs::write(&path, text).map_err(|error| io_failure(&path, &error))?;
     }
     Ok(())
@@ -149,52 +151,95 @@ fn io_failure(path: &Path, error: &std::io::Error) -> StorageError {
 fn skill_md() -> String {
     let mut out = String::new();
     out.push_str("---\nname: anb\n");
-    out.push_str("description: Work a project's notebook — its Tasks, Decisions, Notes and Questions — through the anb CLI: resume the active Task, take the next ready one, record a decision or a question, close work with its proof, and leave the notebook clean. Use whenever the session touches .agent-notebook, when asked to continue a task or an epic, and before recording a decision, a doubt or a finding.\n");
+    out.push_str("description: Use when working in a repository that has an .agent-notebook directory: when asked to continue a task or an epic, to pick the next piece of work, to record a decision, a doubt or a finding, to close work with its proof, or to say where the project stands. Also when a session starts and a status line beginning with active: was printed.\n");
     out.push_str("metadata:\n  generated: anb\n---\n\n");
     out.push_str(SKILL_BODY);
     out
 }
 
-const SKILL_BODY: &str = r#"# The notebook
+const SKILL_BODY: &str = r#"# anb
 
-`anb` keeps a project's working memory as typed records in `.agent-notebook/`: **Tasks** (open → active → review → closed), **Decisions** (active → superseded | retired), **Notes** (active → retired), **Questions** (open → closed). Every record has an id you type — `task.parser-fences`, `decision.no-mise-toml` — and a markdown file a human can read. Mutate the notebook only through `anb`; never edit the files.
+## Overview
 
-Every reply is short plain text an agent parses at a glance: `ok: <verb> <id> — <what changed>`, tables as `name[N]{fields}:` with comma rows, and refusals as `error[<code>]: <message>` followed by `try:` lines. **A `try:` line is a command that runs as printed** — run one instead of guessing. Listings are bounded; `--all` lifts the bound, `--json` gives the same data as compact JSON. Three references sit beside this file, one per need, so open only the one you have: before a verb you have not used, [commands](commands.md) — every verb with its flags and what each means; to see what a reply looks like before you parse one, the [worked session](session.md) — a notebook from empty to archived work, every reply as printed; when a refusal's `try:` line is not enough, [refusals](refusals.md) — every error code with its cause and repair, and the findings `anb check` raises.
+`anb` keeps a project's working memory as typed records in `.agent-notebook/`: Tasks (open → active → review → closed), Decisions (active → superseded | retired), Notes (active → retired), Questions (open → closed). Every record has an id you type, such as `task.parser-fences` or `decision.no-mise-toml`, and a markdown file a human can read. Change the notebook only through `anb`, never by editing the files. The notebook is the developer's memory of the project, and keeping it clean is your job.
+
+Every reply is short plain text an agent parses at a glance: `ok: <verb> <id> — <what changed>`, tables as `name[N]{fields}:` with comma rows, and refusals as `error[<code>]: <message>` followed by `try:` lines. A `try:` line is a command that runs as printed, so run one instead of guessing. Listings are bounded; `--all` lifts the bound, and `--json` gives the same data as compact JSON.
+
+## When to use
+
+- The session starts in a repository with `.agent-notebook/`, or a hook printed a line beginning with `active:`.
+- Someone asks to continue, resume or pick up a task or an epic, or to take the next piece of work.
+- You are about to record a decision, a doubt, a term, a fact or a finding. The notebook is where it goes, not a chat message or a stray file.
+- Work is done and needs closing with its proof, or the developer asks where the project stands.
+
+A repository without a notebook is outside this skill until `anb setup` wires one and `anb add` creates the first record. Editing record files is outside it always: every change is a verb.
+
+## Quick reference
+
+| Situation | Command |
+|---|---|
+| Where did the last session stop? | `anb status` |
+| What can start now? | `anb ready`, or inside one epic `anb ready --for <hub>` |
+| Take a Task into work | `anb start <id>` |
+| Log progress | `anb comment <id> "<one line>"` |
+| A doubt while working | `anb add question "<title>" --from <task>` |
+| A ruling | `anb add decision "<title>" --kind rule` (or `shape`, `drift`) |
+| A fact, a term, a guide | `anb add note "<title>" --kind fact` (or `term`, `guide`) |
+| Hand work to a human | `anb submit <id>` |
+| Close with proof, then file | `anb close <id> --note <report.md>`, then `anb archive <id>` |
+| A Question settled | `anb close <question> --resolved-by <id>`, or `--reason "<why>"` |
+| Pause, resume | `anb hold <id> --reason "<why>"`, `anb unhold <id>` |
+| Find a record | `anb search <words>`, then `anb show <id>` |
+| Verify the notebook | `anb check` |
+
+Three references sit under `references/`, one per need, so open only the one you have. Before a verb you have not used, open [commands](references/commands.md): every verb with its flags and what each means. To see what a reply looks like before you parse one, open the [worked session](references/session.md): a notebook from empty to archived work, every reply as printed. When a refusal's `try:` line is not enough, open [refusals](references/refusals.md): every error code with its cause and repair, and the findings `anb check` raises.
 
 ## The session
 
-1. `anb status`. The **active** line is where the last session stopped, with its last log entry. If a hook already printed it, do not print it again.
-2. Resume the active Task. If none is active, take the top of `anb ready` and `anb start <id>`.
-3. Asked to *continue an epic*: find the hub — `anb search <words>` over ids, titles and tags — then take the active Task inside it, else the top of `anb ready --for <hub>`, and start it.
+1. Run `anb status`. The `active` line is where the last session stopped, with its last log entry. If a hook already printed it, do not print it again.
+2. Resume the active Task. If none is active, take the top of `anb ready` and run `anb start <id>`.
+3. Asked to continue an epic: find the hub with `anb search <words>`, which looks through ids, titles and tags. Then take the active Task inside it, or else the top of `anb ready --for <hub>`, and start it.
 
 ## The Task loop
 
-- `anb start <id>` takes a Task into work (also back from review).
-- `anb comment <id> "<one line>"` as you go: where you stopped, what you decided, what you found. The next session resumes from the log, not from scratch.
-- Every friction met on the way is a record, never a workaround: a doubt is `anb add question "<title>" --from <task>`, a ruling is `anb add decision`, a fact is `anb add note`.
+- `anb start <id>` takes a Task into work, and takes it back from review.
+- `anb comment <id> "<one line>"` as you go: where you stopped, what you decided, what you found. The next session resumes from the log rather than from scratch.
+- Every friction met on the way becomes a record instead of a workaround: a doubt is `anb add question "<title>" --from <task>`, a ruling is `anb add decision`, a fact is `anb add note`.
 - `anb submit <id>` hands the work to a human when one accepts it; the human's `anb start <id>` takes it back.
-- `anb close <id> --note <report.md>` closes with the report ingested as a Note — the default proof, because it travels with the notebook. Equals: `--pr <url>`, `--sha <sha>`, `--report <path>` (a living document left where it lies), `--no-proof` (done, nothing to show). Work that will never happen ends with `anb close <id> --reason "<why>"`, legal from open.
+- `anb close <id> --note <report.md>` closes with the report ingested as a Note. That is the default proof because it travels with the notebook. The others are its equals: `--pr <url>`, `--sha <sha>`, `--report <path>` for a living document left where it lies, and `--no-proof` when the work is done and there is nothing to show. Work that will never happen ends with `anb close <id> --reason "<why>"`, which is legal from open.
 - Run `anb archive <id>` right after the close. A closed record left live is a leftover somebody else has to find.
 
-**Hygiene is your job, not the developer's.** Close Questions the moment they are settled — `anb close <question> --resolved-by <decision-or-task>` when the answer became a record, `--reason "<why>"` when it did not. Pause with `anb hold <id> --reason "<why>"` and resume with `unhold`; a hold without a reason is where work rots. Leave nothing for the developer to tidy.
+Hygiene is your job, not the developer's. Close Questions the moment they are settled: `anb close <question> --resolved-by <decision-or-task>` when the answer became a record, `--reason "<why>"` when it did not. Pause with `anb hold <id> --reason "<why>"` and resume with `unhold`; a hold without a reason is where work rots. Leave nothing for the developer to tidy.
 
 ## The shape of work
 
-Work is almost never a flat sheet. An idea gets a **hub** Task tagged `epic`; every Task born inside it is created `--from <hub>`, and the hub is blocked by each child — `anb block <hub> <child>` — so it is not ready until the last child closes; then close and archive the hub like any Task. `anb ready --for <hub>` and `anb list --for <hub>` see one epic's work; `anb status` shows every epic's progress and its next Task. Create children this way by default, not as an option: origin is written at `add` time.
+Work is almost never a flat sheet. An idea gets a hub Task tagged `epic`, and every Task born inside it is created `--from <hub>`. The hub is blocked by each child (`anb block <hub> <child>`), so it is not ready until the last child closes; then close and archive the hub like any Task. `anb ready --for <hub>` and `anb list --for <hub>` see one epic's work, and `anb status` shows every epic's progress and its next Task. Create children this way by default: origin is written at `add` time and cannot be added later.
 
 ## Knowledge
 
-- **Decisions** carry a kind: `rule` (how we work), `shape` (a design ruling), `drift` (a deviation that stands until superseded). Replace one with `anb add decision "<title>" --supersedes <old>`; end one without a successor with `anb retire <id>`. The reply names a live Decision yours may conflict with — read it before going on.
-- **Notes** are curated knowledge corrected in place (`anb edit`), kinds `fact`, `term`, `guide`.
-- In prose, a bare id is a reference and a backticked one is a quotation. Cite records by id in bodies and comments; a citation of an id that exists nowhere is nudged back as `dangling-mention` — a forward reference is legal, a typo is not.
+- Decisions carry a kind: `rule` for how we work, `shape` for a design ruling, `drift` for a deviation that stands until superseded. Replace one with `anb add decision "<title>" --supersedes <old>`; end one without a successor with `anb retire <id>`. The reply names a live Decision yours may conflict with. Read it before going on.
+- Notes are curated knowledge corrected in place with `anb edit`; their kinds are `fact`, `term` and `guide`.
+- In prose, a bare id is a reference and a backticked one is a quotation. Cite records by id in bodies and comments. A citation of an id that exists nowhere comes back as `dangling-mention`: a forward reference is legal, a typo is not.
 
 ## The user's own notebook
 
-`--global` names the user's notebook in the home directory: knowledge that outlives one repository. Decisions and Notes live there; Tasks and Questions are refused, work stays in the project. A practice is a global Note tagged `skill`, addressed by name — `anb search <name> --global`, then `anb show <id> --global` — so "use my skill X" resolves through anb, never through a pasted path. A project rule that stands against one of the user's cites the user's id in its body; Status then names the pair.
+`--global` names the user's notebook in the home directory, for knowledge that outlives one repository. Decisions and Notes live there; Tasks and Questions are refused, because work stays in the project. A practice is a global Note tagged `skill`, addressed by name with `anb search <name> --global` and then `anb show <id> --global`, so "use my skill X" resolves through anb rather than through a pasted path. A project rule that stands against one of the user's cites the user's id in its body, and Status then names the pair.
 
 ## Before you stop
 
-`anb check` must be green — it verifies every file and names the move that repairs each finding. Commit the notebook with the code it describes.
+`anb check` must be green. It verifies every file and names the move that repairs each finding. Commit the notebook with the code it describes.
+
+## Common mistakes
+
+| Mistake | Instead |
+|---|---|
+| Editing a record file by hand | The verb that makes the change; `anb edit` for a field or the body |
+| Closing without archiving | `anb archive <id>` right after `anb close` |
+| A Question left open after its answer became a Decision | `anb close <question> --resolved-by <decision>` |
+| A hold with no reason, or a Task parked in a chat message | `anb hold <id> --reason "<why>"` |
+| A child Task added without its hub | `anb add task "<title>" --from <hub>`, then `anb block <hub> <child>` |
+| Guessing after a refusal | Run the `try:` line as printed |
+| Starting a second Task while one is active | Finish, submit or hold the active one first; Status shows one line for a reason |
 "#;
 
 // ---------------------------------------------------------------------------
@@ -208,9 +253,37 @@ fn reference(name: &str, description: &str, section: impl FnOnce(&mut String)) -
     let _ = writeln!(out, "---\nname: {name}\ndescription: {description}");
     out.push_str("metadata:\n  generated: anb\n---\n\n");
     let _ = writeln!(out, "# {name}\n");
-    out.push_str("Generated from the binary — the same definitions `anb --help` prints, every example run on a scratch notebook; a committed copy is checked against this rendering in CI.\n\n");
-    section(&mut out);
+    out.push_str("Generated from the binary: the same definitions `anb --help` prints, and every example run on a scratch notebook. A committed copy is checked against this rendering in CI.\n\n");
+    let mut body = String::new();
+    section(&mut body);
+    out.push_str("## Contents\n\n");
+    for heading in headings(&body) {
+        let _ = writeln!(out, "- {heading}");
+    }
+    out.push('\n');
+    out.push_str(&body);
     out
+}
+
+/// The headings of `body` at its shallowest level: the sections a reader
+/// jumps to, listed before the text so a partial read still shows the scope.
+fn headings(body: &str) -> Vec<&str> {
+    let marked: Vec<(usize, &str)> = body
+        .lines()
+        .filter_map(|line| {
+            let level = line.bytes().take_while(|byte| *byte == b'#').count();
+            (level > 0 && line.as_bytes().get(level) == Some(&b' '))
+                .then(|| (level, line[level + 1..].trim()))
+        })
+        .collect();
+    let Some(shallowest) = marked.iter().map(|(level, _)| *level).min() else {
+        return Vec::new();
+    };
+    marked
+        .into_iter()
+        .filter(|(level, _)| *level == shallowest)
+        .map(|(_, text)| text)
+        .collect()
 }
 
 /// Every verb with its flags, from the clap tree the binary parses with.
@@ -280,6 +353,9 @@ fn session_section(out: &mut String) {
     let mut notebook = Scratch::new();
     for step in SESSION {
         match step {
+            Step::Head(text) => {
+                let _ = writeln!(out, "## {text}\n");
+            }
             Step::Say(text) => {
                 let _ = writeln!(out, "{text}\n");
             }
@@ -291,10 +367,13 @@ fn session_section(out: &mut String) {
 
 /// The refusal catalog: one example per stable code, rendered by the tool.
 fn refusals_section(out: &mut String) {
-    out.push_str("Every refusal is `error[<code>]: <message>` and then `try:` lines — commands that run as printed. The codes are stable; the messages name the record and the fact.\n\n");
+    out.push_str("Every refusal is `error[<code>]: <message>` followed by `try:` lines, which are commands that run as printed. The codes are stable; the messages name the record and the fact.\n\n");
     let mut notebook = Scratch::new();
     for step in REFUSALS {
         match step {
+            Step::Head(text) => {
+                let _ = writeln!(out, "## {text}\n");
+            }
             Step::Say(text) => {
                 let _ = writeln!(out, "{text}\n");
             }
@@ -302,6 +381,7 @@ fn refusals_section(out: &mut String) {
             Step::Report(path, body) => notebook.reports.push((path, body)),
         }
     }
+    out.push_str("## Codes without an example\n\n");
     out.push_str("Three more codes reach the command line without a notebook to show them on: `unknown-command` (a verb anb does not have; the reply offers `anb --help`), `storage` (the file system failed the read or write, in the message) and `not-utf8` (a record file is not UTF-8; `anb check` names it).\n\n");
 }
 
@@ -330,6 +410,8 @@ fn findings_section(out: &mut String) {
 }
 
 enum Step {
+    /// A section heading; the reference lists them at its top.
+    Head(&'static str),
     /// Prose between examples.
     Say(&'static str),
     /// A command line, run and rendered.
@@ -339,6 +421,7 @@ enum Step {
 }
 
 const SESSION: &[Step] = &[
+    Step::Head("The hub and the work born inside it"),
     Step::Say("An idea becomes a hub, and the work inside it is born from the hub:"),
     Step::Run(&[
         "add",
@@ -382,9 +465,11 @@ const SESSION: &[Step] = &[
         "task.negative-corpus-wired-into-ci",
         "task.grammar-parser-accepts-fences",
     ]),
+    Step::Head("The queue"),
     Step::Say("The queue shows what can start now; the blocked child waits:"),
     Step::Run(&["ready"]),
     Step::Run(&["ready", "--for", "task.ship-the-parser"]),
+    Step::Head("A session at work"),
     Step::Say(
         "A session takes the top of the queue, logs as it goes, and parks a doubt without widening its scope:",
     ),
@@ -401,8 +486,9 @@ const SESSION: &[Step] = &[
         "--from",
         "task.grammar-parser-accepts-fences",
     ]),
+    Step::Head("Decisions and Notes"),
     Step::Say(
-        "A ruling is a Decision; a term is a Note. A second Decision on the same ground is nudged about the first — read it before going on:",
+        "A ruling is a Decision; a term is a Note. A second Decision on the same ground is nudged about the first, so read it before going on:",
     ),
     Step::Run(&[
         "add",
@@ -439,6 +525,7 @@ const SESSION: &[Step] = &[
         "--body",
         "A fence is a pair of triple-backtick lines; the parser treats the lines between as one opaque body.",
     ]),
+    Step::Head("Closing a Question"),
     Step::Say("The doubt closes into the record that settled it, and is archived right after:"),
     Step::Run(&[
         "close",
@@ -447,10 +534,12 @@ const SESSION: &[Step] = &[
         "decision.fences-never-nest",
     ]),
     Step::Run(&["archive", "question.do-fences-nest"]),
+    Step::Head("Status"),
     Step::Say(
-        "Status is the session's opening — the active Task with its last log line, the rules, the queue, the epics:",
+        "Status opens the session with the active Task and its last log line, the rules, the queue and the epics:",
     ),
     Step::Run(&["status", "--budget", "0"]),
+    Step::Head("Closing a Task"),
     Step::Say(
         "The work closes with its report as a Note, and is archived right after; the reply names what the close unblocked:",
     ),
@@ -465,6 +554,7 @@ const SESSION: &[Step] = &[
         "report.md",
     ]),
     Step::Run(&["archive", "task.grammar-parser-accepts-fences"]),
+    Step::Head("Ending without work, pausing"),
     Step::Say(
         "A Task overtaken before it started ends with its reason, from open, and is archived like any closed record; a pause carries its reason too:",
     ),
@@ -484,8 +574,9 @@ const SESSION: &[Step] = &[
         "--until",
         "2026-01-20",
     ]),
+    Step::Head("Reading back, and the gate"),
     Step::Say(
-        "Reading back: one record, the whole notebook, a search that reaches the archive, and the gate — clean, because every settled record was archived as it settled:",
+        "Reading back: one record, the whole notebook, a search that reaches the archive, and the gate, which is clean because every settled record was archived as it settled:",
     ),
     Step::Run(&["show", "task.ship-the-parser"]),
     Step::Run(&["list"]),
@@ -494,6 +585,7 @@ const SESSION: &[Step] = &[
 ];
 
 const REFUSALS: &[Step] = &[
+    Step::Head("The scratch notebook"),
     Step::Say("The scratch notebook the refusals below run against:"),
     Step::Run(&["add", "task", "Ship the parser", "--tag", "epic"]),
     Step::Run(&[
@@ -505,20 +597,23 @@ const REFUSALS: &[Step] = &[
     ]),
     Step::Run(&["add", "decision", "Fences never nest", "--kind", "rule"]),
     Step::Run(&["add", "note", "Fence", "--kind", "term"]),
-    Step::Say("`unknown-id`: no record carries the id."),
+    Step::Head("unknown-id"),
+    Step::Say("No record carries the id."),
     Step::Run(&["start", "task.parser"]),
+    Step::Head("invalid-transition"),
     Step::Say(
-        "`invalid-transition`: the record's state does not allow the move; the valid moves are listed, each with its command.",
+        "The record's state does not allow the move; the valid moves are listed, each with its command.",
     ),
     Step::Run(&["close", "task.ship-the-parser", "--no-proof"]),
-    Step::Say(
-        "`invalid-argument`: a flag or value is malformed or foreign to the record; the retry shape is given.",
-    ),
+    Step::Head("invalid-argument"),
+    Step::Say("A flag or value is malformed or foreign to the record; the retry shape is given."),
     Step::Run(&["add", "decision", "Tabs", "--priority", "2"]),
     Step::Run(&["close", "task.ship-the-parser"]),
-    Step::Say("`dangling-ref`: an envelope reference names a record that does not exist."),
+    Step::Head("dangling-ref"),
+    Step::Say("An envelope reference names a record that does not exist."),
     Step::Run(&["add", "task", "A child", "--from", "task.ghost"]),
-    Step::Say("`would-cycle`: the edge would close a dependency cycle, which is walked in full."),
+    Step::Head("would-cycle"),
+    Step::Say("The edge would close a dependency cycle, which is walked in full."),
     Step::Run(&[
         "block",
         "task.ship-the-parser",
@@ -529,7 +624,8 @@ const REFUSALS: &[Step] = &[
         "task.grammar-parser-accepts-fences",
         "task.ship-the-parser",
     ]),
-    Step::Say("`duplicate-id`: ids are never reused, the archive included."),
+    Step::Head("duplicate-id"),
+    Step::Say("Ids are never reused, the archive included."),
     Step::Run(&[
         "add",
         "task",
@@ -537,13 +633,14 @@ const REFUSALS: &[Step] = &[
         "--id",
         "task.ship-the-parser",
     ]),
-    Step::Say("`wrong-type`: the id names a type the command does not act on."),
+    Step::Head("wrong-type"),
+    Step::Say("The id names a type the command does not act on."),
     Step::Run(&["comment", "note.fence", "a line"]),
-    Step::Say(
-        "`still-referenced`: a delete would leave the notebook pointing at nothing; every holder is named.",
-    ),
+    Step::Head("still-referenced"),
+    Step::Say("A delete would leave the notebook pointing at nothing; every holder is named."),
     Step::Run(&["delete", "task.ship-the-parser"]),
-    Step::Say("`cannot-supersede`: the record named by `--supersedes` cannot die by supersession."),
+    Step::Head("cannot-supersede"),
+    Step::Say("The record named by `--supersedes` cannot die by supersession."),
     Step::Run(&["retire", "decision.fences-never-nest"]),
     Step::Run(&[
         "add",
@@ -554,13 +651,13 @@ const REFUSALS: &[Step] = &[
         "--supersedes",
         "decision.fences-never-nest",
     ]),
-    Step::Say(
-        "`archived`: an archived record is read, never mutated in place; `restore` brings it back.",
-    ),
+    Step::Head("archived"),
+    Step::Say("An archived record is read, never mutated in place; `restore` brings it back."),
     Step::Run(&["archive", "decision.fences-never-nest"]),
     Step::Run(&["edit", "decision.fences-never-nest", "--title", "Fences"]),
+    Step::Head("invalid-record"),
     Step::Say(
-        "`invalid-record`: the file carries error findings, which close it to every verb until `check` is answered.",
+        "The file carries error findings, which close it to every verb until `check` is answered.",
     ),
     Step::Run(&["add", "task", "Broken", "--id", "task.broken"]),
     Step::Run(&["start", "task.broken"]),
@@ -663,6 +760,36 @@ mod tests {
             &skill.skill.replace("  generated: anb\n", "")
         ));
         assert!(!is_generated("# No frontmatter at all\n"));
+    }
+
+    #[test]
+    fn a_reference_opens_with_the_list_of_its_sections() {
+        let skill = render();
+        for (file, text) in &skill.files()[1..] {
+            let (_, after) = text
+                .split_once("## Contents\n\n")
+                .unwrap_or_else(|| panic!("{file} has no contents list"));
+            let listed: Vec<&str> = after
+                .lines()
+                .map_while(|line| line.strip_prefix("- "))
+                .collect();
+            let body = &after[listed.iter().map(|item| item.len() + 3).sum::<usize>()..];
+            let marks = |line: &str| line.bytes().take_while(|byte| *byte == b'#').count();
+            let shallowest = body
+                .lines()
+                .filter(|line| line.starts_with('#'))
+                .map(marks)
+                .min()
+                .unwrap_or_else(|| panic!("{file} has no sections"));
+            let sections: Vec<&str> = body
+                .lines()
+                .filter(|line| {
+                    marks(line) == shallowest && line.as_bytes().get(shallowest) == Some(&b' ')
+                })
+                .map(|line| line[shallowest + 1..].trim())
+                .collect();
+            assert_eq!(listed, sections, "{file} lists other sections than it has");
+        }
     }
 
     #[test]

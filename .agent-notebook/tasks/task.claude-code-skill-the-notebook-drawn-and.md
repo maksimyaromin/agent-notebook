@@ -1,11 +1,12 @@
 ---
 id: task.claude-code-skill-the-notebook-drawn-and
 type: task
-state: open
+state: active
 title: Claude Code skill: the notebook drawn and decided on in one page
 by: Maksim Yaromin
 from: task.graph-the-data-surface-every-drawing-is
 blocked-by: task.improvements
+hold: the skill layout task settles where references live and how SKILL.md is sectioned; the atlas skill follows that shape
 created: 2026-08-30
 updated: 2026-09-05
 ---
