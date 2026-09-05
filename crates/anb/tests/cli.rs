@@ -1669,6 +1669,18 @@ mod json_surface {
 /// The surface itself: every verb of the task cycle parses, so a rename in
 /// the clap tree cannot slip out silently.
 #[test]
+fn a_skill_check_without_the_directory_it_checks_is_refused() {
+    let Err(refusal) = Cli::try_parse_from(["anb", "skill", "--check"]) else {
+        panic!("a check with nothing to check against parsed");
+    };
+    assert_eq!(
+        refusal.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument,
+        "{refusal}"
+    );
+}
+
+#[test]
 fn the_command_vocabulary_parses() {
     for line in [
         vec!["anb", "add", "task", "A title"],
@@ -1714,6 +1726,8 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "graph", "--for", "task.epic", "--ready"],
         vec!["anb", "setup"],
         vec!["anb", "setup", "--remove"],
+        vec!["anb", "skill"],
+        vec!["anb", "skill", ".agents/skills/anb", "--check"],
         vec![
             "anb",
             "edit",
@@ -3358,6 +3372,7 @@ mod the_global_scope {
         &["status"],
         &["ready"],
         &["graph"],
+        &["skill"],
     ];
 
     /// The verb refused the user's notebook for a reason of its own: setup

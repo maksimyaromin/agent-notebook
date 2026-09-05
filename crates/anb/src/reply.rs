@@ -5,6 +5,7 @@
 
 use crate::cli::{AddArgs, CloseArgs, Command, EditArgs, GraphArgs, SliceArgs};
 use crate::setup::{self, SetUp};
+use crate::skill::{self, Drift};
 use anb_core::encode::ROW_BOUND;
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, Deleted, Draft, Edged, Edit, Edited,
@@ -93,6 +94,9 @@ pub enum Reply {
     Restored(Restored),
     Deleted(Deleted),
     SetUp(SetUp),
+    /// The skill rendered from the binary: printed, written, or held
+    /// against a committed copy.
+    Skill(SkillReply),
     Edited(Edited),
     Searched {
         query: String,
@@ -123,9 +127,44 @@ impl Reply {
             Reply::Checked { findings, .. } => {
                 findings.iter().any(|located| located.finding.is_error())
             }
+            Reply::Skill(SkillReply::Checked { drift, .. }) => !drift.is_empty(),
             _ => false,
         }
     }
+}
+
+/// What `skill` answered with.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SkillReply {
+    /// `SKILL.md` itself, for a reader with no directory to write into.
+    Printed(String),
+    Written {
+        dir: String,
+        files: usize,
+    },
+    /// The committed copy held against the rendering; `drift` empty means
+    /// the two agree.
+    Checked {
+        dir: String,
+        drift: Vec<Drift>,
+    },
+}
+
+fn skilled(dir: Option<&Path>, check: bool) -> Result<SkillReply, NotebookError> {
+    let rendered = skill::render();
+    let Some(dir) = dir else {
+        return Ok(SkillReply::Printed(rendered.skill));
+    };
+    let shown = dir.display().to_string();
+    if check {
+        let drift = skill::drift(dir, &rendered)?;
+        return Ok(SkillReply::Checked { dir: shown, drift });
+    }
+    skill::write_into(dir, &rendered)?;
+    Ok(SkillReply::Written {
+        dir: shown,
+        files: rendered.files().len(),
+    })
 }
 
 /// Everything the shell knows and the Core cannot compute, in one place so
@@ -247,6 +286,7 @@ pub fn execute(
         }),
         Command::Graph(args) => graphed(&notebook, args),
         Command::Setup { remove } => Ok(Reply::SetUp(setup::apply(project_dir, remove)?)),
+        Command::Skill { dir, check } => Ok(Reply::Skill(skilled(dir.as_deref(), check)?)),
         Command::Status { budget, hook } => {
             status_reply(&notebook, budget, hook, lost_proofs, today)
         }

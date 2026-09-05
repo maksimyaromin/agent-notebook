@@ -113,7 +113,8 @@ fn writes(command: &Command) -> bool {
         | Command::Check { .. }
         | Command::Search { .. }
         | Command::Overview { .. }
-        | Command::Setup { .. } => false,
+        | Command::Setup { .. }
+        | Command::Skill { .. } => false,
     }
 }
 

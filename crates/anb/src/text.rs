@@ -74,6 +74,7 @@ pub fn render(reply: &Reply, today: &str) -> String {
         Reply::Archived(moved) => archive_lines(moved),
         Reply::Restored(moved) => restore_lines(moved),
         Reply::SetUp(done) => setup_lines(done),
+        Reply::Skill(skill) => skill_lines(skill),
         Reply::Deleted(gone) => format!(
             "ok: delete {} — {} removed\n",
             gone.id,
@@ -556,4 +557,27 @@ fn setup_lines(done: &crate::setup::SetUp) -> String {
         let _ = writeln!(out, "notice: {notice}");
     }
     out
+}
+
+/// The skill printed whole, or one line on what happened to a directory; a
+/// drift lists each file that differs and the command that rewrites them.
+fn skill_lines(skill: &crate::reply::SkillReply) -> String {
+    use crate::reply::SkillReply;
+    match skill {
+        SkillReply::Printed(text) => text.clone(),
+        SkillReply::Written { dir, files } => {
+            format!("ok: skill — {files} files written into {dir}\n")
+        }
+        SkillReply::Checked { dir, drift } if drift.is_empty() => {
+            format!("ok: skill — {dir} matches the rendering\n")
+        }
+        SkillReply::Checked { dir, drift } => {
+            let mut out = format!("skill: {dir} has drifted from the rendering\n");
+            for drifted in drift {
+                let _ = writeln!(out, "  {}: {}", drifted.file, drifted.reason);
+            }
+            let _ = writeln!(out, "try: anb skill {dir}");
+            out
+        }
+    }
 }

@@ -1,0 +1,242 @@
+---
+name: anb commands
+description: Every anb command with its flags, from the definitions anb --help prints. Open before a verb you have not used.
+metadata:
+  generated: anb
+---
+
+# anb commands
+
+Generated from the binary — the same definitions `anb --help` prints, every example run on a scratch notebook; a committed copy is checked against this rendering in CI.
+
+Global flags on every command: `--json` (compact JSON instead of text), `--notebook <PATH>` (where the notebook lives, outranking `ANB_NOTEBOOK`), `--global` (the user's notebook in the home directory; refused beside `--notebook`).
+
+### anb add
+
+Create a record — `add task|decision|note|question "<title>"`; the notebook appears on first write
+
+Arguments: `<RECORD_TYPE> <TITLE>`
+
+| Flag | Meaning |
+|---|---|
+| `--id <ID>` | Explicit id; omitted, one is minted from the title |
+| `--from <FROM>` | Origin: the record this record was born from |
+| `--tag <TAG>` | A tag; repeatable |
+| `--link <LINK>` | `<kind> <target>`, e.g. `pr https://…`; repeatable |
+| `--body <BODY>` | The prose under the envelope; omitted, the record opens empty |
+| `--by <BY>` | The accountable identity; omitted, git identity fills it |
+| `--via <VIA>` | The acting agent tool |
+| `--priority <PRIORITY>` | A task's urgency, 0–4, 0 the most urgent |
+| `--kind <KIND>` | A decision's rule, shape, or drift; a note's fact, term, or guide |
+| `--supersedes <SUPERSEDES>` | The Decision or Note this one replaces; it flips in the same move |
+
+### anb start
+
+open | review → active: take the Task into work, or back into it
+
+Arguments: `<ID>`
+
+### anb submit
+
+active → review: hand the work to a human for acceptance
+
+Arguments: `<ID>`
+
+### anb close
+
+active | review → closed, carrying its proof; --reason ends a Task or a Question without work, from open too; --resolved-by closes a Question into the record that settled it
+
+Arguments: `<ID>`
+
+| Flag | Meaning |
+|---|---|
+| `--note <NOTE>` | Proof, the default route: the report file, ingested as a Note the notebook carries, so a reader reaches it through the notebook alone |
+| `--pr <PR>` | Proof: the pull request that shipped the work |
+| `--sha <SHA>` | Proof: the commit that shipped the work |
+| `--report <REPORT>` | Proof: a file left where it lies — right for a living document, which a Note would freeze into a second source of truth |
+| `--no-proof` | The explicit waiver: close stating there is no proof |
+| `--reason <WHY>` | End a Task or a Question without work, stating why; the reason lands in the envelope and no proof is written |
+| `--resolved-by <ID>` | The Decision or Task that settled the Question |
+
+### anb reopen
+
+closed → open, explicitly
+
+Arguments: `<ID>`
+
+### anb hold
+
+Pause a Task deliberately; the reason is mandatory
+
+Arguments: `<ID>`
+
+| Flag | Meaning |
+|---|---|
+| `--reason <REASON>` | Why the Task waits; an unreasoned hold is where work rots |
+| `--until <DATE>` | Calendar hold: the date to resume on |
+
+### anb unhold
+
+Resume a held Task
+
+Arguments: `<ID>`
+
+### anb block
+
+Write a dependency edge: this Task waits on another
+
+Arguments: `<ID> <ON>`
+
+### anb unblock
+
+Erase a dependency edge
+
+Arguments: `<ID> <ON>`
+
+### anb comment
+
+Append one entry to a Task's log — where the next session resumes
+
+Arguments: `<ID> <TEXT>`
+
+| Flag | Meaning |
+|---|---|
+| `--via <VIA>` | The acting agent tool writing the entry |
+
+### anb retire
+
+active → retired: end a Decision or Note that has no successor
+
+Arguments: `<ID>`
+
+### anb ready
+
+The dispatch queue: open, unblocked, unheld Tasks, most urgent first
+
+| Flag | Meaning |
+|---|---|
+| `--for <ID>` | Only work this record's scope reaches: an epic's own queue |
+| `--all` | Every row; the listing is bounded by default |
+
+### anb list
+
+Every live record
+
+| Flag | Meaning |
+|---|---|
+| `--for <ID>` | Only records this one's scope reaches: an epic and its work |
+| `--all` | Every row; the listing is bounded by default |
+
+### anb show
+
+One record: envelope, body, and its mention blocks
+
+Arguments: `<ID>`
+
+| Flag | Meaning |
+|---|---|
+| `--all` | Every line and every mention; a long body and a crowded block print bounded by default |
+
+### anb status
+
+The session Status: one quiet line, or the budgeted composite
+
+| Flag | Meaning |
+|---|---|
+| `--budget <BUDGET>` | Token ceiling for this call, outranking the config key; 0 = no ceiling |
+| `--hook` | The session-start payload for an agent hook; fails soft |
+
+### anb check
+
+Verify every file: each finding names where it is, why, and what repairs it
+
+| Flag | Meaning |
+|---|---|
+| `--all` | Every row; the listing is bounded by default |
+
+### anb archive
+
+Move a settled record into the archive; history moves with it
+
+Arguments: `<ID>`
+
+### anb restore
+
+Move an archived record back into the working set: same filename, same bytes
+
+Arguments: `<ID>`
+
+### anb delete
+
+Delete a record born by mistake; refuses while anything cites it
+
+Arguments: `<ID>`
+
+### anb edit
+
+Correct a live record's own fields; state stays a command's move
+
+Arguments: `<ID>`
+
+| Flag | Meaning |
+|---|---|
+| `--title <TITLE>` | The whole title, replaced |
+| `--body <BODY>` | The whole body, replaced; empty clears it |
+| `--tag <TAG>` | Add a tag; repeatable |
+| `--untag <TAG>` | Remove a tag; repeatable |
+| `--from <FROM>` | Origin: the record this record was born from |
+| `--priority <PRIORITY>` | 0–4, 0 the most urgent |
+| `--review-by <DATE>` | The explicit resurfacing date |
+| `--clear <FIELD>` | The optional field to erase: `from`, `priority`, or `review-by`; repeatable |
+
+### anb search
+
+Find records — the archive included — by substring
+
+Arguments: `<QUERY>`
+
+| Flag | Meaning |
+|---|---|
+| `--all` | Every row; the listing is bounded by default |
+
+### anb graph
+
+The notebook as records and the edges between them
+
+| Flag | Meaning |
+|---|---|
+| `--for <ID>` | Only the work this record's scope reaches: one epic's branch |
+| `--type <TYPE>` | Only records of these types. Every type by default, including one whose own `type` field no notebook word matches |
+| `--ready` | Only what can be started now: the ready lens |
+| `--focus <ID>` | Only this record and the graph around it |
+| `--depth <N>` | How many edges out from `--focus` the graph reaches; 1 by default |
+| `--archive` | The archive too; by default only the work still in play |
+| `--full` | Each record's envelope and body as well |
+| `--all` | Every row the plain text bounds. JSON is never bounded: a graph missing edges is not a smaller graph, it is a wrong one |
+
+### anb overview
+
+The whole notebook as one page, grouped by type
+
+| Flag | Meaning |
+|---|---|
+| `--all` | Every row; each section is bounded by default |
+
+### anb setup
+
+Wire the agents to the notebook, in this directory: the one-line snippet in `AGENTS.md` and `CLAUDE.md`, the `SessionStart` hook for Claude Code and Codex, and the anb skill where each agent looks for skills. Re-running patches in place
+
+| Flag | Meaning |
+|---|---|
+| `--remove` | Take out what setup put in, and nothing else |
+
+### anb skill
+
+The skill an agent learns the tool from, rendered from the binary: printed, written into a directory, or checked against one
+
+Arguments: `[DIR]`
+
+| Flag | Meaning |
+|---|---|
+| `--check` | Compare the directory with the rendering instead of writing it; a difference is a failing exit, for CI |
+

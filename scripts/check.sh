@@ -18,3 +18,6 @@ cargo test --workspace --locked --doc
 # `--document-private-items` because a link is as broken for the next
 # reader of this repository as for a host reading the published API.
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --document-private-items --quiet
+# The committed skill is a rendering of the binary; a rendering that no
+# longer matches is a skill teaching a tool that does not exist.
+cargo run --quiet --locked -- skill .agents/skills/anb --check
