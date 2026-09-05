@@ -15,7 +15,7 @@ Status is a composite under a token budget. Its sections, in the order they prin
 | `active:` and `log:` | the Task in flight, with its last log entry: where the last session stopped |
 | `review[N]` | Tasks handed to a human and waiting |
 | `held[N]{id,reason,until}` | Tasks paused on purpose, with the reason each waits for |
-| `rules[N]` | the standing Decisions of kind `rule`, so the owner's taste applies without reading the log |
+| `rules[N]` | the standing Decisions of kind `rule`, so the project's rules apply without reading the log |
 | `ready[N]{id,priority,age,title}` | what can start now |
 | `epics[N]` | every hub with its progress and its next Task |
 | `debt[N]` | what is aging: a stale active Task, an old Question, a hold nobody lifted, a citation of an id that does not exist |
