@@ -52,7 +52,7 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
             return invalid("priority: applies only to a task".to_owned());
         }
         if priority > 4 {
-            return invalid(format!("priority: {priority} is not 0–4"));
+            return invalid(format!("priority: {priority} is outside 0 to 4"));
         }
     }
 
@@ -98,7 +98,7 @@ pub(super) fn validate_edit(
 
     if edit.changes_nothing() {
         return invalid(
-            "edit: nothing to change — pass --title, --body, --tag, --untag, --from, --priority, --review-by, or --clear"
+            "edit: nothing to change; pass --title, --body, --tag, --untag, --from, --priority, --review-by, or --clear"
                 .to_owned(),
         );
     }
@@ -119,7 +119,7 @@ pub(super) fn validate_edit(
             return invalid("priority: applies only to a task".to_owned());
         }
         if priority > 4 {
-            return invalid(format!("priority: {priority} is not 0–4"));
+            return invalid(format!("priority: {priority} is outside 0 to 4"));
         }
     }
     if let Some(date) = &edit.review_by
@@ -131,7 +131,7 @@ pub(super) fn validate_edit(
     for field in &edit.clear {
         let Some(key) = CLEARABLE.into_iter().find(|key| *key == field.as_str()) else {
             return invalid(format!(
-                "clear: `{field}` is not an erasable field — {}",
+                "clear: `{field}` is not an erasable field; {}",
                 CLEARABLE.join(", ")
             ));
         };
@@ -263,7 +263,7 @@ pub(super) fn resolve_draft_id(
     let slug = slugify(&draft.title);
     if slug.is_empty() {
         return Err(NotebookError::InvalidArgument {
-            reason: "title: yields an empty id — pass an explicit id".to_owned(),
+            reason: "title: yields an empty id; pass an explicit id".to_owned(),
         });
     }
     let base = format!("{}.{slug}", draft.record_type.word());
