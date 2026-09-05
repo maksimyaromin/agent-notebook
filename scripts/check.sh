@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The local gate: format, lint, test.
+# The local gate: format, lint, tests, docs, and the renderings the binary owns.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -21,3 +21,5 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --document-p
 # The committed skill is a rendering of the binary; a rendering that no
 # longer matches is a skill teaching a tool that does not exist.
 cargo run --quiet --locked -- skill .agents/skills/anb --check
+# Two docs pages are renderings of the binary as well.
+./scripts/docs-reference.sh --check

@@ -1,0 +1,9 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# sharp arrives through the documentation site and compiles from source when no prebuild fits the machine. Nothing
+# here renders an image, so that compile is time spent for nothing.
+allowBuilds:
+  esbuild: true
+  sharp: false
