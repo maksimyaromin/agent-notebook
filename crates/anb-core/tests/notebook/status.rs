@@ -475,7 +475,7 @@ mod status_dashboard {
         ]);
         let text = status_text(&mut storage);
         assert!(
-            text.starts_with("ok: notebook — 1 tasks, 1 decisions, 1 notes, 1 questions\n"),
+            text.starts_with("ok: notebook — 1 task, 1 decision, 1 note, 1 question\n"),
             "{text}"
         );
     }

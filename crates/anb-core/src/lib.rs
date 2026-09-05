@@ -52,8 +52,8 @@ pub use reply::{
 pub use request::{Draft, Edit, Link, Proof};
 pub use resolve::path_stem;
 pub use status::{
-    ActiveTask, Budget, DebtClass, HeldTask, SECTION_ROWS, Status, StatusRule, counts_phrase,
-    debt_classes, epic_line,
+    ActiveTask, Budget, DebtClass, HeldTask, SECTION_ROWS, Status, StatusRule, counted,
+    counts_phrase, debt_classes, epic_line,
 };
 pub use storage::{MemoryStorage, Storage, StorageError};
 pub use tokens::estimate_tokens;
