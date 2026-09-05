@@ -41,7 +41,7 @@ Global flags on every command: `--json` (compact JSON instead of text), `--noteb
 
 ### anb add
 
-Create a record — `add task|decision|note|question "<title>"`; the notebook appears on first write
+Create a record: `add task|decision|note|question "<title>"`. The notebook appears on first write
 
 Arguments: `<RECORD_TYPE> <TITLE>`
 
@@ -54,7 +54,7 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 | `--body <BODY>` | The prose under the envelope; omitted, the record opens empty |
 | `--by <BY>` | The accountable identity; omitted, git identity fills it |
 | `--via <VIA>` | The acting agent tool |
-| `--priority <PRIORITY>` | A task's urgency, 0–4, 0 the most urgent |
+| `--priority <PRIORITY>` | A task's urgency, 0 to 4, 0 the most urgent |
 | `--kind <KIND>` | A decision's rule, shape, or drift; a note's fact, term, or guide |
 | `--supersedes <SUPERSEDES>` | The Decision or Note this one replaces; it flips in the same move |
 
@@ -81,7 +81,7 @@ Arguments: `<ID>`
 | `--note <NOTE>` | Proof, the default route: the report file, ingested as a Note the notebook carries, so a reader reaches it through the notebook alone |
 | `--pr <PR>` | Proof: the pull request that shipped the work |
 | `--sha <SHA>` | Proof: the commit that shipped the work |
-| `--report <REPORT>` | Proof: a file left where it lies — right for a living document, which a Note would freeze into a second source of truth |
+| `--report <REPORT>` | Proof: a file left where it lies, right for a living document, which a Note would freeze into a second source of truth |
 | `--no-proof` | The explicit waiver: close stating there is no proof |
 | `--reason <WHY>` | End a Task or a Question without work, stating why; the reason lands in the envelope and no proof is written |
 | `--resolved-by <ID>` | The Decision or Task that settled the Question |
@@ -123,7 +123,7 @@ Arguments: `<ID> <ON>`
 
 ### anb comment
 
-Append one entry to a Task's log — where the next session resumes
+Append one entry to a Task's log, where the next session resumes
 
 Arguments: `<ID> <TEXT>`
 
@@ -213,13 +213,13 @@ Arguments: `<ID>`
 | `--tag <TAG>` | Add a tag; repeatable |
 | `--untag <TAG>` | Remove a tag; repeatable |
 | `--from <FROM>` | Origin: the record this record was born from |
-| `--priority <PRIORITY>` | 0–4, 0 the most urgent |
+| `--priority <PRIORITY>` | 0 to 4, 0 the most urgent |
 | `--review-by <DATE>` | The explicit resurfacing date |
 | `--clear <FIELD>` | The optional field to erase: `from`, `priority`, or `review-by`; repeatable |
 
 ### anb search
 
-Find records — the archive included — by substring
+Find records by substring, the archive included
 
 Arguments: `<QUERY>`
 

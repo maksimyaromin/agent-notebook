@@ -300,7 +300,7 @@ fn check_replaced_record_is_settled(record: &Record, out: &mut Vec<FileFinding>)
             line,
             FindingCode::BrokenSupersession,
             format!(
-                "state: `{state}` on a record marked `superseded-by` — a replaced record must not read live"
+                "state: `{state}` on a record marked `superseded-by`; a replaced record must not read live"
             ),
         ),
     ));

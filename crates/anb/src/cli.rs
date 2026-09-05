@@ -24,18 +24,18 @@ pub struct Cli {
     /// nearest `.agent-notebook` at or above the working directory.
     #[arg(long, global = true, value_name = "PATH")]
     pub notebook: Option<std::path::PathBuf>,
-    /// The user's notebook — `.agent-notebook` in the home directory —
-    /// instead of the project's, outranking `ANB_NOTEBOOK` like
-    /// `--notebook` and refused beside it. It holds knowledge that outlives
-    /// one repository, so the verbs that create or move a task or a
-    /// question refuse it.
+    /// The user's notebook, `.agent-notebook` in the home directory,
+    /// instead of the project's; it outranks `ANB_NOTEBOOK` like
+    /// `--notebook` and is refused beside it. It holds knowledge that
+    /// outlives one repository, so the verbs that create or move a task or
+    /// a question refuse it.
     #[arg(long, global = true)]
     pub global: bool,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Create a record — `add task|decision|note|question "<title>"`; the
+    /// Create a record: `add task|decision|note|question "<title>"`. The
     /// notebook appears on first write.
     Add(AddArgs),
     /// open | review → active: take the Task into work, or back into it.
@@ -74,7 +74,7 @@ pub enum Command {
         /// The Task no longer waited on.
         on: String,
     },
-    /// Append one entry to a Task's log — where the next session resumes.
+    /// Append one entry to a Task's log, where the next session resumes.
     Comment {
         id: String,
         text: String,
@@ -133,7 +133,7 @@ pub enum Command {
     Delete { id: String },
     /// Correct a live record's own fields; state stays a command's move.
     Edit(EditArgs),
-    /// Find records — the archive included — by substring.
+    /// Find records by substring, the archive included.
     Search {
         query: String,
         /// Every row; the listing is bounded by default.
@@ -200,7 +200,7 @@ pub struct AddArgs {
     /// The acting agent tool.
     #[arg(long)]
     pub via: Option<String>,
-    /// A task's urgency, 0–4, 0 the most urgent.
+    /// A task's urgency, 0 to 4, 0 the most urgent.
     #[arg(long)]
     pub priority: Option<u32>,
     /// A decision's rule, shape, or drift; a note's fact, term, or guide.
@@ -229,7 +229,7 @@ pub struct EditArgs {
     /// Origin: the record this record was born from.
     #[arg(long)]
     pub from: Option<String>,
-    /// 0–4, 0 the most urgent.
+    /// 0 to 4, 0 the most urgent.
     #[arg(long)]
     pub priority: Option<u32>,
     /// The explicit resurfacing date.
@@ -254,7 +254,7 @@ pub struct CloseArgs {
     /// Proof: the commit that shipped the work.
     #[arg(long)]
     pub sha: Option<String>,
-    /// Proof: a file left where it lies — right for a living document,
+    /// Proof: a file left where it lies, right for a living document,
     /// which a Note would freeze into a second source of truth.
     #[arg(long)]
     pub report: Option<String>,
@@ -314,7 +314,7 @@ pub struct SliceArgs {
 fn a_record_type(word: &str) -> Result<RecordType, String> {
     RecordType::from_word(word).ok_or_else(|| {
         format!(
-            "`{word}` is no type of record — try {}",
+            "`{word}` is no type of record; try {}",
             RecordType::ALL.map(RecordType::word).join(", ")
         )
     })

@@ -495,7 +495,7 @@ impl<'a> Notebook<'a> {
         };
         if is_archived(&path) && !archive {
             return refused(format!(
-                "graph: `{}` is archived — add --archive to focus on it",
+                "graph: `{}` is archived; add --archive to focus on it",
                 focus.id
             ));
         }
@@ -743,7 +743,7 @@ impl<'a> Notebook<'a> {
     ) -> Result<Closed, NotebookError> {
         if report.trim().is_empty() {
             return Err(NotebookError::InvalidArgument {
-                reason: "note: the report is empty — a close carries a proof or waives one"
+                reason: "note: the report is empty; a close carries a proof or waives one"
                     .to_owned(),
             });
         }

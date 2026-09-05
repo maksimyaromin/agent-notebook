@@ -225,7 +225,7 @@ mod task_cycle_replies {
                     &["add", "task", "A triaged task", "--priority", out_of_range]
                 ),
                 format!(
-                    "error[invalid-argument]: priority: {out_of_range} is not 0\u{2013}4\ntry: anb add task \"<title>\"\n"
+                    "error[invalid-argument]: priority: {out_of_range} is outside 0 to 4\ntry: anb add task \"<title>\"\n"
                 )
             );
         }
@@ -254,7 +254,7 @@ mod task_cycle_replies {
             ),
             (
                 vec!["add", "task", "???"],
-                "title: yields an empty id \u{2014} pass an explicit id",
+                "title: yields an empty id; pass an explicit id",
             ),
         ] {
             let mut storage = MemoryStorage::new();
@@ -2429,7 +2429,7 @@ mod maintenance_replies {
         assert_snapshot!(
             refused(&mut storage, &["edit", "task.demo", "--clear", "state"]),
             @r#"
-        error[invalid-argument]: clear: `state` is not an erasable field — from, priority, review-by
+        error[invalid-argument]: clear: `state` is not an erasable field; from, priority, review-by
         try: anb edit task.demo --title "<title>"
         "#
         );
@@ -2465,7 +2465,7 @@ mod maintenance_replies {
         assert_snapshot!(
             refused(&mut storage, &["edit", "task.demo"]),
             @r#"
-        error[invalid-argument]: edit: nothing to change — pass --title, --body, --tag, --untag, --from, --priority, --review-by, or --clear
+        error[invalid-argument]: edit: nothing to change; pass --title, --body, --tag, --untag, --from, --priority, --review-by, or --clear
         try: anb edit task.demo --title "<title>"
         "#
         );

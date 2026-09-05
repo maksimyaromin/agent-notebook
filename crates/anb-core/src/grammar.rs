@@ -789,7 +789,7 @@ fn non_empty_error(value: &str) -> Option<String> {
 
 fn priority_error(value: &str) -> Option<String> {
     let in_range = matches!(value, "0" | "1" | "2" | "3" | "4");
-    (!in_range).then(|| format!("`{value}` is not an integer 0–4"))
+    (!in_range).then(|| format!("`{value}` is not an integer 0 to 4"))
 }
 
 pub(crate) fn is_lower_word(value: &str) -> bool {
