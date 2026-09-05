@@ -32,19 +32,6 @@ pub fn render(reply: &Reply) -> String {
             command,
             transition,
         } => transition_value(command, transition),
-        Reply::Routed { transition, to } => {
-            let mut object = transition_map("answer", transition);
-            object.insert("routed-to".into(), json!(to));
-            Value::Object(object)
-        }
-        Reply::Dropped(dropped) => {
-            let mut object = transition_map("answer", &dropped.transition);
-            object.extend(fields([(
-                "dangling-mention",
-                dangling_mentions(&dropped.dangling_mentions),
-            )]));
-            Value::Object(object)
-        }
         Reply::Closed(closed) => closed_value(closed),
         Reply::Held { held, until } => Value::Object(fields([
             ("ok", json!("hold")),
@@ -94,7 +81,7 @@ pub fn render(reply: &Reply) -> String {
         Reply::Checked { findings, all } => checked_value(findings, *all),
         Reply::Archived(moved) => archived_value(moved),
         Reply::Restored(moved) => restored_value(moved),
-        Reply::Expunged(gone) => json!({"ok": "expunge", "id": gone.id, "paths": gone.paths}),
+        Reply::Deleted(gone) => json!({"ok": "delete", "id": gone.id, "paths": gone.paths}),
         Reply::Edited(edited) => edited_value(edited),
         Reply::Searched { rows, all, .. } => json!({
             "count": rows.len(),
@@ -153,6 +140,7 @@ fn closed_value(closed: &anb_core::Closed) -> Value {
     let mut object = transition_map("close", &closed.transition);
     object.extend(fields([
         ("report", json!(closed.report_note)),
+        ("resolved-by", json!(closed.resolved_by)),
         (
             "dangling-mention",
             dangling_mentions(&closed.dangling_mentions),
@@ -349,10 +337,10 @@ fn slice_value(slice: &GraphSlice) -> Value {
         // caller never asked.
         (
             "type",
-            match slice.kinds.as_slice() {
+            match slice.types.as_slice() {
                 [] => Value::Null,
-                kinds => json!(
-                    kinds
+                types => json!(
+                    types
                         .iter()
                         .copied()
                         .map(RecordType::word)
@@ -460,7 +448,7 @@ fn status_value(status: &Status) -> Value {
     json!({
         "quiet": status.quiet,
         "counts": counts_value(&status.counts),
-        "in-flight": section(&status.in_flight, dashboard_rows(&status.in_flight), in_flight_value),
+        "active": section(&status.active, dashboard_rows(&status.active), active_task_value),
         "review": section(&status.review, dashboard_rows(&status.review), |id| json!(id)),
         "rules": section(&status.rules, dashboard_rows(&status.rules), |rule| {
             json!({"id": rule.id, "title": rule.title})
@@ -537,7 +525,7 @@ fn debt_section(debt: &[DebtSignal]) -> Value {
     })
 }
 
-fn in_flight_value(task: &anb_core::ActiveTask) -> Value {
+fn active_task_value(task: &anb_core::ActiveTask) -> Value {
     Value::Object(fields([
         ("id", json!(task.id)),
         ("title", json!(task.title)),

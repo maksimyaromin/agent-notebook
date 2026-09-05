@@ -6,3 +6,7 @@
 # editor and script leftovers, never part of the source
 *.bak
 *.orig
+
+# npm auth for the @supolka scope: a project-level file, never committed
+.npmrc
+.env

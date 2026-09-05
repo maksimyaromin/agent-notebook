@@ -42,18 +42,22 @@ The project dogfoods its own tool: the backlog is the notebook, and every task-s
 
 When the owner says **"continue the task"** (in any wording, any language), it means exactly this:
 
-1. Run `cargo run --quiet -- status`. The **in-flight** (active) task is THE task — there is never more than one. If none is active, take the top of `cargo run --quiet -- ready` and `start` it.
-2. Read the task with `view <id>`, read the docs it references under `.tmp/docs/`, and resume from its log — not from scratch.
+1. Run `cargo run --quiet -- status`. The **active** task is THE task — there is never more than one. If none is active, take the top of `cargo run --quiet -- ready` and `start` it.
+2. Read the task with `show <id>`, read the docs it references under `.tmp/docs/`, and resume from its log — not from scratch.
 
 Every task moves through these stages:
 
 1. **Dispatch** — `anb start <id>`.
 2. **Work** — execute against the body's acceptance criteria; append progress notes with `anb comment <id> "<text>"` so any later session can resume mid-task. Deliverables are written under `.tmp/`.
-3. **Code review by Opus 5 (mandatory on coding tasks; owner's call, 2026-08-27)** — NEVER reviewed by the authoring model: spawn a separate agent on Opus 5 that loads the engineering instruction and its skills, re-reads the whole diff, code and tests, holding every line against them (story, naming, comments, test behavior), and returns findings with file:line. Fix what it finds and report the findings honestly. A review that finds nothing was not performed.
-4. **Review pause (mandatory, never skipped)** — when the work is done, `anb submit <id>` and STOP. Leave every produced or changed file in the working tree — **uncommitted and unstaged** (no `git add`). Report what is ready and where, then wait for the owner to review.
-5. **Close** — only after the owner's explicit approval: `anb close <id> --note <path>`, which ingests the report file as a Note born from the task and links that Note as the proof, so the report travels with the notebook. The other proofs are equals, not fallbacks: `--pr`, `--sha`, `--report <path>` (leaves the file where it lies — right for a living document, wrong for a finished report), `--no-proof`. Commit and push only if the owner asks.
+3. **Smoke check by another model (mandatory on coding tasks; owner's call, 2026-09-05, replacing the Opus 5 review of 2026-08-27)** — NEVER by the authoring model: spawn one agent on Sonnet 5, once, that loads the engineering instruction and its skills, re-reads the whole diff, code and tests, and returns findings with file:line. It verifies the author's claims; it does not redesign the work — the original idea stands, and taste argued against it is not a finding. Fix real defects and report the findings honestly.
+4. **Review pause (mandatory outside a marathon)** — when the work is done, `anb submit <id>` and STOP. Leave every produced or changed file in the working tree — **uncommitted and unstaged** (no `git add`). Report what is ready and where, then wait for the owner to review.
+5. **Close** — only after the owner's explicit approval: `anb close <id> --note <path>`, which ingests the report file as a Note born from the task and links that Note as the proof, so the report travels with the notebook. The other proofs are equals, not fallbacks: `--pr`, `--sha`, `--report <path>` (leaves the file where it lies — right for a living document, wrong for a finished report), `--no-proof`. Then `anb archive <id>`: a closed record left live is a leftover the owner would have to find. Commit and push only if the owner asks.
 
-No formal task closure, no commit, and no push ever happens before the review pause in stage 4.
+No formal task closure, no commit, and no push ever happens before the review pause in stage 4 — except inside a marathon.
+
+## Marathon mode
+
+When the owner declares a marathon (in any wording), the review pause is lifted for its duration and each task runs the whole loop without waiting: work → smoke check → `submit` → a branch with one Conventional commit → pull request whose body carries the report's summary and the findings with what was done about them → green `check` → squash-merge, branch deleted → `close --note <report>` → `archive` → the next task from `ready`. The owner reads the merged pull requests afterwards and files follow-ups. A blocker only the owner can resolve becomes a Question born `--from` the task and a hold naming it; the plan bends, task list included, so the most useful work still happens, and the marathon ends with one summary Note listing every pull request, hold and Question. It leaves the repository release-ready: what remains are the owner's own hands — the first npm publish, the repository's visibility, the tag.
 
 ## Conventions
 
@@ -62,7 +66,8 @@ No formal task closure, no commit, and no push ever happens before the review pa
 - In prose the project is **agent notebooks**, never the abbreviation (owner's call, 2026-08-30). `anb` survives only where it is an identifier a reader types or a compiler reads: the command, the crate names, the `ANB_` variables, and record ids already minted.
 - Committed text is self-contained (owner's call, 2026-08-28): comments, docs, and test data never cite what only `.tmp/` holds — no spec §, research-report, ADR, user-story, or owner-ruling pointers. State the constraint itself; provenance stays in `.tmp/` reports.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
-- Commit and push only when asked.
+- No commit message or pull request body names an agent as author, co-author or generator (owner's call, 2026-09-05): the code and its ownership are the owner's. No `Co-Authored-By`, no session trailer, no "generated with" line.
+- Commit and push only when asked; a declared marathon is the ask for its duration.
 - main moves only by pull request with a green CI check, never by direct push (owner's call, 2026-08-31). This is a convention, not a server rule: the enforcing ruleset waits until the repo is public or the plan allows rulesets on private repos.
 - Keep this file short and current: update it when a convention or command changes, remove anything that stops being true.
 

@@ -90,19 +90,121 @@ mod task_cycle {
     }
 
     #[test]
-    fn a_return_on_a_task_never_submitted_is_invalid_not_a_replay() {
-        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+    fn an_invalid_move_names_the_moves_the_state_allows() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let error = Notebook::new(&mut storage)
-            .return_task("task.demo", TODAY)
+            .submit("task.demo", TODAY)
             .unwrap_err();
         assert_eq!(
             error,
             NotebookError::InvalidTransition {
                 id: "task.demo".to_owned(),
-                state: "active".to_owned(),
-                valid: vec!["submit", "close"],
+                state: "open".to_owned(),
+                valid: vec!["start", "close --reason"],
             }
         );
+    }
+
+    #[test]
+    fn start_takes_a_task_in_review_back_into_work() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("review", &[]))]);
+        let reply = Notebook::new(&mut storage)
+            .start("task.demo", TODAY)
+            .unwrap();
+        assert_eq!(reply, moved("task.demo", "review", "active"));
+    }
+
+    #[test]
+    fn a_close_by_reason_ends_an_open_task_with_the_reason_in_the_envelope_and_no_proof() {
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task_file("open", &[])),
+            (
+                "tasks/task.waiting.md",
+                &record_file(
+                    "task.waiting",
+                    "task",
+                    "open",
+                    &["blocked-by: task.demo"],
+                    "",
+                ),
+            ),
+        ]);
+        let closed = Notebook::new(&mut storage)
+            .close_with_reason("task.demo", "overtaken by a newer decision", TODAY)
+            .unwrap();
+        assert_eq!(closed.transition, moved("task.demo", "open", "closed"));
+        assert_eq!(
+            closed.unblocked,
+            vec!["task.waiting"],
+            "a close by reason unblocks dependents like any close"
+        );
+        let text = storage.read("tasks/task.demo.md").unwrap();
+        assert!(text.contains("\nstate: closed\n"));
+        assert!(text.contains("\nclosed: 2026-08-27\n"));
+        assert!(
+            text.contains("\nreason: overtaken by a newer decision\n"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("link:"),
+            "no work happened, so nothing vouches for it"
+        );
+    }
+
+    #[test]
+    fn a_close_by_reason_ends_a_task_from_every_live_state() {
+        for state in ["open", "active", "review"] {
+            let mut storage = storage_with(&[("tasks/task.demo.md", &task_file(state, &[]))]);
+            let closed = Notebook::new(&mut storage)
+                .close_with_reason("task.demo", "abandoned", TODAY)
+                .unwrap();
+            assert_eq!(closed.transition, moved("task.demo", state, "closed"));
+        }
+    }
+
+    #[test]
+    fn a_waived_close_still_refuses_an_open_task() {
+        let text = task_file("open", &[]);
+        let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
+        let error = Notebook::new(&mut storage)
+            .close("task.demo", &Proof::Waived, TODAY)
+            .unwrap_err();
+        assert!(
+            matches!(error, NotebookError::InvalidTransition { .. }),
+            "a waiver means done with nothing to show, and nothing was done: {error:?}"
+        );
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+    }
+
+    #[test]
+    fn a_replayed_close_by_reason_changes_no_byte() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        Notebook::new(&mut storage)
+            .close_with_reason("task.demo", "a reason", TODAY)
+            .unwrap();
+        let after_first = storage.read("tasks/task.demo.md").unwrap();
+
+        let replay = Notebook::new(&mut storage)
+            .close_with_reason("task.demo", "another reason", TODAY)
+            .unwrap();
+        assert!(replay.transition.already);
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), after_first);
+    }
+
+    #[test]
+    fn a_close_by_reason_requires_a_one_line_reason() {
+        let text = task_file("open", &[]);
+        for reason in [" ", "two\nlines"] {
+            let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
+            let error = Notebook::new(&mut storage)
+                .close_with_reason("task.demo", reason, TODAY)
+                .unwrap_err();
+            assert!(
+                matches!(error, NotebookError::InvalidArgument { .. }),
+                "{reason:?}"
+            );
+            assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+        }
     }
 
     #[test]
@@ -362,12 +464,12 @@ mod task_cycle {
                 ),
             ),
             (
-                "questions/question.already-routed.md",
+                "questions/question.already-resolved.md",
                 &record_file(
-                    "question.already-routed",
+                    "question.already-resolved",
                     "question",
-                    "routed",
-                    &["from: task.demo", "routed-to: task.demo"],
+                    "closed",
+                    &["from: task.demo", "resolved-by: task.demo"],
                     "",
                 ),
             ),
@@ -392,7 +494,7 @@ mod task_cycle {
                     "question.corrupt",
                     "question",
                     "open",
-                    &["from: task.demo", "routed-to: decision.never-written"],
+                    &["from: task.demo", "resolved-by: decision.never-written"],
                     "",
                 ),
             ),
@@ -408,7 +510,7 @@ mod task_cycle {
     }
 
     #[test]
-    fn the_review_loop_submits_returns_and_closes_from_review() {
+    fn the_review_loop_submits_restarts_and_closes_from_review() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         {
             let mut notebook = Notebook::new(&mut storage);
@@ -417,7 +519,7 @@ mod task_cycle {
                 moved("task.demo", "active", "review")
             );
             assert_eq!(
-                notebook.return_task("task.demo", TODAY).unwrap(),
+                notebook.start("task.demo", TODAY).unwrap(),
                 moved("task.demo", "review", "active")
             );
             notebook.submit("task.demo", TODAY).unwrap();
@@ -746,7 +848,7 @@ mod task_log {
     }
 }
 
-mod routing {
+mod resolution {
     use crate::*;
 
     fn question_notebook() -> MemoryStorage {
@@ -763,37 +865,21 @@ mod routing {
     }
 
     #[test]
-    fn route_closes_the_question_into_what_its_answer_became() {
+    fn a_question_closes_into_the_record_that_resolved_it() {
         let mut storage = question_notebook();
-        let reply = Notebook::new(&mut storage)
-            .route("question.demo", "decision.the-answer", TODAY)
+        let closed = Notebook::new(&mut storage)
+            .resolve_question("question.demo", "decision.the-answer", TODAY)
             .unwrap();
-        assert_eq!(reply, moved("question.demo", "open", "routed"));
+        assert_eq!(closed.transition, moved("question.demo", "open", "closed"));
+        assert_eq!(closed.resolved_by.as_deref(), Some("decision.the-answer"));
         let text = storage.read("questions/question.demo.md").unwrap();
-        assert!(text.contains("\nstate: routed\n"));
-        assert!(text.contains("\nrouted-to: decision.the-answer\n"));
+        assert!(text.contains("\nstate: closed\n"));
+        assert!(text.contains("\nclosed: 2026-08-27\n"));
+        assert!(text.contains("\nresolved-by: decision.the-answer\n"));
     }
 
     #[test]
-    fn a_replayed_route_to_the_same_target_answers_already() {
-        let mut storage = question_notebook();
-        Notebook::new(&mut storage)
-            .route("question.demo", "decision.the-answer", TODAY)
-            .unwrap();
-        let after_first = storage.read("questions/question.demo.md").unwrap();
-
-        let replay = Notebook::new(&mut storage)
-            .route("question.demo", "decision.the-answer", TODAY)
-            .unwrap();
-        assert!(replay.already);
-        assert_eq!(
-            storage.read("questions/question.demo.md").unwrap(),
-            after_first
-        );
-    }
-
-    #[test]
-    fn a_routed_question_cannot_be_rerouted() {
+    fn a_closed_question_resolved_again_answers_already_and_keeps_its_resolver() {
         let mut storage = question_notebook();
         storage
             .write(
@@ -802,23 +888,27 @@ mod routing {
             )
             .unwrap();
         Notebook::new(&mut storage)
-            .route("question.demo", "decision.the-answer", TODAY)
+            .resolve_question("question.demo", "decision.the-answer", TODAY)
             .unwrap();
-        let error = Notebook::new(&mut storage)
-            .route("question.demo", "task.other-answer", TODAY)
-            .unwrap_err();
+        let after_first = storage.read("questions/question.demo.md").unwrap();
+
+        let replay = Notebook::new(&mut storage)
+            .resolve_question("question.demo", "task.other-answer", TODAY)
+            .unwrap();
+        assert!(replay.transition.already);
         assert_eq!(
-            error,
-            NotebookError::InvalidTransition {
-                id: "question.demo".to_owned(),
-                state: "routed".to_owned(),
-                valid: vec![],
-            }
+            replay.resolved_by.as_deref(),
+            Some("decision.the-answer"),
+            "the reply names the resolver the record holds, not the one the replay carried"
+        );
+        assert_eq!(
+            storage.read("questions/question.demo.md").unwrap(),
+            after_first
         );
     }
 
     #[test]
-    fn a_question_routes_only_into_a_decision_or_a_task() {
+    fn a_question_resolves_only_into_a_decision_or_a_task() {
         let mut storage = question_notebook();
         storage
             .write(
@@ -827,7 +917,7 @@ mod routing {
             )
             .unwrap();
         let error = Notebook::new(&mut storage)
-            .route("question.demo", "note.a-fact", TODAY)
+            .resolve_question("question.demo", "note.a-fact", TODAY)
             .unwrap_err();
         assert_eq!(
             error,
@@ -839,42 +929,47 @@ mod routing {
     }
 
     #[test]
-    fn a_route_into_nothing_is_a_dangling_ref() {
+    fn a_resolver_that_does_not_exist_is_a_dangling_ref() {
         let mut storage = question_notebook();
         let error = Notebook::new(&mut storage)
-            .route("question.demo", "decision.never-written", TODAY)
+            .resolve_question("question.demo", "decision.never-written", TODAY)
             .unwrap_err();
         assert_eq!(
             error,
             NotebookError::DanglingRef {
-                field: "routed-to",
+                field: "resolved-by",
                 target: "decision.never-written".to_owned(),
             }
         );
     }
 
     #[test]
-    fn drop_closes_the_question_with_its_stated_reason_in_the_body() {
+    fn a_close_by_reason_ends_a_question_with_the_reason_in_the_envelope() {
         let mut storage = question_notebook();
-        let reply = Notebook::new(&mut storage)
-            .drop_question("question.demo", "overtaken by a newer decision", TODAY)
+        let closed = Notebook::new(&mut storage)
+            .close_with_reason("question.demo", "overtaken by a newer decision", TODAY)
             .unwrap();
-        assert_eq!(reply.transition, moved("question.demo", "open", "dropped"));
+        assert_eq!(closed.transition, moved("question.demo", "open", "closed"));
         let text = storage.read("questions/question.demo.md").unwrap();
-        assert!(text.contains("\nstate: dropped\n"));
-        assert!(text.ends_with("---\nDropped 2026-08-27: overtaken by a newer decision\n"));
+        assert!(text.contains("\nstate: closed\n"));
+        assert!(text.contains("\nclosed: 2026-08-27\n"));
+        assert!(
+            text.contains("\nreason: overtaken by a newer decision\n"),
+            "{text}"
+        );
+        assert!(!text.contains("resolved-by:"));
     }
 
     #[test]
-    fn a_replayed_drop_appends_no_second_reason_line() {
+    fn a_replayed_close_by_reason_on_a_question_changes_no_byte() {
         let mut storage = question_notebook();
         Notebook::new(&mut storage)
-            .drop_question("question.demo", "a reason", TODAY)
+            .close_with_reason("question.demo", "a reason", TODAY)
             .unwrap();
         let after_first = storage.read("questions/question.demo.md").unwrap();
 
         let replay = Notebook::new(&mut storage)
-            .drop_question("question.demo", "a reason", TODAY)
+            .close_with_reason("question.demo", "a reason", TODAY)
             .unwrap();
         assert!(replay.transition.already);
         assert_eq!(
@@ -884,19 +979,19 @@ mod routing {
     }
 
     #[test]
-    fn a_routed_question_with_a_dangling_thread_is_broken_routing_on_every_surface() {
+    fn a_closed_question_whose_resolver_is_gone_is_a_dangling_ref_on_every_surface() {
         let mut storage = storage_with(&[(
             "questions/question.demo.md",
             &record_file(
                 "question.demo",
                 "question",
-                "routed",
-                &["routed-to: decision.gone"],
+                "closed",
+                &["resolved-by: decision.gone"],
                 "",
             ),
         )]);
         let error = Notebook::new(&mut storage)
-            .drop_question("question.demo", "a reason", TODAY)
+            .close_with_reason("question.demo", "a reason", TODAY)
             .unwrap_err();
         let NotebookError::InvalidRecord { findings, .. } = error else {
             panic!("expected InvalidRecord, got {error:?}");
@@ -904,16 +999,16 @@ mod routing {
         assert_eq!(findings.len(), 1);
         assert_eq!(
             findings[0].code,
-            FindingCode::BrokenRouting,
+            FindingCode::DanglingRef,
             "check and the mutation guard must name one condition with one code"
         );
     }
 
     #[test]
-    fn drop_requires_a_reason() {
+    fn a_close_by_reason_on_a_question_requires_a_reason() {
         let mut storage = question_notebook();
         let error = Notebook::new(&mut storage)
-            .drop_question("question.demo", " ", TODAY)
+            .close_with_reason("question.demo", " ", TODAY)
             .unwrap_err();
         assert!(matches!(error, NotebookError::InvalidArgument { .. }));
     }

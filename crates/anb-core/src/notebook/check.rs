@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 impl Notebook<'_> {
     /// Verify the whole notebook: every record's own findings plus the
     /// cross-record rules — duplicate ids, dangling references, supersession
-    /// pairs, routing threads — each carrying the move that erases it where
+    /// pairs — each carrying the move that erases it where
     /// the notebook has one. Errors first, then by file and line.
     ///
     /// # Errors
@@ -163,7 +163,7 @@ fn check_refs(record: &Record, resolvable: &Resolver<'_>, out: &mut Vec<FileFind
         }
         out.push(FileFinding::on(
             record.path(),
-            dangling_finding(record, key, target, line),
+            dangling_finding(key, target, line),
         ));
     };
     for key in REF_KEYS {
@@ -341,7 +341,7 @@ fn check_dep_cycles(
         across_files,
         by_stem,
         "blocked-by",
-        FindingCode::DepCycle,
+        FindingCode::BlockCycle,
         out,
     );
 }

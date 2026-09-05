@@ -1,11 +1,11 @@
 ---
 id: question.should-anb-resolve-the-local-date
 type: question
-state: routed
+state: closed
 title: Should anb resolve the local date without jiff?
 by: Maksim Yaromin
 tags: perf
-routed-to: decision.the-local-date-is-worth-its-dependency
+resolved-by: decision.the-local-date-is-worth-its-dependency
 created: 2026-08-30
 updated: 2026-08-30
 ---

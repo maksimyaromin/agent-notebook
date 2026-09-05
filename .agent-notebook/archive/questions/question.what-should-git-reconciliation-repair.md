@@ -1,12 +1,12 @@
 ---
 id: question.what-should-git-reconciliation-repair
 type: question
-state: routed
+state: closed
 title: What should git reconciliation repair?
 by: Maksim Yaromin
 from: task.git-reconciliation
 tags: core
-routed-to: decision.reconciliation-reports-a-divergence-and
+resolved-by: decision.reconciliation-reports-a-divergence-and
 created: 2026-08-29
 updated: 2026-08-30
 ---

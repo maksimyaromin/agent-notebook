@@ -26,7 +26,7 @@ fn main() -> ExitCode {
 
 /// Write one reply out and answer with the exit it earned.
 ///
-/// A reader that stops early — `anb view <id> | head` — closes the pipe
+/// A reader that stops early — `anb show <id> | head` — closes the pipe
 /// mid-write. That is the reader's choice, not a failed command, and the
 /// process ends on the verdict it had already reached. Any other write
 /// failure is the host's to report.

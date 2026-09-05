@@ -28,11 +28,11 @@ mod restore_verb {
         let cases = [
             ("decision.old", "decision", "retired", "decisions"),
             ("note.done", "note", "retired", "notes"),
-            ("question.q", "question", "dropped", "questions"),
+            ("question.q", "question", "closed", "questions"),
         ];
         for (id, type_word, state, home) in cases {
             let extra: &[&str] = if type_word == "question" {
-                &["drop-reason: moot"]
+                &["reason: moot"]
             } else {
                 &[]
             };

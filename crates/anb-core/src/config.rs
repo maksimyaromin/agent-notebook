@@ -32,8 +32,8 @@ const BUDGET: ConfigKey = config_key("budget", Budget::DEFAULT_TOKENS);
 const TASK_STALE: ConfigKey = config_key("debt-task-stale", 7);
 const QUESTION_AGE: ConfigKey = config_key("debt-question-age", 14);
 const QUESTION_AGE_TASK_BORN: ConfigKey = config_key("debt-question-age-task-born", 7);
-const HOLD_QUIET: ConfigKey = config_key("debt-hold-quiet", 14);
-const REVIEW_WAIT: ConfigKey = config_key("debt-review-wait", 7);
+const HOLD_STALE: ConfigKey = config_key("debt-hold-stale", 14);
+const REVIEW_STALE: ConfigKey = config_key("debt-review-stale", 7);
 
 const CONFIG_KEYS: &[ConfigKey] = &[
     FORMAT,
@@ -41,8 +41,8 @@ const CONFIG_KEYS: &[ConfigKey] = &[
     TASK_STALE,
     QUESTION_AGE,
     QUESTION_AGE_TASK_BORN,
-    HOLD_QUIET,
-    REVIEW_WAIT,
+    HOLD_STALE,
+    REVIEW_STALE,
 ];
 
 /// The parsed config: every value resolved, the file's findings kept for
@@ -78,8 +78,8 @@ impl Config {
                 task_stale: value(TASK_STALE),
                 question_age: value(QUESTION_AGE),
                 question_age_task_born: value(QUESTION_AGE_TASK_BORN),
-                hold_quiet: value(HOLD_QUIET),
-                review_wait: value(REVIEW_WAIT),
+                hold_stale: value(HOLD_STALE),
+                review_stale: value(REVIEW_STALE),
             },
             findings,
         }

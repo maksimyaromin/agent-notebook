@@ -1,11 +1,11 @@
 ---
 id: question.should-a-write-time-nudge-see-the-user-s
 type: question
-state: routed
+state: closed
 title: Should the write paths and check see the user's notebook too?
 by: Maksim Yaromin
 from: task.global-shadow-surfacing
-routed-to: task.write-paths-and-check-read-the-global-root
+resolved-by: task.write-paths-and-check-read-the-global-root
 created: 2026-08-30
 updated: 2026-09-02
 ---

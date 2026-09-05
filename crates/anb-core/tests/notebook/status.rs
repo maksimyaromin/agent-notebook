@@ -11,7 +11,7 @@ mod status_dashboard {
     /// A dashboard is derived, so its size is the dashboard's shape and
     /// not the notebook's: a title and a log line are a record's own text,
     /// and a hand writes them as long as it likes. Every line that carries
-    /// one is cut; the whole line is one `view` away.
+    /// one is cut; the whole line is one `show` away.
     #[test]
     fn no_dashboard_line_carries_a_record_s_text_whole() {
         let wall_of_words = "word ".repeat(400);
@@ -30,7 +30,7 @@ mod status_dashboard {
         ]);
         let text = status_text(&mut storage);
 
-        for prefix in ["in-flight:", "log:", "  decision.rule:"] {
+        for prefix in ["active:", "log:", "  decision.rule:"] {
             let line = text
                 .lines()
                 .find(|line| line.starts_with(prefix))
@@ -45,14 +45,14 @@ mod status_dashboard {
 
     /// The dashboard is a derived query like every other: a record whose
     /// findings put it outside `ready` and `list` cannot lead a session
-    /// from the in-flight, review or rules line either. Each of the three
+    /// from the active, review or rules line either. Each of the three
     /// reads the notebook through its own fold, so each can lose the gate
     /// on its own.
     #[test]
     fn an_invalid_record_reaches_no_line_of_the_dashboard() {
         for (case, path, id, type_word, state, extra) in [
             (
-                "in-flight",
+                "active",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
@@ -82,7 +82,7 @@ mod status_dashboard {
                 .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
                 .unwrap();
             let named: Vec<&str> = seen
-                .in_flight
+                .active
                 .iter()
                 .map(|task| task.id.as_str())
                 .chain(seen.review.iter().map(String::as_str))
@@ -99,14 +99,14 @@ mod status_dashboard {
             let seen = Notebook::new(&mut storage)
                 .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
                 .unwrap();
-            assert_eq!(seen.in_flight, vec![], "{case}");
+            assert_eq!(seen.active, vec![], "{case}");
             assert_eq!(seen.review, Vec::<String>::new(), "{case}");
             assert_eq!(seen.rules, vec![], "{case}");
         }
     }
 
     #[test]
-    fn an_active_task_is_the_in_flight_line_with_its_last_log_line() {
+    fn an_active_task_is_the_active_line_with_its_last_log_line() {
         let body = "Acceptance: the ladder holds.\n\n- 2026-08-25 claude: stopped at the ladder\n";
         let mut storage = storage_with(&[(
             "tasks/task.demo.md",
@@ -114,7 +114,7 @@ mod status_dashboard {
         )]);
         let text = status_text(&mut storage);
         assert!(
-            text.contains("in-flight: task.demo \"A demo record\"\n"),
+            text.contains("active: task.demo \"A demo record\"\n"),
             "{text}"
         );
         assert!(
@@ -123,11 +123,11 @@ mod status_dashboard {
         );
     }
 
-    /// Two Tasks in flight is a session that lost track of one of them, so
+    /// Two active Tasks is a session that lost track of one of them, so
     /// the dashboard leads with the one last touched and spends its log
     /// line there.
     #[test]
-    fn the_in_flight_lines_lead_with_the_task_last_touched() {
+    fn the_active_lines_lead_with_the_task_last_touched() {
         let mut storage = storage_with(&[
             (
                 "tasks/task.stale.md",
@@ -139,15 +139,15 @@ mod status_dashboard {
             ),
         ]);
         let text = status_text(&mut storage);
-        let in_flight: Vec<&str> = text
+        let active: Vec<&str> = text
             .lines()
-            .filter(|line| line.starts_with("in-flight: "))
+            .filter(|line| line.starts_with("active: "))
             .collect();
         assert_eq!(
-            in_flight,
+            active,
             [
-                "in-flight: task.fresh \"A demo record\"",
-                "in-flight: task.stale \"A demo record\""
+                "active: task.fresh \"A demo record\"",
+                "active: task.stale \"A demo record\""
             ],
             "{text}"
         );
@@ -194,7 +194,7 @@ mod status_dashboard {
 
     #[test]
     fn the_dashboard_opens_on_debt_alone() {
-        // A routed question is settled; the open one aged past fourteen days.
+        // A resolved question is settled; the open one aged past fourteen days.
         let mut storage = storage_with(&[(
             "questions/question.demo.md",
             "---\nid: question.demo\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n",
@@ -297,14 +297,14 @@ mod status_dashboard {
     }
 
     #[test]
-    fn an_in_flight_title_with_a_quote_is_escaped() {
+    fn an_active_title_with_a_quote_is_escaped() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md",
             "---\nid: task.demo\ntype: task\nstate: active\ntitle: Fix the \"quiet\" line\ncreated: 2026-08-24\n---\n",
         )]);
         let text = status_text(&mut storage);
         assert!(
-            text.contains("in-flight: task.demo \"Fix the \\\"quiet\\\" line\"\n"),
+            text.contains("active: task.demo \"Fix the \\\"quiet\\\" line\"\n"),
             "{text}"
         );
     }
@@ -459,25 +459,25 @@ mod debt_signals {
                 },
             ),
             (
-                "debt-hold-quiet",
+                "debt-hold-stale",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
                 "open",
                 &["hold: waiting on the owner"][..],
-                DebtSignal::HoldQuiet {
+                DebtSignal::HoldStale {
                     id: "task.demo".into(),
                     days: 2,
                 },
             ),
             (
-                "debt-review-wait",
+                "debt-review-stale",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
                 "review",
                 &[][..],
-                DebtSignal::ReviewWait {
+                DebtSignal::ReviewStale {
                     id: "task.demo".into(),
                     days: 2,
                 },
@@ -562,27 +562,27 @@ mod debt_signals {
                 },
             ),
             (
-                "hold-quiet",
+                "hold-stale",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
                 "open",
                 &["hold: waiting on the owner"][..],
                 14,
-                DebtSignal::HoldQuiet {
+                DebtSignal::HoldStale {
                     id: "task.demo".into(),
                     days: 14,
                 },
             ),
             (
-                "review-wait",
+                "review-stale",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
                 "review",
                 &[][..],
                 7,
-                DebtSignal::ReviewWait {
+                DebtSignal::ReviewStale {
                     id: "task.demo".into(),
                     days: 7,
                 },
@@ -613,7 +613,7 @@ mod debt_signals {
     }
 
     #[test]
-    fn a_held_task_gone_quiet_is_hold_quiet_not_task_stale() {
+    fn a_held_task_gone_quiet_is_hold_stale_not_task_stale() {
         let mut storage = storage_with(&[(
             "tasks/task.demo.md",
             &aged(
@@ -626,7 +626,7 @@ mod debt_signals {
         )]);
         assert_eq!(
             debt_of(&mut storage),
-            vec![DebtSignal::HoldQuiet {
+            vec![DebtSignal::HoldStale {
                 id: "task.demo".into(),
                 days: 14
             }]
@@ -824,12 +824,12 @@ mod debt_signals {
         let pairs: Vec<&DebtSignal> = status
             .debt
             .iter()
-            .filter(|signal| matches!(signal, DebtSignal::UndeclaredPair { .. }))
+            .filter(|signal| matches!(signal, DebtSignal::MayConflict { .. }))
             .collect();
         assert_eq!(pairs.len(), 1, "both directions of citation are one pair");
         assert!(
             status.text.contains(
-                "  undeclared-pair: decision.a (supolka) <-> decision.b (supolka/claude-code)\n"
+                "  may-conflict: decision.a (supolka) <-> decision.b (supolka/claude-code)\n"
             ),
             "{}",
             status.text
@@ -1027,7 +1027,7 @@ mod debt_signals {
         let pair_firsts: Vec<String> = debt_of(&mut storage)
             .iter()
             .filter_map(|signal| match signal {
-                DebtSignal::UndeclaredPair { first, .. } => Some(first.id.clone()),
+                DebtSignal::MayConflict { first, .. } => Some(first.id.clone()),
                 _ => None,
             })
             .collect();
@@ -1384,7 +1384,7 @@ mod debt_signals {
 
             assert_eq!(
                 debt_lines(&mut project, Some(&itself)),
-                vec!["undeclared-pair: decision.spaces (Teammate) <-> decision.tabs (Reader)"],
+                vec!["may-conflict: decision.spaces (Teammate) <-> decision.tabs (Reader)"],
                 "a notebook read behind itself pairs with nobody across the scopes"
             );
         }

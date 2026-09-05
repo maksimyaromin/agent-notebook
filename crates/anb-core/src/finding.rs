@@ -43,9 +43,8 @@ pub enum FindingCode {
     ArchivedLiveRecord,
     UnarchivedSettledRecord,
     OrphanField,
-    BrokenRouting,
     DanglingRef,
-    DepCycle,
+    BlockCycle,
     OriginCycle,
     DuplicateId,
     BrokenSupersession,
@@ -76,9 +75,8 @@ impl FindingCode {
             | FindingCode::IdFilenameMismatch
             | FindingCode::TypeDirMismatch
             | FindingCode::ArchivedLiveRecord
-            | FindingCode::BrokenRouting
             | FindingCode::DanglingRef
-            | FindingCode::DepCycle
+            | FindingCode::BlockCycle
             | FindingCode::OriginCycle
             | FindingCode::DuplicateId
             | FindingCode::BrokenSupersession
@@ -109,9 +107,8 @@ impl FindingCode {
             FindingCode::ArchivedLiveRecord => "archived-live-record",
             FindingCode::UnarchivedSettledRecord => "unarchived-settled-record",
             FindingCode::OrphanField => "orphan-field",
-            FindingCode::BrokenRouting => "broken-routing",
             FindingCode::DanglingRef => "dangling-ref",
-            FindingCode::DepCycle => "dep-cycle",
+            FindingCode::BlockCycle => "block-cycle",
             FindingCode::OriginCycle => "origin-cycle",
             FindingCode::DuplicateId => "duplicate-id",
             FindingCode::BrokenSupersession => "broken-supersession",

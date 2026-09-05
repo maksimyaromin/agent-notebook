@@ -1,12 +1,12 @@
 ---
 id: question.does-the-notebook-need-an-expunge-for-re
 type: question
-state: routed
+state: closed
 title: Does the notebook need an expunge for records born by mistake?
 by: Maksim Yaromin
 via: claude-code
 from: task.milestone-self-host-switch
-routed-to: decision.expunge-for-records-born-by-mistake
+resolved-by: decision.expunge-for-records-born-by-mistake
 created: 2026-08-29
 updated: 2026-08-29
 ---

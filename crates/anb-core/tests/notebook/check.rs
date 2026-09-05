@@ -216,8 +216,8 @@ fn a_hand_edited_cycle_is_named_on_every_member_at_its_edge_line() {
             .map(|found| (found.path.as_str(), found.finding.code, found.finding.line))
             .collect::<Vec<_>>(),
         vec![
-            ("tasks/task.a.md", FindingCode::DepCycle, Some(6)),
-            ("tasks/task.b.md", FindingCode::DepCycle, Some(6)),
+            ("tasks/task.a.md", FindingCode::BlockCycle, Some(6)),
+            ("tasks/task.b.md", FindingCode::BlockCycle, Some(6)),
         ]
     );
     assert!(
@@ -304,9 +304,9 @@ fn repairing_a_named_cycle_surfaces_the_one_overlapping_it() {
     assert_eq!(
         first_pass,
         vec![
-            FindingCode::DepCycle,
-            FindingCode::DepCycle,
-            FindingCode::DepCycle
+            FindingCode::BlockCycle,
+            FindingCode::BlockCycle,
+            FindingCode::BlockCycle
         ],
         "one cycle per back edge: the walk names task.a → task.b → task.c → task.a"
     );
@@ -317,8 +317,8 @@ fn repairing_a_named_cycle_surfaces_the_one_overlapping_it() {
     assert_eq!(
         findings_for(&mut storage),
         vec![
-            ("tasks/task.a.md".to_owned(), FindingCode::DepCycle),
-            ("tasks/task.c.md".to_owned(), FindingCode::DepCycle),
+            ("tasks/task.a.md".to_owned(), FindingCode::BlockCycle),
+            ("tasks/task.c.md".to_owned(), FindingCode::BlockCycle),
         ],
         "the cycle hidden behind the repaired one surfaces on the next walk"
     );
@@ -332,7 +332,7 @@ fn a_task_waiting_on_itself_is_a_dep_cycle_at_its_own_line() {
     )]);
     let located = Notebook::new(&mut storage).check().unwrap();
     assert_eq!(located.len(), 1);
-    assert_eq!(located[0].finding.code, FindingCode::DepCycle);
+    assert_eq!(located[0].finding.code, FindingCode::BlockCycle);
     assert_eq!(located[0].finding.line, Some(6));
 }
 
@@ -356,7 +356,7 @@ fn a_cycle_finding_points_at_the_live_file_when_the_archive_holds_the_name_too()
     assert_eq!(
         located
             .iter()
-            .filter(|found| found.finding.code == FindingCode::DepCycle)
+            .filter(|found| found.finding.code == FindingCode::BlockCycle)
             .map(|found| (found.path.as_str(), found.finding.line))
             .collect::<Vec<_>>(),
         vec![("tasks/task.a.md", Some(6)), ("tasks/task.b.md", Some(6))],
@@ -463,14 +463,14 @@ fn a_dependency_edge_into_a_non_task_is_a_bad_value() {
 }
 
 #[test]
-fn a_routed_question_pointing_at_nothing_has_lost_its_thread() {
+fn a_closed_question_whose_resolver_is_gone_is_a_dangling_ref() {
     let mut storage = storage_with(&[(
         "archive/questions/question.demo.md",
         &record_file(
             "question.demo",
             "question",
-            "routed",
-            &["routed-to: decision.never-written"],
+            "closed",
+            &["resolved-by: decision.never-written"],
             "",
         ),
     )]);
@@ -478,7 +478,7 @@ fn a_routed_question_pointing_at_nothing_has_lost_its_thread() {
         findings_for(&mut storage),
         vec![(
             "archive/questions/question.demo.md".to_owned(),
-            FindingCode::BrokenRouting
+            FindingCode::DanglingRef
         )]
     );
 }
@@ -515,7 +515,7 @@ fn a_line_in_many_cycles_is_named_once() {
     let checked = Notebook::new(&mut storage).check().unwrap();
     let mut lines: Vec<(&str, Option<usize>)> = checked
         .iter()
-        .filter(|found| found.finding.code == FindingCode::DepCycle)
+        .filter(|found| found.finding.code == FindingCode::BlockCycle)
         .map(|found| (found.path.as_str(), found.finding.line))
         .collect();
     let named = lines.len();

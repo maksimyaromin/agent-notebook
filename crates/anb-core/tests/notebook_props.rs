@@ -24,7 +24,7 @@ enum Verb {
     Start,
     Submit,
     Close,
-    Return,
+    CloseWithReason,
     Reopen,
     Hold,
     Unhold,
@@ -41,7 +41,9 @@ fn apply(storage: &mut MemoryStorage, verb: Verb) -> Result<bool, NotebookError>
         Verb::Close => notebook
             .close(id, &Proof::Sha("f00dfeed".to_owned()), TODAY)
             .map(|reply| reply.transition.already),
-        Verb::Return => notebook.return_task(id, TODAY).map(|reply| reply.already),
+        Verb::CloseWithReason => notebook
+            .close_with_reason(id, "overtaken", TODAY)
+            .map(|reply| reply.transition.already),
         Verb::Reopen => notebook.reopen(id, TODAY).map(|reply| reply.already),
         Verb::Hold => notebook
             .hold(id, "a standing reason", None, TODAY)
@@ -61,7 +63,7 @@ fn verb() -> impl Strategy<Value = Verb> {
         Just(Verb::Start),
         Just(Verb::Submit),
         Just(Verb::Close),
-        Just(Verb::Return),
+        Just(Verb::CloseWithReason),
         Just(Verb::Reopen),
         Just(Verb::Hold),
         Just(Verb::Unhold),
@@ -187,7 +189,7 @@ proptest! {
 
 /// Two promises the Budget makes. However small the ceiling, the rendered
 /// Status fits it — or the ladder has reached its floor, which ships
-/// regardless because the first in-flight line is never dropped. And under
+/// regardless because the first active line is never dropped. And under
 /// the default ceiling nothing is cut at all: every section is bounded, so
 /// no notebook can grow a dashboard past the budget it was given. Section
 /// content and section count vary freely; neither promise may.
@@ -243,12 +245,12 @@ mod status_fits_its_budget {
             let status = notebook
                 .status(TODAY, Budget::Tokens(ceiling), no_lost_proofs, None)
                 .unwrap();
-            // The floor is counts, the first in-flight line, what the rest
+            // The floor is counts, the first active line, what the rest
             // of it came to, and the budget line.
             let at_floor = status.text.lines().count() <= 4
                 && status.text.lines().all(|line| {
                     line.starts_with("ok: notebook")
-                        || line.starts_with("in-flight: ")
+                        || line.starts_with("active: ")
                         || line.starts_with("  \u{2026} ")
                         || line.starts_with("budget: ")
                 });

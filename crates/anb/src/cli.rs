@@ -35,16 +35,17 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Create a Task; the notebook appears on first write.
+    /// Create a record — `add task|decision|note|question "<title>"`; the
+    /// notebook appears on first write.
     Add(AddArgs),
-    /// open → active: take the Task into work.
+    /// open | review → active: take the Task into work, or back into it.
     Start { id: String },
     /// active → review: hand the work to a human for acceptance.
     Submit { id: String },
-    /// active | review → closed, carrying its proof.
+    /// active | review → closed, carrying its proof; --reason ends a Task or
+    /// a Question without work, from open too; --resolved-by closes a
+    /// Question into the record that settled it.
     Close(CloseArgs),
-    /// review → active: the human returned the work.
-    Return { id: String },
     /// closed → open, explicitly.
     Reopen { id: String },
     /// Pause a Task deliberately; the reason is mandatory.
@@ -81,22 +82,6 @@ pub enum Command {
         #[arg(long)]
         via: Option<String>,
     },
-    /// Record a Decision; replacing a conflicting one takes --supersedes.
-    Decide(DecideArgs),
-    /// Record a Note: curated knowledge, corrected in place.
-    Note(NoteArgs),
-    /// File a Question: a doubt parked without scope creep.
-    Ask(DraftArgs),
-    /// Close a Question by routing it into what its answer became.
-    Answer {
-        id: String,
-        /// The Decision or Task the answer became.
-        #[arg(long)]
-        to: Option<String>,
-        /// Close without routing, stating why.
-        #[arg(long)]
-        drop: Option<String>,
-    },
     /// active → retired: end a Decision or Note that has no successor.
     Retire { id: String },
     /// The dispatch queue: open, unblocked, unheld Tasks, most urgent first.
@@ -118,7 +103,7 @@ pub enum Command {
         all: bool,
     },
     /// One record: envelope, body, and its mention blocks.
-    View {
+    Show {
         id: String,
         /// Every line and every mention; a long body and a crowded block
         /// print bounded by default.
@@ -145,7 +130,7 @@ pub enum Command {
     /// Move an archived record back into the working set: same filename, same bytes.
     Restore { id: String },
     /// Delete a record born by mistake; refuses while anything cites it.
-    Expunge { id: String },
+    Delete { id: String },
     /// Correct a live record's own fields; state stays a command's move.
     Edit(EditArgs),
     /// Find records — the archive included — by substring.
@@ -165,10 +150,14 @@ pub enum Command {
     },
 }
 
-/// The envelope flags every create shares; each command adds its type's
-/// own on top.
+/// One creation command for every record type: the envelope flags all
+/// four share, plus the ones only some types carry — the Core refuses a
+/// flag foreign to the type by name.
 #[derive(Args)]
-pub struct DraftArgs {
+pub struct AddArgs {
+    /// task, decision, note, or question.
+    #[arg(value_parser = a_record_type)]
+    pub record_type: RecordType,
     pub title: String,
     /// Explicit id; omitted, one is minted from the title.
     #[arg(long)]
@@ -191,37 +180,13 @@ pub struct DraftArgs {
     /// The acting agent tool.
     #[arg(long)]
     pub via: Option<String>,
-}
-
-#[derive(Args)]
-pub struct AddArgs {
-    #[command(flatten)]
-    pub draft: DraftArgs,
-    /// 0–4, 0 the most urgent.
+    /// A task's urgency, 0–4, 0 the most urgent.
     #[arg(long)]
     pub priority: Option<u32>,
-}
-
-#[derive(Args)]
-pub struct DecideArgs {
-    #[command(flatten)]
-    pub draft: DraftArgs,
-    /// rule, shape, or drift.
+    /// A decision's rule, shape, or drift; a note's fact, term, or guide.
     #[arg(long)]
     pub kind: Option<String>,
-    /// The Decision this one replaces; it flips in the same move.
-    #[arg(long)]
-    pub supersedes: Option<String>,
-}
-
-#[derive(Args)]
-pub struct NoteArgs {
-    #[command(flatten)]
-    pub draft: DraftArgs,
-    /// fact, term, or guide.
-    #[arg(long)]
-    pub kind: Option<String>,
-    /// The Note this one replaces; it retires in the same move.
+    /// The Decision or Note this one replaces; it flips in the same move.
     #[arg(long)]
     pub supersedes: Option<String>,
 }
@@ -276,6 +241,13 @@ pub struct CloseArgs {
     /// The explicit waiver: close stating there is no proof.
     #[arg(long)]
     pub no_proof: bool,
+    /// End a Task or a Question without work, stating why; the reason lands
+    /// in the envelope and no proof is written.
+    #[arg(long, value_name = "WHY")]
+    pub reason: Option<String>,
+    /// The Decision or Task that settled the Question.
+    #[arg(long, value_name = "ID")]
+    pub resolved_by: Option<String>,
 }
 
 #[derive(Args)]
@@ -299,10 +271,10 @@ pub struct SliceArgs {
     /// Only the work this record's scope reaches: one epic's branch.
     #[arg(long = "for", value_name = "ID")]
     pub scope: Option<String>,
-    /// Only records of these kinds. Every kind by default, including one
-    /// whose own `type` field no notebook word matches
-    #[arg(long = "type", value_name = "KIND", value_delimiter = ',', value_parser = a_record_kind)]
-    pub kinds: Vec<RecordType>,
+    /// Only records of these types. Every type by default, including one
+    /// whose own `type` field no notebook word matches.
+    #[arg(long = "type", value_name = "TYPE", value_delimiter = ',', value_parser = a_record_type)]
+    pub types: Vec<RecordType>,
     /// Only what can be started now: the ready lens.
     #[arg(long)]
     pub ready: bool,
@@ -317,13 +289,12 @@ pub struct SliceArgs {
     pub archive: bool,
 }
 
-/// One `--type` word as the kind it names. The kinds are asked of the Core
-/// rather than retyped here, so a fifth one is offered by this flag the day
-/// it exists.
-fn a_record_kind(word: &str) -> Result<RecordType, String> {
+/// One type word as the type it names. The types are asked of the Core
+/// rather than retyped here, so a fifth one is accepted the day it exists.
+fn a_record_type(word: &str) -> Result<RecordType, String> {
     RecordType::from_word(word).ok_or_else(|| {
         format!(
-            "`{word}` is no kind of record — try {}",
+            "`{word}` is no type of record — try {}",
             RecordType::ALL.map(RecordType::word).join(", ")
         )
     })
