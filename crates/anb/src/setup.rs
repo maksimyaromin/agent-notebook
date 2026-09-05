@@ -6,7 +6,7 @@
 //! Claude Code reads instead — between markers; one `SessionStart` hook
 //! group in the settings Claude Code and Codex run hooks from; and the anb
 //! skill files where each agent looks for skills, known as setup's own by
-//! the generated mark in their frontmatter. Other tools' lines and hook
+//! the mark in their frontmatter. Other tools' lines and hook
 //! groups in the same files are never touched; a skill file the user made
 //! theirs is theirs.
 
@@ -39,7 +39,7 @@ const CLAUDE_SETTINGS: &str = ".claude/settings.json";
 const CODEX_HOOKS: &str = ".codex/hooks.json";
 /// Where each host looks for skills: Claude Code in its own directory,
 /// Codex and Pi in the shared one.
-const SKILL_DIRS: [&str; 2] = [".claude/skills/anb", ".agents/skills/anb"];
+const SKILL_HOSTS: [&str; 2] = [".claude/skills", ".agents/skills"];
 
 /// What Codex asks of a project hook before it runs it, printed so a
 /// silent first session is not mistaken for a broken install.
@@ -61,7 +61,7 @@ pub enum Outcome {
     /// The file is a link to somewhere else. Writing through it would edit a
     /// file the project does not own, so setup leaves it as it found it.
     Linked,
-    /// A skill file whose frontmatter no longer says setup generated it: the
+    /// A skill file whose frontmatter no longer carries setup's mark: the
     /// user made it theirs, and setup neither rewrites nor removes it.
     Yours,
 }
@@ -128,10 +128,12 @@ pub fn apply(project: &Path, remove: bool) -> Result<SetUp, NotebookError> {
         plan_hook(project, CLAUDE_SETTINGS, remove)?,
         plan_hook(project, CODEX_HOOKS, remove)?,
     ];
-    let rendered = skill::render();
-    for dir in SKILL_DIRS {
-        for (file, text) in rendered.files() {
-            plans.push(plan_skill_file(project, dir, file, text, remove)?);
+    for host in SKILL_HOSTS {
+        for skill in skill::installable() {
+            let dir = format!("{host}/{}", skill.name);
+            for (file, text) in &skill.files {
+                plans.push(plan_skill_file(project, &dir, file, text, remove)?);
+            }
         }
     }
     let mut files = Vec::new();
@@ -151,8 +153,8 @@ pub fn apply(project: &Path, remove: bool) -> Result<SetUp, NotebookError> {
     })
 }
 
-/// A generated skill file: written where absent or stale, left alone once
-/// the user has made it theirs by dropping the generated mark.
+/// A skill file: written where absent or stale, left alone once the user
+/// has made it theirs by dropping the mark.
 fn plan_skill_file(
     project: &Path,
     dir: &str,
@@ -168,7 +170,7 @@ fn plan_skill_file(
     let existing = read_text(&path)?;
     if existing
         .as_deref()
-        .is_some_and(|text| !skill::is_generated(text))
+        .is_some_and(|text| !skill::is_managed(text))
     {
         return Ok(left_alone(shown, Outcome::Yours));
     }

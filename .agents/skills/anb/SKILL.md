@@ -2,7 +2,7 @@
 name: anb
 description: Use when working in a repository that has an .agent-notebook directory: when asked to continue a task or an epic, to pick the next piece of work, to record a decision, a doubt or a finding, to close work with its proof, or to say where the project stands. Also when a session starts and a status line beginning with active: was printed.
 metadata:
-  generated: anb
+  managed-by: anb
 ---
 
 # anb

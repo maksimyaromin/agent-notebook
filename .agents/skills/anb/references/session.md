@@ -2,7 +2,7 @@
 name: anb worked session
 description: One notebook worked from empty to archived work, every reply as the tool printed it. Open to see what a reply looks like before you parse one.
 metadata:
-  generated: anb
+  managed-by: anb
 ---
 
 # anb worked session
