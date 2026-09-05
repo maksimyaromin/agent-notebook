@@ -1,5 +1,15 @@
 # Changelog
 
+## agent-notebook v2026.09.06
+
+The first release published entirely by the repository: a tag builds every platform, creates the GitHub release and publishes the packages through npm's trusted publishing, with no token anywhere. Nothing changes for a user of `anb`; the packages move to 0.1.1 so the chain has something to publish.
+
+### Improved
+
+- **The skill module is two symmetric children.** `skill` owns what the installed skills share: the frontmatter mark, the list of installables, writing a skill's files and diffing them. `skill/anb` renders the `anb` skill from the binary and `skill/atlas` carries the hand-written atlas skill, one file per skill.
+
+Packages in this release: `@supolka/agent-notebook@0.1.1` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.05
 
 The first release. A project's working memory as typed records in plain markdown files, and one command, `anb`, that any coding agent runs to read and write them. Four kinds of record with lifecycles the tool enforces, a Status that fits a token budget, a check that names the repair for anything it finds, and a skill rendered from the binary so what agents learn cannot drift from what the tool does. Installs from npm with a native binary per platform, or with `cargo install`.

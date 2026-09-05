@@ -151,16 +151,16 @@ pub enum SkillReply {
 }
 
 fn skilled(dir: Option<&Path>, check: bool) -> Result<SkillReply, NotebookError> {
-    let rendered = skill::render();
+    let rendered = skill::anb::render();
     let Some(dir) = dir else {
         return Ok(SkillReply::Printed(rendered.skill));
     };
     let shown = dir.display().to_string();
     if check {
-        let drift = skill::drift(dir, &rendered)?;
+        let drift = skill::drift(dir, &rendered.files())?;
         return Ok(SkillReply::Checked { dir: shown, drift });
     }
-    skill::write_into(dir, &rendered)?;
+    skill::write_into(dir, &rendered.files())?;
     Ok(SkillReply::Written {
         dir: shown,
         files: rendered.files().len(),
