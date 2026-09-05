@@ -7,9 +7,23 @@ metadata:
 
 # anb worked session
 
-Generated from the binary — the same definitions `anb --help` prints, every example run on a scratch notebook; a committed copy is checked against this rendering in CI.
+Generated from the binary: the same definitions `anb --help` prints, and every example run on a scratch notebook. A committed copy is checked against this rendering in CI.
+
+## Contents
+
+- The hub and the work born inside it
+- The queue
+- A session at work
+- Decisions and Notes
+- Closing a Question
+- Status
+- Closing a Task
+- Ending without work, pausing
+- Reading back, and the gate
 
 Every reply below is what the tool printed, run on 2026-01-15 by an agent whose git identity is `Ada`.
+
+## The hub and the work born inside it
 
 An idea becomes a hub, and the work inside it is born from the hub:
 
@@ -43,6 +57,8 @@ $ anb block task.negative-corpus-wired-into-ci task.grammar-parser-accepts-fence
 ok: block task.negative-corpus-wired-into-ci — waits on task.grammar-parser-accepts-fences
 ```
 
+## The queue
+
 The queue shows what can start now; the blocked child waits:
 
 ```
@@ -56,6 +72,8 @@ $ anb ready --for task.ship-the-parser
 ready[1]{id,priority,age,title}:
   task.grammar-parser-accepts-fences,1,0d,Grammar parser accepts fences
 ```
+
+## A session at work
 
 A session takes the top of the queue, logs as it goes, and parks a doubt without widening its scope:
 
@@ -74,7 +92,9 @@ $ anb add question "Do fences nest?" --from task.grammar-parser-accepts-fences
 ok: add question.do-fences-nest — questions/question.do-fences-nest.md
 ```
 
-A ruling is a Decision; a term is a Note. A second Decision on the same ground is nudged about the first — read it before going on:
+## Decisions and Notes
+
+A ruling is a Decision; a term is a Note. A second Decision on the same ground is nudged about the first, so read it before going on:
 
 ```
 $ anb add decision "Fences never nest" --kind rule --tag parser --tag grammar --body "A fence closes at the first closing marker. Answers question.do-fences-nest."
@@ -92,6 +112,8 @@ $ anb add note Fence --kind term --body "A fence is a pair of triple-backtick li
 ok: add note.fence — notes/note.fence.md
 ```
 
+## Closing a Question
+
 The doubt closes into the record that settled it, and is archived right after:
 
 ```
@@ -105,7 +127,9 @@ $ anb archive question.do-fences-nest
 ok: archive question.do-fences-nest — questions/question.do-fences-nest.md→archive/questions/question.do-fences-nest.md
 ```
 
-Status is the session's opening — the active Task with its last log line, the rules, the queue, the epics:
+## Status
+
+Status opens the session with the active Task and its last log line, the rules, the queue and the epics:
 
 ```
 $ anb status --budget 0
@@ -119,6 +143,8 @@ epics[1]:
   task.ship-the-parser: 0/2 closed — nothing ready
 budget: ~122 tokens (no ceiling)
 ```
+
+## Closing a Task
 
 The work closes with its report as a Note, and is archived right after; the reply names what the close unblocked:
 
@@ -134,6 +160,8 @@ $ anb archive task.grammar-parser-accepts-fences
 ok: archive task.grammar-parser-accepts-fences — tasks/task.grammar-parser-accepts-fences.md→archive/tasks/task.grammar-parser-accepts-fences.md
 carried[1]: note.report-grammar-parser-accepts-fences
 ```
+
+## Ending without work, pausing
 
 A Task overtaken before it started ends with its reason, from open, and is archived like any closed record; a pause carries its reason too:
 
@@ -157,7 +185,9 @@ $ anb hold task.negative-corpus-wired-into-ci --reason "waits for the CI runner"
 ok: hold task.negative-corpus-wired-into-ci — held until 2026-01-20
 ```
 
-Reading back: one record, the whole notebook, a search that reaches the archive, and the gate — clean, because every settled record was archived as it settled:
+## Reading back, and the gate
+
+Reading back: one record, the whole notebook, a search that reaches the archive, and the gate, which is clean because every settled record was archived as it settled:
 
 ```
 $ anb show task.ship-the-parser

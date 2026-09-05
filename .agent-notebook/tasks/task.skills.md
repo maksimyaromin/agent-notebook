@@ -10,6 +10,8 @@ blocked-by: task.setup-sessionstart-hooks
 blocked-by: task.skill-from-help-ci-drift-check
 blocked-by: task.global-skill-notes-docs
 blocked-by: task.claude-code-skill-the-notebook-drawn-and
+blocked-by: task.skill-layout-references-in-their-own
+blocked-by: task.cli-help-and-reply-texts-pass-the
 created: 2026-08-31
 updated: 2026-09-05
 ---
