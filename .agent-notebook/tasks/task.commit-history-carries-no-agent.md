@@ -1,7 +1,7 @@
 ---
 id: task.commit-history-carries-no-agent
 type: task
-state: open
+state: active
 title: Commit history carries no agent attribution before the repository goes public
 by: Maksim Yaromin
 via: claude-code
