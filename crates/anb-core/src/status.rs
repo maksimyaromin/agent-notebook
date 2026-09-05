@@ -3,8 +3,9 @@
 //!
 //! Only synthesized, uninferable state enters — never prose, never
 //! instructions: counts, the active Task with its last log line, review
-//! Tasks waiting on a human, standing rules, the ready top rows, where each
-//! epic stands, Debt. The gate keeps a quiet notebook to one line.
+//! Tasks waiting on a human, held Tasks with their reasons, standing rules,
+//! the ready top rows, where each epic stands, Debt. The gate keeps a quiet
+//! notebook to one line.
 //!
 //! Over Budget the sections collapse one rung at a time up [`Collapse`],
 //! and the first active line survives every rung: no notebook, however
@@ -63,6 +64,16 @@ pub struct ActiveTask {
     pub log: Option<String>,
 }
 
+/// A live Task on hold: paused on purpose, with the reason and the day it
+/// resumes on when one was set. It is not the Task a session resumes from,
+/// whichever live state the hold froze it in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldTask {
+    pub id: String,
+    pub reason: String,
+    pub until: Option<String>,
+}
+
 /// A standing rule: a live Decision of kind `rule`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusRule {
@@ -79,6 +90,7 @@ pub struct Status {
     pub counts: Counts,
     pub active: Vec<ActiveTask>,
     pub review: Vec<String>,
+    pub held: Vec<HeldTask>,
     pub rules: Vec<StatusRule>,
     pub ready: Vec<ReadyTask>,
     pub epics: Vec<Epic>,
@@ -93,6 +105,7 @@ pub(crate) struct StatusInputs {
     pub counts: Counts,
     pub active: Vec<ActiveTask>,
     pub review: Vec<String>,
+    pub held: Vec<HeldTask>,
     pub rules: Vec<StatusRule>,
     pub ready: Vec<ReadyTask>,
     pub epics: Vec<Epic>,
@@ -103,7 +116,9 @@ pub(crate) struct StatusInputs {
 impl StatusInputs {
     /// The gate: signal is work in motion, work waiting on a human,
     /// dispatchable work, or decay. Review counts deliberately: a Task
-    /// parked at acceptance is not a quiet notebook.
+    /// parked at acceptance is not a quiet notebook. A hold does not count:
+    /// it is a pause somebody chose, and a hold gone stale is Debt's to
+    /// raise.
     fn has_signal(&self) -> bool {
         !self.active.is_empty()
             || !self.review.is_empty()
@@ -198,6 +213,9 @@ impl Ladder {
             if !inputs.review.is_empty() {
                 cuts.push("review\u{2192}count".to_owned());
             }
+            if !inputs.held.is_empty() {
+                cuts.push("held\u{2192}count".to_owned());
+            }
         }
         (!cuts.is_empty()).then(|| cuts.join(", "))
     }
@@ -230,6 +248,7 @@ fn status_from(inputs: StatusInputs, text: String, spent: u32, quiet: bool) -> S
         counts: inputs.counts,
         active: inputs.active,
         review: inputs.review,
+        held: inputs.held,
         rules: inputs.rules,
         ready: inputs.ready,
         epics: inputs.epics,
@@ -297,6 +316,7 @@ fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> Str
         return out;
     }
     render_review(&mut out, &inputs.review, ladder);
+    render_held(&mut out, &inputs.held, ladder);
     render_rules(&mut out, &inputs.rules, ladder);
     render_ready(
         &mut out,
@@ -388,6 +408,30 @@ fn render_review(out: &mut String, review: &[String], ladder: Ladder) {
         review.len(),
         encode::id_list(review, SECTION_ROWS)
     );
+}
+
+/// What waits on purpose, each with the reason it waits for, so a session
+/// can see whether that reason has lifted. Collapsed with review: both are
+/// work standing still.
+fn render_held(out: &mut String, held: &[HeldTask], ladder: Ladder) {
+    if held.is_empty() {
+        return;
+    }
+    if ladder.reached(Collapse::Log) {
+        let _ = writeln!(out, "held: {}", held.len());
+        return;
+    }
+    let _ = writeln!(out, "held[{}]{{id,reason,until}}:", held.len());
+    for task in held.iter().take(SECTION_ROWS) {
+        let _ = writeln!(
+            out,
+            "  {},{},{}",
+            task.id,
+            encode::quoted_if_delimited(&task.reason),
+            task.until.as_deref().unwrap_or("-")
+        );
+    }
+    section_hint(out, held.len(), SECTION_ROWS);
 }
 
 fn render_rules(out: &mut String, rules: &[StatusRule], ladder: Ladder) {

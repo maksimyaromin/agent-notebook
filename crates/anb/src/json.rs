@@ -450,6 +450,7 @@ fn status_value(status: &Status) -> Value {
         "counts": counts_value(&status.counts),
         "active": section(&status.active, dashboard_rows(&status.active), active_task_value),
         "review": section(&status.review, dashboard_rows(&status.review), |id| json!(id)),
+        "held": section(&status.held, dashboard_rows(&status.held), held_task_value),
         "rules": section(&status.rules, dashboard_rows(&status.rules), |rule| {
             json!({"id": rule.id, "title": rule.title})
         }),
@@ -523,6 +524,14 @@ fn debt_section(debt: &[DebtSignal]) -> Value {
             .map(debt_value)
             .collect::<Vec<Value>>(),
     })
+}
+
+fn held_task_value(task: &anb_core::HeldTask) -> Value {
+    Value::Object(fields([
+        ("id", json!(task.id)),
+        ("reason", json!(task.reason)),
+        ("until", json!(task.until)),
+    ]))
 }
 
 fn active_task_value(task: &anb_core::ActiveTask) -> Value {

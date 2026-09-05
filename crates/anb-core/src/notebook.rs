@@ -312,6 +312,7 @@ impl<'a> Notebook<'a> {
             counts: query::live_counts(records),
             active: query::active_tasks(&live_valid),
             review: query::review_tasks(&live_valid),
+            held: query::held_tasks(&live_valid),
             rules: query::standing_rules(&live_valid),
             epics: query::epic_rows(records, &self.epic_kin(&corpus)?, &resolvable, &queue),
             ready: queue,
