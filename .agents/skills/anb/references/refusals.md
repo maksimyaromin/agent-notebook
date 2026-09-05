@@ -2,7 +2,7 @@
 name: anb refusals
 description: Every refusal code with its cause and the try: line that repairs it, and the findings anb check raises. Open when a refusal's try: line is not enough.
 metadata:
-  generated: anb
+  managed-by: anb
 ---
 
 # anb refusals

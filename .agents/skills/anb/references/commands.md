@@ -2,7 +2,7 @@
 name: anb commands
 description: Every anb command with its flags, from the definitions anb --help prints. Open before a verb you have not used.
 metadata:
-  generated: anb
+  managed-by: anb
 ---
 
 # anb commands
@@ -252,7 +252,7 @@ The whole notebook as one page, grouped by type
 
 ### anb setup
 
-Wire the agents to the notebook, in this directory: the one-line snippet in `AGENTS.md` and `CLAUDE.md`, the `SessionStart` hook for Claude Code and Codex, and the anb skill where each agent looks for skills. Re-running patches in place
+Wire the agents to the notebook, in this directory: the one-line snippet in `AGENTS.md` and `CLAUDE.md`, the `SessionStart` hook for Claude Code and Codex, and the anb skills where each agent looks for skills. Re-running patches in place
 
 | Flag | Meaning |
 |---|---|

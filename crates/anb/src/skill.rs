@@ -8,7 +8,8 @@
 //! command with its flags from the same definitions `--help` prints, a
 //! worked session with every reply rendered by running the command, and the
 //! refusal catalog rendered the same way. A committed copy is diffed against
-//! this rendering in CI.
+//! this rendering in CI. The atlas skill, written by hand, lives in
+//! [`atlas`] and is installed by `setup` beside this one.
 
 use crate::cli::{Cli, Command};
 use crate::recovery::subject;
@@ -20,10 +21,12 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-/// The frontmatter key by which `setup` knows a skill file as its own. A
+pub mod atlas;
+
+/// The frontmatter line by which `setup` knows a skill file as its own. A
 /// user who deletes the line owns the file from then on: setup rewrites only
 /// what still carries it.
-pub const GENERATED_MARK: &str = "generated: anb";
+pub const MANAGED_MARK: &str = "managed-by: anb";
 
 pub const SKILL_FILE: &str = "SKILL.md";
 pub const COMMANDS_FILE: &str = "references/commands.md";
@@ -54,6 +57,37 @@ impl Skill {
             (REFUSALS_FILE, &self.refusals),
         ]
     }
+}
+
+/// A skill `setup` installs: its directory name under a host's `skills/`
+/// and its files, paths relative to that directory.
+pub struct Installable {
+    pub name: &'static str,
+    pub files: Vec<(&'static str, String)>,
+}
+
+/// Both skills the binary carries: the one rendered from itself and the
+/// atlas, written by hand.
+#[must_use]
+pub fn installable() -> [Installable; 2] {
+    let rendered = render();
+    [
+        Installable {
+            name: "anb",
+            files: rendered
+                .files()
+                .iter()
+                .map(|(file, text)| (*file, (*text).to_owned()))
+                .collect(),
+        },
+        Installable {
+            name: atlas::NAME,
+            files: atlas::files()
+                .iter()
+                .map(|(file, text)| (*file, (*text).to_owned()))
+                .collect(),
+        },
+    ]
 }
 
 /// Which committed file differs from the rendering.
@@ -125,16 +159,14 @@ pub fn drift(dir: &Path, skill: &Skill) -> Result<Vec<Drift>, StorageError> {
 
 /// Whether a skill file on disk is one setup wrote and may rewrite.
 #[must_use]
-pub fn is_generated(text: &str) -> bool {
+pub fn is_managed(text: &str) -> bool {
     let Some(rest) = text.strip_prefix("---\n") else {
         return false;
     };
     let Some(end) = rest.find("\n---\n") else {
         return false;
     };
-    rest[..end]
-        .lines()
-        .any(|line| line.trim() == GENERATED_MARK)
+    rest[..end].lines().any(|line| line.trim() == MANAGED_MARK)
 }
 
 fn io_failure(path: &Path, error: &std::io::Error) -> StorageError {
@@ -152,7 +184,7 @@ fn skill_md() -> String {
     let mut out = String::new();
     out.push_str("---\nname: anb\n");
     out.push_str("description: Use when working in a repository that has an .agent-notebook directory: when asked to continue a task or an epic, to pick the next piece of work, to record a decision, a doubt or a finding, to close work with its proof, or to say where the project stands. Also when a session starts and a status line beginning with active: was printed.\n");
-    out.push_str("metadata:\n  generated: anb\n---\n\n");
+    out.push_str("metadata:\n  managed-by: anb\n---\n\n");
     out.push_str(SKILL_BODY);
     out
 }
@@ -251,7 +283,7 @@ Work is almost never a flat sheet. An idea gets a hub Task tagged `epic`, and ev
 fn reference(name: &str, description: &str, section: impl FnOnce(&mut String)) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "---\nname: {name}\ndescription: {description}");
-    out.push_str("metadata:\n  generated: anb\n---\n\n");
+    out.push_str("metadata:\n  managed-by: anb\n---\n\n");
     let _ = writeln!(out, "# {name}\n");
     out.push_str("Generated from the binary: the same definitions `anb --help` prints, and every example run on a scratch notebook. A committed copy is checked against this rendering in CI.\n\n");
     let mut body = String::new();
@@ -754,12 +786,10 @@ mod tests {
     fn a_generated_file_is_known_by_its_frontmatter_mark() {
         let skill = render();
         for (file, text) in skill.files() {
-            assert!(is_generated(text), "{file} lacks the mark");
+            assert!(is_managed(text), "{file} lacks the mark");
         }
-        assert!(!is_generated(
-            &skill.skill.replace("  generated: anb\n", "")
-        ));
-        assert!(!is_generated("# No frontmatter at all\n"));
+        assert!(!is_managed(&skill.skill.replace("  managed-by: anb\n", "")));
+        assert!(!is_managed("# No frontmatter at all\n"));
     }
 
     #[test]
@@ -790,6 +820,29 @@ mod tests {
                 .collect();
             assert_eq!(listed, sections, "{file} lists other sections than it has");
         }
+    }
+
+    #[test]
+    fn setup_installs_the_rendered_skill_and_the_atlas() {
+        let [anb, atlas] = installable();
+        assert_eq!(anb.name, "anb");
+        let rendered = render();
+        assert_eq!(
+            anb.files,
+            rendered
+                .files()
+                .iter()
+                .map(|(file, text)| (*file, (*text).to_owned()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(atlas.name, "anb-atlas");
+        assert_eq!(
+            atlas.files,
+            atlas::files()
+                .iter()
+                .map(|(file, text)| (*file, (*text).to_owned()))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
