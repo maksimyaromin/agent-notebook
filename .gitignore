@@ -13,3 +13,5 @@
 node_modules/
 apps/docs/dist/
 apps/docs/.astro/
+packages/*/bin/anb
+packages/*/bin/anb.exe

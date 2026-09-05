@@ -1,0 +1,123 @@
+name: Release
+
+# A tag v<version> builds the binary for every platform the npm packages ship and publishes them, platform packages
+# first and the shim package last. Until the packages exist on the registry, the publish step is a dry run: the
+# first publish is made from a maintainer's machine with scripts/release/publish.sh, from the binaries this workflow
+# built (scripts/release/fetch-binaries.sh <run-id>). After that the maintainer adds a Trusted Publisher for this
+# repository and workflow on npm, sets the RELEASE_DRY_RUN repository variable to false, and the id-token below is
+# all the authentication a publish needs.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: Run every step and publish nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Two tags pushed close together publish one after the other: npm hands `latest` to whatever lands last.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # A tag, or a run started by hand with the box unticked, proposes a publish. The RELEASE_DRY_RUN repository
+  # variable decides whether one happens: while it holds anything but false, every step runs and nothing reaches
+  # the registry.
+  DRY_RUN: ${{ (inputs.dryRun || vars.RELEASE_DRY_RUN != 'false') && '1' || '' }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            os: macos-15
+            target: aarch64-apple-darwin
+          - platform: darwin-x64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+          - platform: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - platform: win32-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install && rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p anb
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: anb-${{ matrix.platform }}
+          path: |
+            target/${{ matrix.target }}/release/anb
+            target/${{ matrix.target }}/release/anb.exe
+          if-no-files-found: error
+
+  publish:
+    name: Publish the packages to npm
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The environment carries whatever protection rule the maintainer sets, and no secret: publishing is by OIDC.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: binaries
+      - name: Place each binary in its platform package
+        run: |
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
+            case "$platform" in win32-*) name=anb.exe ;; *) name=anb ;; esac
+            sh scripts/release/place-binary.sh "$platform" "binaries/anb-$platform/$name"
+          done
+      # The version a tag names must be the version every manifest carries; a disagreement would surface as a
+      # wrong version on the registry.
+      - name: Check the tag against the manifests
+        if: startsWith(github.ref, 'refs/tags/')
+        run: sh scripts/release/check-versions.sh "$GITHUB_REF_NAME"
+      - name: Check the manifests agree
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: sh scripts/release/check-versions.sh
+      # The shim resolves the platform package next to it; running it here is the packaged tool answering.
+      - name: Run the shim against the Linux binary
+        run: |
+          mkdir -p node_modules/@supolka
+          ln -s "$PWD/packages/agent-notebook-linux-x64" node_modules/@supolka/agent-notebook-linux-x64
+          node packages/agent-notebook/bin/anb.js --version
+      # npm generates no provenance for a private repository, so the setting follows the repository's visibility.
+      - name: Publish
+        run: |
+          for dir in packages/agent-notebook-darwin-arm64 packages/agent-notebook-darwin-x64 packages/agent-notebook-linux-x64 packages/agent-notebook-linux-arm64 packages/agent-notebook-win32-x64 packages/agent-notebook; do
+            (cd "$dir" && npm publish --access public ${DRY_RUN:+--dry-run})
+          done
+        env:
+          NPM_CONFIG_PROVENANCE: ${{ github.event.repository.private && 'false' || 'true' }}
