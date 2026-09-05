@@ -79,12 +79,15 @@ Work is almost never a flat sheet. An idea gets a hub Task tagged `epic`, and ev
 
 ## Common mistakes
 
-| Mistake | Instead |
-|---|---|
-| Editing a record file by hand | The verb that makes the change; `anb edit` for a field or the body |
-| Closing without archiving | `anb archive <id>` right after `anb close` |
-| A Question left open after its answer became a Decision | `anb close <question> --resolved-by <decision>` |
-| A hold with no reason, or a Task parked in a chat message | `anb hold <id> --reason "<why>"` |
-| A child Task added without its hub | `anb add task "<title>" --from <hub>`, then `anb block <hub> <child>` |
-| Guessing after a refusal | Run the `try:` line as printed |
-| Starting a second Task while one is active | Finish, submit or hold the active one first; Status shows one line for a reason |
+Each of these is easy because of how the tool behaves, and each has a cost the next session pays.
+
+| Mistake | What it costs | Instead |
+|---|---|---|
+| A child Task added without `--from`, and no `block` edge from the hub | The epic never sees it: `ready --for <hub>` and `list --for <hub>` follow the hub's scope, and the hub's `closed/total` does not count it | `anb add task "<title>" --from <hub>` at creation; later `anb edit <id> --from <hub>`, and `anb block <hub> <id>` when the hub waits on it |
+| A backticked id where a reference was meant, or a bare id as an example | A backticked id is a quotation the mention scan skips, so a typo in it is never caught and `show` lists no relation; a bare example id becomes a `dangling-mention` Debt line that stays until the record exists | Bare ids for references, backticks for quotations |
+| A Question answered in a comment on the Task | The Question stays open; when the Task closes, Status raises `origin-closed`, and the answer sits in a log nobody rereads | `anb close <question> --resolved-by <id>` when the answer became a record, `--reason "<why>"` when it did not |
+| A ruling changed with `anb edit --body` | The Decision's text says one thing and its history another; nobody is told the rule changed, and `may-conflict` cannot warn about a body that was rewritten in place | `anb edit` for a correction of the same ruling; a different ruling is `anb add decision "<title>" --supersedes <old>` |
+| A collapsed Status section read as empty | Under budget, a section keeps its count and drops its rows (`ready: 7` with the command that lists them); the queue is not empty, the budget was | `anb status --budget 0` shows every row; `anb ready` is the queue itself |
+| A held Task read as gone | A hold removes the Task from `active:` and from `ready`; it waits in `held[N]` with its reason. A session that reads only the first lines starts a second Task on the same work | Read `held` before starting anything; `anb unhold <id>` when the reason has lifted |
+| `--no-proof` because the proof is somewhere else | The record says forever that there was nothing to show, while a pull request, a commit or a report existed | `--pr <url>`, `--sha <sha>`, `--note <report.md>`; `--no-proof` only when there is nothing |
+| A record recreated because it was not in `list` | `list` and `ready` show the working set; the settled record lives in the archive with its id, so the new one is minted as `<id>-00` beside it and the notebook holds the same thing twice (`duplicate-id` fires only when `--id` names the taken id) | `anb search <words>` reaches the archive; `anb restore <id>` brings a record back |
