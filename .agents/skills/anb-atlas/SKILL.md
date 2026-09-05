@@ -39,22 +39,25 @@ Before writing the page, open [drawing](references/drawing.md): what the data ca
 
 ## The page
 
-- The page is one file and uses no library. The data is embedded as JSON; the force layout, the ranking, the label placement and the collision spacing are about two hundred lines of plain JavaScript, cheaper than a dependency and easier to change per question. Nothing is fetched. The styling is the page's own, never copied from a repository.
-- Four facts read at a glance, each on its own channel: the kind of record by hue, how settled it is by fill (live filled, settled outlined), filed away by reduced opacity, how much the notebook leans on a record by radius from degree. Relations are told apart by stroke: solid for waits, dashed for born, dotted for mentions. The legend is the filter, and every key turns its own class off.
-- Finished work has a picture. Closed, superseded and retired records are outlined, archived ones fade, and a hub carries `closed/total` from its `epic` field, whose `next` names what to work on next inside it, so progress reads without opening it.
-- A record opens beside the map in a side panel, never over it. The reader reviews by pointing and weighs a record against its neighbours, which a covering panel makes impossible. The panel shows the envelope line by line, the body, and every relation with a jump to the other end.
-- A reader can click a record or its name to open it, drag a record to pin it and double-click to release it, drag the ground to pan, scroll to zoom, press `/` to search and `Escape` to close, and switch between a force web and a ranked stack ordered by how deep a record sits in the chain of what must settle first.
+The map is the page. Beside it stands one narrow column: a find box, the legends, and the arrangement switch. The legends are the filters, one row per key with its count, and there is one legend per fact a reader can switch off: kind, settled or live, filed away, relation. Degree is read from size and needs none. Below the map runs one small line: the command that produced the data and the slice it names. That is all the chrome there is. No header of controls, no dashboard of counters, no disclaimer, no second footer; the reader's eye rests on the map.
+
+- The page is one file and uses no library. The data is embedded as JSON; the force layout, the ranking, the label placement and the collision spacing are about two hundred lines of plain JavaScript. Nothing is fetched. The styling is the page's own, never copied from a repository.
+- Four facts read at a glance, each on its own channel: the kind of record by hue, how settled it is by fill (live filled, settled outlined), filed away by reduced opacity, how much the notebook leans on a record by radius from degree. Relations are told apart by stroke: solid for waits, dashed for born, dotted for mentions.
+- The page opens readable. The opening zoom fits the names of the records the notebook leans on most, so a reader sees words before touching anything; names fade only when the reader zooms out past legibility.
+- Web is the arrangement for a notebook; ranked is for a branch. Depth in the chain of what must settle first is small for most records, so a whole notebook ranked becomes a rope of a few rungs. Rank one epic's slice, where the chain is the story.
+- Finished work has a picture: closed, superseded and retired records are outlined, archived ones fade, and a hub carries `closed/total` from its `epic` field, whose `next` names what to work on next inside it.
+- A record opens beside the map in a side panel, never over it, and opens on what the reader came for: the title, the body, then every relation with a jump to the other end; the envelope comes last, folded. Comments are made in that panel; a drawer that collects them opens only when the reader asks for it.
+- A reader can click a record or its name to open it, drag a record to pin it and double-click to release it, drag the ground to pan, scroll to zoom, press `/` to find and `Escape` to close.
 - Verify by driving the real browser. A dispatched click bypasses hit-testing and passes on code a real cursor cannot use.
 
 ## Common mistakes
 
-| Mistake | Instead |
-|---|---|
-| Drawing from the plain-text `anb graph`, which is bounded | `--json`, which is never bounded |
-| A picture of a slice that does not say so | Show `slice` on the page and print the command at the bottom |
-| Vendoring a graph library, or copying a theme from the repository | Plain JavaScript and the page's own styling |
-| A modal over the map | A side panel beside it |
-| A record a few pixels across that a hand cannot hit | A constant on-screen hit circle around every mark; the name is part of the target |
-| Names that overprint | Reserve label space in the layout, place by degree, drop what still collides |
-| Writing the notebook from the page, or editing files after reading it | An `anb` command per comment, run by you and reported |
-| Testing clicks with dispatched events | Drive the real browser |
+| Mistake | What it costs | Instead |
+|---|---|---|
+| Chrome that outgrows the map: a header of controls, a rail of counters, a footer of provenance, a disclaimer | The reader's eye has nowhere to rest, and the page reads as an instrument panel rather than a map | One narrow column (find, legends, arrangement), one small line under the map (command and slice), nothing else |
+| Ranked arrangement on the whole notebook | Most records sit at a depth of one or two, so the notebook ranks into a rope of a few rungs with every name hidden | Rank one branch (`--for <hub>`); the whole notebook is a web |
+| Names faded at the opening zoom | The page opens as dots; the reader has to zoom before reading a single word | Fit the opening zoom to the names of the most-leaned-on records; fade names only past legibility |
+| `--archive` in a working question | Settled records outnumber live ones several times over, and the work the question was about hides among grey outlines | The slice follows the question; the archive belongs in a picture about history |
+| The panel opens on the envelope | Twenty `blocked-by` rows stand between the reader and the body they clicked for | Title, body, relations with jumps; the envelope last and folded |
+| Two facts on one channel, colour for kind and for state | A settled Task and a live Decision can wear the same look, and the legend cannot say which | One channel per fact, as the encoding table lays them out |
+| Drawing from the plain text of `anb graph` | The plain text is bounded like every listing; a picture of some of the edges is a picture of a notebook that does not exist | `anb --json graph …`, which is never bounded |
