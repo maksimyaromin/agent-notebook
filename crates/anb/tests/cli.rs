@@ -166,14 +166,15 @@ mod task_cycle_replies {
         assert_snapshot!(
             run_with(&mut storage, &["close", "task.demo", "--note", "report.md"], &unreadable)
                 .expect_err("bytes outside UTF-8 are no proof"),
-            @r"
+            @r#"
         error[invalid-argument]: note: `report.md` is not UTF-8
         try: anb close task.demo --note <path>
         try: anb close task.demo --no-proof
-        "
+        try: anb close task.demo --reason "<why>"
+        "#
         );
         assert!(
-            ok(&mut storage, &["view", "task.demo"]).contains("state: active"),
+            ok(&mut storage, &["show", "task.demo"]).contains("state: active"),
             "the task stays where it was"
         );
     }
@@ -184,7 +185,7 @@ mod task_cycle_replies {
         let mut storage = MemoryStorage::new();
         let output = ok(
             &mut storage,
-            &["add", "Grammar parser accepts fenced envelopes"],
+            &["add", "task", "Grammar parser accepts fenced envelopes"],
         );
         assert_eq!(
             output,
@@ -208,10 +209,10 @@ mod task_cycle_replies {
             assert_eq!(
                 refused(
                     &mut MemoryStorage::new(),
-                    &["add", "A triaged task", "--priority", out_of_range]
+                    &["add", "task", "A triaged task", "--priority", out_of_range]
                 ),
                 format!(
-                    "error[invalid-argument]: priority: {out_of_range} is not 0\u{2013}4\ntry: anb add \"<title>\"\n"
+                    "error[invalid-argument]: priority: {out_of_range} is not 0\u{2013}4\ntry: anb add task \"<title>\"\n"
                 )
             );
         }
@@ -227,19 +228,19 @@ mod task_cycle_replies {
                 "id: `not-an-id` is not `<type>.<slug>`",
             ),
             (
-                vec!["add", "A tagged task", "--tag", "Bad Tag"],
+                vec!["add", "task", "A tagged task", "--tag", "Bad Tag"],
                 "tags: `Bad Tag` is not a `[a-z0-9-]+` tag",
             ),
             (
-                vec!["add", "A linked task", "--link", "foo"],
+                vec!["add", "task", "A linked task", "--link", "foo"],
                 "link: `foo` is not `<kind> <target>`",
             ),
             (
-                vec!["add", "A note by another name", "--id", "note.demo"],
+                vec!["add", "task", "A note by another name", "--id", "note.demo"],
                 "id: `note.demo` names a note, the draft is a task",
             ),
             (
-                vec!["add", "???"],
+                vec!["add", "task", "???"],
                 "title: yields an empty id \u{2014} pass an explicit id",
             ),
         ] {
@@ -368,11 +369,12 @@ mod task_cycle_replies {
         assert_snapshot!(
             run_reading(&mut storage, &["close", "task.demo", "--note", "gone.md"], &[])
                 .expect_err("the command must be refused"),
-            @r"
+            @r#"
         error[invalid-argument]: note: no file at `gone.md`
         try: anb close task.demo --note <path>
         try: anb close task.demo --no-proof
-        "
+        try: anb close task.demo --reason "<why>"
+        "#
         );
         assert_eq!(
             storage.read("tasks/task.demo.md").unwrap(),
@@ -389,11 +391,12 @@ mod task_cycle_replies {
         )]);
         assert_snapshot!(
             refused(&mut storage, &["close", "task.demo", "--sha", "f00d", "--no-proof"]),
-            @r"
-        error[invalid-argument]: close: pass exactly one of --note <path>, --pr <url>, --sha <sha>, --report <path>, or --no-proof
+            @r#"
+        error[invalid-argument]: close: pass exactly one of --note <path>, --pr <url>, --sha <sha>, --report <path>, --no-proof, --reason "<why>", or --resolved-by <id>
         try: anb close task.demo --note <path>
         try: anb close task.demo --no-proof
-        "
+        try: anb close task.demo --reason "<why>"
+        "#
         );
     }
 
@@ -405,11 +408,12 @@ mod task_cycle_replies {
         )]);
         assert_snapshot!(
             refused(&mut storage, &["close", "task.demo"]),
-            @r"
-        error[invalid-argument]: close: a proof is required — pass --note <path>, --pr <url>, --sha <sha>, --report <path>, or --no-proof
+            @r#"
+        error[invalid-argument]: close: pass one of --note <path>, --pr <url>, --sha <sha>, --report <path>, --no-proof, --reason "<why>", or --resolved-by <id>
         try: anb close task.demo --note <path>
         try: anb close task.demo --no-proof
-        "
+        try: anb close task.demo --reason "<why>"
+        "#
         );
     }
 
@@ -418,10 +422,11 @@ mod task_cycle_replies {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         assert_snapshot!(
             refused(&mut storage, &["close", "task.demo", "--no-proof"]),
-            @r"
-        error[invalid-transition]: `task.demo` is open; valid: start
+            @r#"
+        error[invalid-transition]: `task.demo` is open; valid: start, close --reason
         try: anb start task.demo
-        "
+        try: anb close task.demo --reason "<why>"
+        "#
         );
     }
 
@@ -432,13 +437,14 @@ mod task_cycle_replies {
             record_file("task.demo", "task", "review", "A demo record", &[], ""),
         )]);
         assert_snapshot!(
-            refused(&mut storage, &["start", "task.demo"]),
-            @r"
-        error[invalid-transition]: `task.demo` is review; valid: close, return
+            refused(&mut storage, &["reopen", "task.demo"]),
+            @r#"
+        error[invalid-transition]: `task.demo` is review; valid: start, close, close --reason
+        try: anb start task.demo
         try: anb close task.demo --note <path>
         try: anb close task.demo --no-proof
-        try: anb return task.demo
-        "
+        try: anb close task.demo --reason "<why>"
+        "#
         );
     }
 
@@ -503,7 +509,7 @@ mod task_cycle_replies {
         assert_snapshot!(
             ok(
                 &mut storage,
-                &["add", "A demo record", "--body", "Blocked by task.ghost."],
+                &["add", "task", "A demo record", "--body", "Blocked by task.ghost."],
             ),
             @r"
         ok: add task.a-demo-record — tasks/task.a-demo-record.md
@@ -523,7 +529,7 @@ mod task_cycle_replies {
             @r"
         error[invalid-record]: tasks/task.demo.md is invalid (1 findings)
           line 4: bad-value state: `cancelled` is not one of open, active, review, closed for a task
-        try: anb view task.demo
+        try: anb show task.demo
         "
         );
     }
@@ -559,7 +565,7 @@ mod task_cycle_replies {
             refused(&mut storage, &["start", "task.done"]),
             @r"
         error[archived]: `task.done` is archived
-        try: anb view task.done
+        try: anb show task.done
         try: anb restore task.done
         "
         );
@@ -572,7 +578,7 @@ mod task_cycle_replies {
             refused(&mut storage, &["block", "task.demo", "decision.d"]),
             @r"
         error[wrong-type]: `decision.d` is not a task
-        try: anb view decision.d
+        try: anb show decision.d
         "
         );
     }
@@ -584,7 +590,7 @@ mod task_cycle_replies {
             refused(&mut storage, &["block", "task.demo", "task.ghost"]),
             @r#"
         error[dangling-ref]: blocked-by: `task.ghost` names no record
-        try: anb add "<title>" --id task.ghost
+        try: anb add task "<title>" --id task.ghost
         try: anb list
         "#
         );
@@ -663,11 +669,11 @@ mod task_cycle_replies {
     fn a_taken_id_suggests_the_next_commands() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         assert_snapshot!(
-            refused(&mut storage, &["add", "Another demo", "--id", "task.demo"]),
+            refused(&mut storage, &["add", "task", "Another demo", "--id", "task.demo"]),
             @r#"
         error[duplicate-id]: `task.demo` already exists at tasks/task.demo.md
-        try: anb view task.demo
-        try: anb add "<title>"
+        try: anb show task.demo
+        try: anb add task "<title>"
         "#
         );
     }
@@ -700,18 +706,18 @@ mod knowledge_replies {
         assert_eq!(
             ok(
                 &mut storage,
-                &["note", "The new note", "--supersedes", "note.old"],
+                &["add", "note", "The new note", "--supersedes", "note.old"],
             ),
-            "ok: note note.the-new-note — notes/note.the-new-note.md\n\
+            "ok: add note.the-new-note — notes/note.the-new-note.md\n\
              superseded: note.old\n"
         );
     }
 
-    /// `--to` routes a Question into what its answer became and `--drop` ends
-    /// it with a reason; passing both leaves nothing to choose between, and
-    /// silently keeping one would discard the other's words.
+    /// `--resolved-by` closes a Question into the record that settled it and
+    /// `--reason` ends it without one; passing both leaves nothing to choose
+    /// between, and silently keeping one would discard the other's words.
     #[test]
-    fn answering_with_both_a_route_and_a_drop_names_the_conflict() {
+    fn closing_a_question_with_both_a_resolver_and_a_reason_names_the_conflict() {
         let mut storage = storage_with(&[
             (
                 "questions/question.doubt.md".to_owned(),
@@ -726,33 +732,36 @@ mod knowledge_replies {
             refused(
                 &mut storage,
                 &[
-                    "answer",
+                    "close",
                     "question.doubt",
-                    "--to",
+                    "--resolved-by",
                     "decision.settled",
-                    "--drop",
+                    "--reason",
                     "not worth it",
                 ],
             ),
             @r#"
-        error[invalid-argument]: answer: pass exactly one of --to, --drop
-        try: anb answer question.doubt --to <id>
-        try: anb answer question.doubt --drop "<why>"
+        error[invalid-argument]: close: pass exactly one of --note <path>, --pr <url>, --sha <sha>, --report <path>, --no-proof, --reason "<why>", or --resolved-by <id>
+        try: anb close question.doubt --resolved-by <id>
+        try: anb close question.doubt --reason "<why>"
         "#
         );
         assert!(
-            ok(&mut storage, &["view", "question.doubt"]).contains("state: open"),
-            "a refused answer closes nothing"
+            ok(&mut storage, &["show", "question.doubt"]).contains("state: open"),
+            "a refused close closes nothing"
         );
     }
     use anb_core::Storage as _;
 
     #[test]
-    fn decide_records_a_decision_and_answers_the_path() {
+    fn add_decision_records_a_decision_and_answers_the_path() {
         let mut storage = MemoryStorage::new();
         assert_eq!(
-            ok(&mut storage, &["decide", "No mise toml", "--kind", "rule"]),
-            "ok: decide decision.no-mise-toml — decisions/decision.no-mise-toml.md\n"
+            ok(
+                &mut storage,
+                &["add", "decision", "No mise toml", "--kind", "rule"]
+            ),
+            "ok: add decision.no-mise-toml — decisions/decision.no-mise-toml.md\n"
         );
         let written = storage.read("decisions/decision.no-mise-toml.md").unwrap();
         assert!(written.contains("\nstate: active\n"), "{written}");
@@ -760,7 +769,7 @@ mod knowledge_replies {
     }
 
     #[test]
-    fn decide_with_supersedes_names_the_replaced_decision() {
+    fn add_decision_with_supersedes_names_the_replaced_decision() {
         let mut storage = storage_with(&[(
             "decisions/decision.go-for-the-cli.md".to_owned(),
             record_file(
@@ -776,13 +785,14 @@ mod knowledge_replies {
             ok(
                 &mut storage,
                 &[
-                    "decide",
+                    "add",
+                    "decision",
                     "Rust for the CLI",
                     "--supersedes",
                     "decision.go-for-the-cli"
                 ],
             ),
-            "ok: decide decision.rust-for-the-cli — decisions/decision.rust-for-the-cli.md\n\
+            "ok: add decision.rust-for-the-cli — decisions/decision.rust-for-the-cli.md\n\
              superseded: decision.go-for-the-cli\n"
         );
     }
@@ -804,7 +814,8 @@ mod knowledge_replies {
             ok(
                 &mut storage,
                 &[
-                    "decide",
+                "add",
+                "decision",
                     "Fences stay",
                     "--tag",
                     "parser",
@@ -813,7 +824,7 @@ mod knowledge_replies {
                 ],
             ),
             @r"
-        ok: decide decision.fences-stay — decisions/decision.fences-stay.md
+        ok: add decision.fences-stay — decisions/decision.fences-stay.md
         may-conflict[1]: decision.first (supolka/claude-code)
         "
         );
@@ -824,11 +835,11 @@ mod knowledge_replies {
     }
 
     #[test]
-    fn note_records_a_term() {
+    fn add_note_records_a_term() {
         let mut storage = MemoryStorage::new();
         assert_eq!(
-            ok(&mut storage, &["note", "Record", "--kind", "term"]),
-            "ok: note note.record — notes/note.record.md\n"
+            ok(&mut storage, &["add", "note", "Record", "--kind", "term"]),
+            "ok: add note.record — notes/note.record.md\n"
         );
         let written = storage.read("notes/note.record.md").unwrap();
         assert!(written.contains("\nkind: term\n"), "{written}");
@@ -838,23 +849,29 @@ mod knowledge_replies {
     fn a_kind_outside_the_types_enum_is_a_recovery_payload() {
         let mut storage = MemoryStorage::new();
         assert_snapshot!(
-            refused(&mut storage, &["note", "A fact", "--kind", "law"]),
+            refused(&mut storage, &["add", "note", "A fact", "--kind", "law"]),
             @r#"
         error[invalid-argument]: kind: `law` is not one of fact, term, guide for a note
-        try: anb note "<title>" --kind fact
+        try: anb add note "<title>"
         "#
         );
     }
 
     #[test]
-    fn ask_files_a_question_with_its_origin() {
+    fn add_question_files_a_question_with_its_origin() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         assert_eq!(
             ok(
                 &mut storage,
-                &["ask", "Does the parser keep fences?", "--from", "task.demo"],
+                &[
+                    "add",
+                    "question",
+                    "Does the parser keep fences?",
+                    "--from",
+                    "task.demo"
+                ],
             ),
-            "ok: ask question.does-the-parser-keep-fences — questions/question.does-the-parser-keep-fences.md\n"
+            "ok: add question.does-the-parser-keep-fences — questions/question.does-the-parser-keep-fences.md\n"
         );
         let written = storage
             .read("questions/question.does-the-parser-keep-fences.md")
@@ -864,25 +881,25 @@ mod knowledge_replies {
     }
 
     #[test]
-    fn ask_from_a_missing_origin_is_a_recovery_payload() {
+    fn add_from_a_missing_origin_is_a_recovery_payload() {
         let mut storage = MemoryStorage::new();
         assert_snapshot!(
-            refused(&mut storage, &["ask", "A doubt", "--from", "task.ghost"]),
+            refused(&mut storage, &["add", "question", "A doubt", "--from", "task.ghost"]),
             @r#"
         error[dangling-ref]: from: `task.ghost` names no record
-        try: anb add "<title>" --id task.ghost
+        try: anb add task "<title>" --id task.ghost
         try: anb list
         "#
         );
     }
 
-    /// `add` mints Tasks alone: a dangling reference to another type has
-    /// no command that would create it, so none is offered.
+    /// A dangling reference to a record no `add` shape is offered for gets
+    /// no creating command; only a missing Task is worth minting on the spot.
     #[test]
     fn a_dangling_reference_to_another_type_offers_no_creating_command() {
         let mut storage = MemoryStorage::new();
         assert_snapshot!(
-            refused(&mut storage, &["ask", "A doubt", "--from", "note.ghost"]),
+            refused(&mut storage, &["add", "question", "A doubt", "--from", "note.ghost"]),
             @r"
         error[dangling-ref]: from: `note.ghost` names no record
         try: anb list
@@ -891,7 +908,7 @@ mod knowledge_replies {
     }
 
     #[test]
-    fn answer_routes_the_question_into_what_its_answer_became() {
+    fn close_resolved_by_closes_the_question_into_the_record_that_settled_it() {
         let mut storage = storage_with(&[
             (
                 "questions/question.doubt.md".to_owned(),
@@ -905,20 +922,25 @@ mod knowledge_replies {
         assert_eq!(
             ok(
                 &mut storage,
-                &["answer", "question.doubt", "--to", "decision.ruling"],
+                &[
+                    "close",
+                    "question.doubt",
+                    "--resolved-by",
+                    "decision.ruling"
+                ],
             ),
-            "ok: answer question.doubt — open\u{2192}routed\nrouted-to: decision.ruling\n"
+            "ok: close question.doubt — open\u{2192}closed\nresolved-by: decision.ruling\n"
         );
         let written = storage.read("questions/question.doubt.md").unwrap();
-        assert!(written.contains("\nstate: routed\n"), "{written}");
+        assert!(written.contains("\nstate: closed\n"), "{written}");
         assert!(
-            written.contains("\nrouted-to: decision.ruling\n"),
+            written.contains("\nresolved-by: decision.ruling\n"),
             "{written}"
         );
     }
 
     #[test]
-    fn answer_drop_closes_with_the_stated_reason() {
+    fn close_reason_ends_the_question_with_the_reason_in_its_envelope() {
         let mut storage = storage_with(&[(
             "questions/question.doubt.md".to_owned(),
             record_file("question.doubt", "question", "open", "A doubt", &[], ""),
@@ -927,33 +949,34 @@ mod knowledge_replies {
             ok(
                 &mut storage,
                 &[
-                    "answer",
+                    "close",
                     "question.doubt",
-                    "--drop",
+                    "--reason",
                     "overtaken by the rewrite"
                 ],
             ),
-            "ok: answer question.doubt — open\u{2192}dropped\n"
+            "ok: close question.doubt — open\u{2192}closed\n"
         );
         let written = storage.read("questions/question.doubt.md").unwrap();
+        assert!(written.contains("\nstate: closed\n"), "{written}");
         assert!(
-            written.ends_with("Dropped 2026-08-28: overtaken by the rewrite\n"),
+            written.contains("\nreason: overtaken by the rewrite\n"),
             "{written}"
         );
     }
 
     #[test]
-    fn answer_without_a_route_is_a_recovery_payload() {
+    fn closing_a_question_without_an_outcome_is_a_recovery_payload() {
         let mut storage = storage_with(&[(
             "questions/question.doubt.md".to_owned(),
             record_file("question.doubt", "question", "open", "A doubt", &[], ""),
         )]);
         assert_snapshot!(
-            refused(&mut storage, &["answer", "question.doubt"]),
+            refused(&mut storage, &["close", "question.doubt"]),
             @r#"
-        error[invalid-argument]: answer: a routing is required — pass --to <id> or --drop "<reason>"
-        try: anb answer question.doubt --to <id>
-        try: anb answer question.doubt --drop "<why>"
+        error[invalid-argument]: close: pass one of --note <path>, --pr <url>, --sha <sha>, --report <path>, --no-proof, --reason "<why>", or --resolved-by <id>
+        try: anb close question.doubt --resolved-by <id>
+        try: anb close question.doubt --reason "<why>"
         "#
         );
     }
@@ -1106,17 +1129,17 @@ mod single_record {
             record_file("task.done", "task", "closed", "A finished task", &[], ""),
         )]);
         assert!(
-            ok(&mut storage, &["view", "task.done"]).contains("archived: true"),
+            ok(&mut storage, &["show", "task.done"]).contains("archived: true"),
             "a filed record must not read like a live one"
         );
     }
 
     /// A record's envelope grows with the notebook — an epic hub carries a
     /// `blocked-by` line per child — and a value in it is as long as the
-    /// hand that wrote it. `view` bounds both, and `--all` restores the
+    /// hand that wrote it. `show` bounds both, and `--all` restores the
     /// record whole.
     #[test]
-    fn view_bounds_a_long_envelope_and_a_long_value() {
+    fn show_bounds_a_long_envelope_and_a_long_value() {
         let edges: Vec<String> = (0..80)
             .map(|n| format!("blocked-by: task.c{n:03}"))
             .collect();
@@ -1127,9 +1150,9 @@ mod single_record {
             record_file("task.hub", "task", "open", &long_title, &lines, ""),
         )]);
 
-        let bounded = ok(&mut storage, &["view", "task.hub"]);
+        let bounded = ok(&mut storage, &["show", "task.hub"]);
         assert!(
-            bounded.contains("more: anb view task.hub --all"),
+            bounded.contains("more: anb show task.hub --all"),
             "the envelope names what it left out: {bounded}"
         );
         assert!(
@@ -1137,7 +1160,7 @@ mod single_record {
             "a value as long as a hand wrote it is cut: {bounded}"
         );
 
-        let whole = ok(&mut storage, &["view", "task.hub", "--all"]);
+        let whole = ok(&mut storage, &["show", "task.hub", "--all"]);
         assert!(whole.contains("blocked-by: task.c079"), "{whole}");
         assert!(whole.contains(long_title.trim_end()), "{whole}");
         assert!(
@@ -1176,9 +1199,9 @@ mod single_record {
     }
 
     #[test]
-    fn view_prints_the_envelope_the_body_and_the_blocks() {
+    fn show_prints_the_envelope_the_body_and_the_blocks() {
         assert_snapshot!(
-            ok(&mut viewed_storage(), &["view", "task.demo"]),
+            ok(&mut viewed_storage(), &["show", "task.demo"]),
             @r"
         id: task.demo
         type: task
@@ -1197,12 +1220,12 @@ mod single_record {
         );
     }
 
-    /// A Task's log grows for as long as the work does, and `view` is how a
+    /// A Task's log grows for as long as the work does, and `show` is how a
     /// session resumes it, so the reply must not grow with the trail.
     #[test]
-    fn view_prints_a_long_body_by_its_ends_and_names_what_it_dropped() {
+    fn show_prints_a_long_body_by_its_ends_and_names_what_it_dropped() {
         let mut storage = logged_task(60);
-        let output = ok(&mut storage, &["view", "task.long"]);
+        let output = ok(&mut storage, &["show", "task.long"]);
         let body: Vec<&str> = output
             .lines()
             .skip_while(|line| *line != "body: |")
@@ -1212,7 +1235,7 @@ mod single_record {
         assert_eq!(body.last(), Some(&"  - entry 60"));
         assert_eq!(
             body[20],
-            "  \u{2026} 20 more lines: anb view task.long --all"
+            "  \u{2026} 20 more lines: anb show task.long --all"
         );
         assert_eq!(body.len(), 41, "twenty lines each end, and the elision");
     }
@@ -1223,16 +1246,16 @@ mod single_record {
     fn the_json_body_is_bounded_like_the_text() {
         let mut storage = logged_task(60);
         let view: serde_json::Value =
-            serde_json::from_str(&ok(&mut storage, &["view", "task.long", "--json"])).unwrap();
+            serde_json::from_str(&ok(&mut storage, &["show", "task.long", "--json"])).unwrap();
         assert_eq!(view["body"]["lines"], serde_json::json!(60));
         assert_eq!(view["body"]["head"].as_str().unwrap().lines().count(), 20);
         assert_eq!(view["body"]["tail"].as_str().unwrap().lines().count(), 20);
     }
 
     #[test]
-    fn view_all_prints_every_line_of_a_long_body() {
+    fn show_all_prints_every_line_of_a_long_body() {
         let mut storage = logged_task(60);
-        let output = ok(&mut storage, &["view", "task.long", "--all"]);
+        let output = ok(&mut storage, &["show", "task.long", "--all"]);
         assert!(output.contains("  - entry 30"), "{output}");
         assert!(!output.contains("more lines"), "{output}");
     }
@@ -1240,9 +1263,9 @@ mod single_record {
     /// The elision costs a line of its own, so a body it could not shorten
     /// is left whole.
     #[test]
-    fn view_prints_a_body_at_the_bound_whole() {
+    fn show_prints_a_body_at_the_bound_whole() {
         let mut storage = logged_task(41);
-        let output = ok(&mut storage, &["view", "task.long"]);
+        let output = ok(&mut storage, &["show", "task.long"]);
         assert!(output.contains("  - entry 21"), "{output}");
         assert!(!output.contains("more lines"), "{output}");
     }
@@ -1259,8 +1282,8 @@ mod single_record {
     }
 
     #[test]
-    fn view_json_carries_the_fields_in_envelope_order() {
-        let output = ok(&mut viewed_storage(), &["view", "task.demo", "--json"]);
+    fn show_json_carries_the_fields_in_envelope_order() {
+        let output = ok(&mut viewed_storage(), &["show", "task.demo", "--json"]);
         let value: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(value["archived"], serde_json::json!(false));
         assert_eq!(
@@ -1354,7 +1377,7 @@ mod session_status {
         assert_eq!(value["quiet"], serde_json::json!(false));
         assert_eq!(value["counts"]["tasks"], serde_json::json!(1));
         assert_eq!(
-            value["in-flight"]["rows"][0]["id"],
+            value["active"]["rows"][0]["id"],
             serde_json::json!("task.demo")
         );
         let keys = value.as_object().unwrap();
@@ -1490,7 +1513,8 @@ mod json_surface {
             ok(
                 &mut storage,
                 &[
-                    "decide",
+                    "add",
+                    "decision",
                     "Fences stay",
                     "--tag",
                     "parser",
@@ -1499,12 +1523,12 @@ mod json_surface {
                     "--json"
                 ],
             ),
-            r#"{"ok":"decide","id":"decision.fences-stay","path":"decisions/decision.fences-stay.md","may-conflict":{"count":1,"rows":[{"id":"decision.first","by":"supolka"}]}}"#
+            r#"{"ok":"add","id":"decision.fences-stay","path":"decisions/decision.fences-stay.md","may-conflict":{"count":1,"rows":[{"id":"decision.first","by":"supolka"}]}}"#
         );
     }
 
     #[test]
-    fn an_answer_reply_carries_the_thread() {
+    fn a_close_reply_on_a_question_carries_its_resolver() {
         let mut storage = storage_with(&[
             (
                 "questions/question.doubt.md".to_owned(),
@@ -1519,14 +1543,14 @@ mod json_surface {
             ok(
                 &mut storage,
                 &[
-                    "answer",
+                    "close",
                     "question.doubt",
-                    "--to",
+                    "--resolved-by",
                     "decision.ruling",
                     "--json"
                 ],
             ),
-            r#"{"ok":"answer","id":"question.doubt","from":"open","to":"routed","already":false,"routed-to":"decision.ruling"}"#
+            r#"{"ok":"close","id":"question.doubt","from":"open","to":"closed","already":false,"resolved-by":"decision.ruling","unblocked":{"count":0,"rows":[]},"open-questions":{"count":0,"rows":[]}}"#
         );
     }
 
@@ -1593,20 +1617,20 @@ mod json_surface {
 #[test]
 fn the_command_vocabulary_parses() {
     for line in [
-        vec!["anb", "add", "A title"],
+        vec!["anb", "add", "task", "A title"],
         vec!["anb", "start", "task.x"],
         vec!["anb", "submit", "task.x"],
         vec!["anb", "close", "task.x", "--no-proof"],
-        vec!["anb", "return", "task.x"],
         vec!["anb", "reopen", "task.x"],
         vec!["anb", "hold", "task.x", "--reason", "why"],
         vec!["anb", "unhold", "task.x"],
         vec!["anb", "block", "task.x", "task.y"],
         vec!["anb", "unblock", "task.x", "task.y"],
         vec!["anb", "comment", "task.x", "note"],
-        vec!["anb", "decide", "A ruling", "--kind", "rule"],
+        vec!["anb", "add", "decision", "A ruling", "--kind", "rule"],
         vec![
             "anb",
+            "add",
             "note",
             "A fact",
             "--kind",
@@ -1614,17 +1638,18 @@ fn the_command_vocabulary_parses() {
             "--supersedes",
             "note.y",
         ],
-        vec!["anb", "ask", "A doubt", "--from", "task.x"],
-        vec!["anb", "answer", "question.x", "--to", "decision.y"],
-        vec!["anb", "answer", "question.x", "--drop", "why"],
+        vec!["anb", "add", "question", "A doubt", "--from", "task.x"],
+        vec!["anb", "close", "question.x", "--resolved-by", "decision.y"],
+        vec!["anb", "close", "question.x", "--reason", "why"],
+        vec!["anb", "close", "task.x", "--reason", "why"],
         vec!["anb", "retire", "decision.x"],
         vec!["anb", "ready"],
         vec!["anb", "list"],
-        vec!["anb", "view", "task.x"],
+        vec!["anb", "show", "task.x"],
         vec!["anb", "status", "--budget", "0", "--hook"],
         vec!["anb", "check", "--all"],
         vec!["anb", "archive", "task.x"],
-        vec!["anb", "expunge", "task.x"],
+        vec!["anb", "delete", "task.x"],
         vec!["anb", "--notebook", "elsewhere", "list"],
         vec!["anb", "ready", "--for", "task.epic"],
         vec!["anb", "list", "--for", "task.epic"],
@@ -2023,11 +2048,12 @@ mod maintenance_replies {
         )]);
         assert_snapshot!(
             refused(&mut storage, &["archive", "task.demo"]),
-            @r"
+            @r#"
         error[invalid-transition]: `task.demo` is active; valid: close
         try: anb close task.demo --note <path>
         try: anb close task.demo --no-proof
-        "
+        try: anb close task.demo --reason "<why>"
+        "#
         );
     }
 
@@ -2045,8 +2071,8 @@ mod maintenance_replies {
             ),
         )]);
         assert_eq!(
-            ok(&mut storage, &["expunge", "note.mistake"]),
-            "ok: expunge note.mistake — notes/note.mistake.md removed\n"
+            ok(&mut storage, &["delete", "note.mistake"]),
+            "ok: delete note.mistake — notes/note.mistake.md removed\n"
         );
     }
 
@@ -2078,13 +2104,13 @@ mod maintenance_replies {
             ),
         ]);
         assert_snapshot!(
-            refused(&mut storage, &["expunge", "note.mistake"]),
+            refused(&mut storage, &["delete", "note.mistake"]),
             @r"
         error[still-referenced]: `note.mistake` is still referenced by 2 records
           task.born — from
           task.citing — body
-        try: anb view task.born
-        try: anb view task.citing
+        try: anb show task.born
+        try: anb show task.citing
         "
         );
     }
@@ -2116,12 +2142,12 @@ mod maintenance_replies {
             ),
         ]);
         assert_snapshot!(
-            refused(&mut storage, &["expunge", "note.mistake"]),
+            refused(&mut storage, &["delete", "note.mistake"]),
             @r"
         error[still-referenced]: `note.mistake` is still referenced by 1 record
           task.holder — from
           task.holder — body
-        try: anb view task.holder
+        try: anb show task.holder
         "
         );
     }
@@ -2241,7 +2267,7 @@ mod maintenance_replies {
     #[test]
     fn a_scoped_queue_answers_only_the_epic_it_was_asked_about() {
         let mut storage = an_epic();
-        ok(&mut storage, &["add", "Something else entirely"]);
+        ok(&mut storage, &["add", "task", "Something else entirely"]);
         assert_snapshot!(
             ok(&mut storage, &["ready", "--for", "task.epic-auth"]),
             @r"
@@ -2377,8 +2403,9 @@ mod maintenance_replies {
     fn a_file_the_adapter_cannot_read_renders_the_not_utf8_payload() {
         use anb_core::{NotebookError, StorageError};
         let subject = anb::recovery::Subject {
-            verb: "view",
+            verb: "show",
             id: Some("task.demo".to_owned()),
+            record_type: None,
         };
         let error = NotebookError::Storage(StorageError::NotUtf8 {
             path: "tasks/task.demo.md".to_owned(),
@@ -2910,10 +2937,10 @@ mod bounded_consequences {
     #[test]
     fn a_view_bounds_who_cites_the_record_and_says_what_lifts_the_bound() {
         let mut storage = citers_of("note.magnet", MANY);
-        let line = cited_line(&ok(&mut storage, &["view", "note.magnet"]));
+        let line = cited_line(&ok(&mut storage, &["show", "note.magnet"]));
         assert!(line.starts_with("mentioned-by[21]: task.c00, "), "{line}");
         assert!(
-            line.ends_with("task.c19, … 1 more: anb view note.magnet --all"),
+            line.ends_with("task.c19, … 1 more: anb show note.magnet --all"),
             "{line}"
         );
     }
@@ -2921,7 +2948,7 @@ mod bounded_consequences {
     #[test]
     fn a_view_all_names_every_record_that_cites_this_one() {
         let mut storage = citers_of("note.magnet", MANY);
-        let line = cited_line(&ok(&mut storage, &["view", "note.magnet", "--all"]));
+        let line = cited_line(&ok(&mut storage, &["show", "note.magnet", "--all"]));
         assert!(line.starts_with("mentioned-by[21]: task.c00, "), "{line}");
         assert!(line.ends_with("task.c20"), "{line}");
     }
@@ -2956,7 +2983,7 @@ mod bounded_consequences {
             )
         }));
         let mut storage = storage_with(&files);
-        let out = refused(&mut storage, &["expunge", "task.hub"]);
+        let out = refused(&mut storage, &["delete", "task.hub"]);
         assert!(
             out.starts_with(
                 "error[still-referenced]: `task.hub` is still referenced by 11 records\n"
@@ -2988,8 +3015,8 @@ mod bounded_consequences {
         let out = ok(&mut storage, &["check"]);
         let finding = out
             .lines()
-            .find(|line| line.contains("dep-cycle"))
-            .unwrap_or_else(|| panic!("no dep-cycle finding in: {out}"));
+            .find(|line| line.contains("block-cycle"))
+            .unwrap_or_else(|| panic!("no block-cycle finding in: {out}"));
         assert!(
             finding.contains("closes the cycle task.r00 → task.r01 → "),
             "{finding}"
@@ -3041,17 +3068,17 @@ mod json_maintenance_surface {
             ),
             (
                 vec![
-                    "answer",
+                    "close",
                     "question.doubt",
-                    "--drop",
+                    "--reason",
                     "the ground it stood on is gone",
                     "--json",
                 ],
-                r#"{"ok":"answer","id":"question.doubt","from":"open","to":"dropped","already":false}"#,
+                r#"{"ok":"close","id":"question.doubt","from":"open","to":"closed","already":false,"unblocked":{"count":0,"rows":[]},"open-questions":{"count":0,"rows":[]}}"#,
             ),
             (
-                vec!["expunge", "task.other", "--json"],
-                r#"{"ok":"expunge","id":"task.other","paths":["tasks/task.other.md"]}"#,
+                vec!["delete", "task.other", "--json"],
+                r#"{"ok":"delete","id":"task.other","paths":["tasks/task.other.md"]}"#,
             ),
         ] {
             assert_eq!(ok(&mut storage, &line), expected);
@@ -3249,10 +3276,10 @@ mod the_global_scope {
     /// The verbs the Global Notebook exists for: recording knowledge and
     /// reading it back.
     const NAMED: &[&[&str]] = &[
-        &["decide", "A rule"],
-        &["note", "A fact"],
+        &["add", "decision", "A rule"],
+        &["add", "note", "A fact"],
         &["retire", "note.demo"],
-        &["view", "note.demo"],
+        &["show", "note.demo"],
         &["list"],
         &["search", "rule"],
     ];
@@ -3268,7 +3295,7 @@ mod the_global_scope {
         &["check"],
         &["archive", "note.demo"],
         &["restore", "note.demo"],
-        &["expunge", "note.demo"],
+        &["delete", "note.demo"],
         &["overview"],
         &["status"],
         &["ready"],
@@ -3277,19 +3304,18 @@ mod the_global_scope {
 
     /// Every verb that creates or moves a task or a question.
     const WORK: &[&[&str]] = &[
-        &["add", "A task"],
+        &["add", "task", "A task"],
         &["start", "task.demo"],
         &["submit", "task.demo"],
         &["close", "task.demo", "--no-proof"],
-        &["return", "task.demo"],
         &["reopen", "task.demo"],
         &["hold", "task.demo", "--reason", "waiting"],
         &["unhold", "task.demo"],
         &["block", "task.demo", "task.other"],
         &["unblock", "task.demo", "task.other"],
         &["comment", "task.demo", "a line"],
-        &["ask", "A doubt"],
-        &["answer", "question.demo", "--drop", "moot"],
+        &["add", "question", "A doubt"],
+        &["close", "question.demo", "--reason", "moot"],
     ];
 
     fn parsed(line: &[&str]) -> Command {

@@ -3,15 +3,13 @@
 //! how many rows a bounded list shows, and how a command line is spelled
 //! when a reply names one.
 
-use crate::cli::{
-    AddArgs, CloseArgs, Command, DecideArgs, DraftArgs, EditArgs, GraphArgs, NoteArgs, SliceArgs,
-};
+use crate::cli::{AddArgs, CloseArgs, Command, EditArgs, GraphArgs, SliceArgs};
 use anb_core::encode::ROW_BOUND;
 use anb_core::{
-    Archived, Budget, CitedProof, Closed, Commented, Created, Draft, Dropped, Edged, Edit, Edited,
-    Expunged, FileFinding, Focus, Graph, GraphSlice, Held, Link, ListedRecord, Notebook,
-    NotebookError, Overview, Proof, ReadyTask, RecordType, Repair, Restored, Status, Storage,
-    StorageError, Transitioned, View, path_stem,
+    Archived, Budget, CitedProof, Closed, Commented, Created, Deleted, Draft, Edged, Edit, Edited,
+    FileFinding, Focus, Graph, GraphSlice, Held, Link, ListedRecord, Notebook, NotebookError,
+    Overview, Proof, ReadyTask, RecordType, Repair, Restored, Status, Storage, StorageError,
+    Transitioned, View, path_stem,
 };
 use std::fmt::Write as _;
 
@@ -58,13 +56,6 @@ pub enum Reply {
         command: &'static str,
         transition: Transitioned,
     },
-    /// A Question routed into what its answer became.
-    Routed {
-        transition: Transitioned,
-        to: String,
-    },
-    /// A Question closed without routing, for its stated reason.
-    Dropped(Dropped),
     Closed(Closed),
     Held {
         held: Held,
@@ -98,7 +89,7 @@ pub enum Reply {
     },
     Archived(Archived),
     Restored(Restored),
-    Expunged(Expunged),
+    Deleted(Deleted),
     Edited(Edited),
     Searched {
         query: String,
@@ -181,19 +172,7 @@ pub fn execute(
     } = host;
     let mut notebook = Notebook::new(storage);
     match command {
-        Command::Add(args) => created("add", &mut notebook, &task_draft(args, git_by), today),
-        Command::Decide(args) => created(
-            "decide",
-            &mut notebook,
-            &decision_draft(args, git_by),
-            today,
-        ),
-        Command::Note(args) => created("note", &mut notebook, &note_draft(args, git_by), today),
-        Command::Ask(args) => {
-            let draft = draft(RecordType::Question, args, git_by);
-            created("ask", &mut notebook, &draft, today)
-        }
-        Command::Answer { id, to, drop } => answered(&mut notebook, &id, to, drop, today),
+        Command::Add(args) => created("add", &mut notebook, &draft(args, git_by), today),
         Command::Retire { id } => Ok(moved("retire", notebook.retire(&id, today)?)),
         Command::Start { id } => Ok(moved("start", notebook.start(&id, today)?)),
         Command::Submit { id } => Ok(moved("submit", notebook.submit(&id, today)?)),
@@ -204,7 +183,6 @@ pub fn execute(
             git_by,
             today,
         )?)),
-        Command::Return { id } => Ok(moved("return", notebook.return_task(&id, today)?)),
         Command::Reopen { id } => Ok(moved("reopen", notebook.reopen(&id, today)?)),
         Command::Hold { id, reason, until } => Ok(Reply::Held {
             held: notebook.hold(
@@ -237,7 +215,7 @@ pub fn execute(
             scope,
             all,
         }),
-        Command::View { id, all } => Ok(Reply::Viewed {
+        Command::Show { id, all } => Ok(Reply::Viewed {
             view: notebook.view(&id)?,
             all,
         }),
@@ -247,7 +225,7 @@ pub fn execute(
         }),
         Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id, today)?)),
         Command::Restore { id } => Ok(Reply::Restored(notebook.restore(&id)?)),
-        Command::Expunge { id } => Ok(Reply::Expunged(notebook.expunge(&id)?)),
+        Command::Delete { id } => Ok(Reply::Deleted(notebook.delete(&id)?)),
         Command::Edit(args) => edited(&mut notebook, args, today),
         Command::Search { query, all } => Ok(Reply::Searched {
             rows: notebook.search(&query)?,
@@ -296,7 +274,7 @@ fn graphed(notebook: &Notebook<'_>, args: GraphArgs) -> Result<Reply, NotebookEr
 /// The command line's slice as the Core reads it.
 fn asked_for(args: SliceArgs) -> GraphSlice {
     GraphSlice {
-        kinds: args.kinds,
+        types: args.types,
         hub: args.scope,
         ready_only: args.ready,
         focus: args.focus.map(|id| Focus {
@@ -313,8 +291,8 @@ fn asked_for(args: SliceArgs) -> GraphSlice {
 #[must_use]
 pub fn slice_command(slice: &GraphSlice, full: bool) -> String {
     let mut out = "anb graph".to_owned();
-    if !slice.kinds.is_empty() {
-        let words: Vec<&str> = slice.kinds.iter().copied().map(RecordType::word).collect();
+    if !slice.types.is_empty() {
+        let words: Vec<&str> = slice.types.iter().copied().map(RecordType::word).collect();
         let _ = write!(out, " --type {}", words.join(","));
     }
     if let Some(hub) = &slice.hub {
@@ -409,48 +387,8 @@ fn edited(
     Ok(Reply::Edited(notebook.edit(&id, &edit, today)?))
 }
 
-fn answered(
-    notebook: &mut Notebook<'_>,
-    id: &str,
-    to: Option<String>,
-    drop: Option<String>,
-    today: &str,
-) -> Result<Reply, NotebookError> {
-    match chosen_routing(to, drop)? {
-        Routing::To(target) => Ok(Reply::Routed {
-            transition: notebook.route(id, &target, today)?,
-            to: target,
-        }),
-        Routing::Drop(reason) => Ok(Reply::Dropped(notebook.drop_question(id, &reason, today)?)),
-    }
-}
-
-fn task_draft(args: AddArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
-    let mut task = draft(RecordType::Task, args.draft, git_by);
-    task.priority = args.priority;
-    task
-}
-
-fn decision_draft(args: DecideArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
-    let mut decision = draft(RecordType::Decision, args.draft, git_by);
-    decision.kind = args.kind;
-    decision.supersedes = args.supersedes;
-    decision
-}
-
-fn note_draft(args: NoteArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
-    let mut note = draft(RecordType::Note, args.draft, git_by);
-    note.kind = args.kind;
-    note.supersedes = args.supersedes;
-    note
-}
-
-fn draft(
-    record_type: RecordType,
-    args: DraftArgs,
-    git_by: impl FnOnce() -> Option<String>,
-) -> Draft {
-    let mut draft = Draft::new(record_type, &args.title);
+fn draft(args: AddArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
+    let mut draft = Draft::new(args.record_type, &args.title);
     draft.id = args.id;
     draft.by = args.by.or_else(git_by);
     draft.via = args.via;
@@ -458,6 +396,9 @@ fn draft(
     draft.tags = args.tags;
     draft.links = args.links.iter().map(|raw| parsed_link(raw)).collect();
     draft.body = args.body.unwrap_or_default();
+    draft.priority = args.priority;
+    draft.kind = args.kind;
+    draft.supersedes = args.supersedes;
     draft
 }
 
@@ -468,27 +409,6 @@ fn parsed_link(raw: &str) -> Link {
     Link {
         kind: kind.to_owned(),
         target: target.to_owned(),
-    }
-}
-
-/// What closes the Question: the record its answer became, or a reasoned
-/// drop.
-enum Routing {
-    To(String),
-    Drop(String),
-}
-
-fn chosen_routing(to: Option<String>, drop: Option<String>) -> Result<Routing, NotebookError> {
-    match (to, drop) {
-        (Some(target), None) => Ok(Routing::To(target)),
-        (None, Some(reason)) => Ok(Routing::Drop(reason)),
-        (None, None) => Err(NotebookError::InvalidArgument {
-            reason: "answer: a routing is required — pass --to <id> or --drop \"<reason>\""
-                .to_owned(),
-        }),
-        (Some(_), Some(_)) => Err(NotebookError::InvalidArgument {
-            reason: "answer: pass exactly one of --to, --drop".to_owned(),
-        }),
     }
 }
 
@@ -511,25 +431,29 @@ fn listed(
     }
 }
 
-/// The one proof a close was given. `--note` names a file the shell must
-/// read, since only the host can reach a path outside the notebook; every
-/// other proof is a string the Core stores as given.
-enum ChosenProof {
+/// The one way a close was told to end the record. `--note` names a file
+/// the shell must read, since only the host can reach a path outside the
+/// notebook; every other proof is a string the Core stores as given; a
+/// reason ends a Task or a Question without a proof; a resolver is the
+/// record a Question closed into.
+enum Closing {
     Ingest(String),
     Stored(Proof),
+    Reason(String),
+    ResolvedBy(String),
 }
 
-/// The single proof among the flags, or the refusal that says which way the
-/// caller missed: nothing offered, or more than one.
-fn chosen_proof(offered: [Option<ChosenProof>; 5]) -> Result<ChosenProof, NotebookError> {
+/// The single closing among the flags, or the refusal that says which way
+/// the caller missed: nothing offered, or more than one.
+fn chosen_closing(offered: [Option<Closing>; 7]) -> Result<Closing, NotebookError> {
     let mut offered = offered.into_iter().flatten();
     match (offered.next(), offered.next()) {
         (Some(only), None) => Ok(only),
         (None, _) => Err(NotebookError::InvalidArgument {
-            reason: format!("close: a proof is required — pass {PROOF_FLAGS}"),
+            reason: format!("close: pass one of {CLOSE_FLAGS}"),
         }),
         (Some(_), Some(_)) => Err(NotebookError::InvalidArgument {
-            reason: format!("close: pass exactly one of {PROOF_FLAGS}"),
+            reason: format!("close: pass exactly one of {CLOSE_FLAGS}"),
         }),
     }
 }
@@ -548,25 +472,31 @@ fn close_reply(
         sha,
         report,
         no_proof,
+        reason,
+        resolved_by,
     } = args;
     // Each flag builds its own answer, so no two can be transposed.
-    match chosen_proof([
-        note.map(ChosenProof::Ingest),
-        pr.map(|url| ChosenProof::Stored(Proof::Pr(url))),
-        sha.map(|sha| ChosenProof::Stored(Proof::Sha(sha))),
-        report.map(|path| ChosenProof::Stored(Proof::Report(path))),
-        no_proof.then_some(ChosenProof::Stored(Proof::Waived)),
+    match chosen_closing([
+        note.map(Closing::Ingest),
+        pr.map(|url| Closing::Stored(Proof::Pr(url))),
+        sha.map(|sha| Closing::Stored(Proof::Sha(sha))),
+        report.map(|path| Closing::Stored(Proof::Report(path))),
+        no_proof.then_some(Closing::Stored(Proof::Waived)),
+        reason.map(Closing::Reason),
+        resolved_by.map(Closing::ResolvedBy),
     ])? {
-        ChosenProof::Ingest(path) => {
+        Closing::Ingest(path) => {
             let report = read_report(&path).map_err(|error| report_refusal(&error))?;
             notebook.close_with_report(&id, &report, git_by().as_deref(), today)
         }
-        ChosenProof::Stored(proof) => notebook.close(&id, &proof, today),
+        Closing::Stored(proof) => notebook.close(&id, &proof, today),
+        Closing::Reason(reason) => notebook.close_with_reason(&id, &reason, today),
+        Closing::ResolvedBy(resolver) => notebook.resolve_question(&id, &resolver, today),
     }
 }
 
-/// The proof flags as one phrase, so the two refusals name the same set.
-const PROOF_FLAGS: &str = "--note <path>, --pr <url>, --sha <sha>, --report <path>, or --no-proof";
+/// The close flags as one phrase, so the two refusals name the same set.
+const CLOSE_FLAGS: &str = "--note <path>, --pr <url>, --sha <sha>, --report <path>, --no-proof, --reason \"<why>\", or --resolved-by <id>";
 
 /// A report the caller named and the shell could not read. The path came
 /// off the command line, so every way it can fail is a refused argument the

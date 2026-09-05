@@ -1,11 +1,11 @@
 ---
 id: question.should-the-global-scope-accept-more-than
 type: question
-state: routed
+state: closed
 title: Should the global scope accept more than the six verbs named?
 by: Maksim Yaromin
 from: task.global-root-and-flags
-routed-to: decision.global-scope-refused-only-by-work-verbs
+resolved-by: decision.global-scope-refused-only-by-work-verbs
 created: 2026-08-30
 updated: 2026-09-02
 ---

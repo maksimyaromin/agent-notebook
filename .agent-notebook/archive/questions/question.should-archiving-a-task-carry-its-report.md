@@ -1,12 +1,12 @@
 ---
 id: question.should-archiving-a-task-carry-its-report
 type: question
-state: routed
+state: closed
 title: Should archiving a Task carry its report Note along?
 by: Maksim Yaromin
 from: task.cli-close-note-ingests-the-report-as-a-l
 tags: cli
-routed-to: decision.archiving-a-record-carries-its-reports
+resolved-by: decision.archiving-a-record-carries-its-reports
 created: 2026-08-29
 updated: 2026-08-30
 ---

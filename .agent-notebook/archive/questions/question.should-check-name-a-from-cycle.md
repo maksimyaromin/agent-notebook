@@ -1,12 +1,12 @@
 ---
 id: question.should-check-name-a-from-cycle
 type: question
-state: routed
+state: closed
 title: Should check name a from cycle?
 by: Maksim Yaromin
 from: task.epic-pattern-scoped-queries-status-hub-g
 tags: core
-routed-to: decision.check-names-an-origin-cycle
+resolved-by: decision.check-names-an-origin-cycle
 created: 2026-08-29
 updated: 2026-08-30
 ---

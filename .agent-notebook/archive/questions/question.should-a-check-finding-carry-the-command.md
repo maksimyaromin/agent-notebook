@@ -1,12 +1,12 @@
 ---
 id: question.should-a-check-finding-carry-the-command
 type: question
-state: routed
+state: closed
 title: Should a Check finding carry the command that repairs it?
 by: Maksim Yaromin
 from: task.erase-an-optional-envelope-field-through
 tags: cli
-routed-to: decision.a-check-finding-names-the-move-that
+resolved-by: decision.a-check-finding-names-the-move-that
 created: 2026-08-30
 updated: 2026-08-30
 ---

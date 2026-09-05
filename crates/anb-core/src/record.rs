@@ -4,7 +4,7 @@
 //! Types follow the persistence rule — how a record may change, not what it
 //! is about: a Task closes through its workflow, a Decision dies
 //! only by supersession or retirement, a Note is corrected in place, a
-//! Question closes only by routing. This module judges one record at a time;
+//! Question closes like a Task. This module judges one record at a time;
 //! rules that need a second record live in the notebook.
 
 use crate::finding::{Finding, FindingCode};
@@ -72,7 +72,7 @@ impl RecordType {
             RecordType::Task => &["open", "active", "review", "closed"],
             RecordType::Decision => &["active", "superseded", "retired"],
             RecordType::Note => &["active", "retired"],
-            RecordType::Question => &["open", "routed", "dropped"],
+            RecordType::Question => &["open", "closed"],
         }
     }
 
@@ -100,7 +100,8 @@ impl RecordType {
 }
 
 /// The Task workflow states: `open → active → review → closed`, review
-/// optional, reopen explicit.
+/// optional, reopen explicit; a close by reason reaches `closed` from any
+/// live state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskState {
     Open,
@@ -138,7 +139,7 @@ impl TaskState {
     /// # Errors
     /// The valid actions from this state, when `action` is not among them.
     pub(crate) fn transition(self, action: TaskAction) -> Result<Transition, Vec<TaskAction>> {
-        if action.already_state() == Some(self) {
+        if action.already_state() == self {
             return Ok(Transition::Already);
         }
         if action.sources().contains(&self) {
@@ -154,14 +155,17 @@ impl TaskState {
     }
 }
 
-/// The Task transitions, named by their commands.
+/// The Task transitions, named as an agent asks for them. `start` also
+/// takes a Task back from review. `CloseWithReason` is `close --reason`:
+/// the Task ends without work, so it may end from `open`, where a close
+/// carrying a proof is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskAction {
     Start,
     Submit,
     Close,
-    Return,
     Reopen,
+    CloseWithReason,
 }
 
 impl TaskAction {
@@ -169,51 +173,50 @@ impl TaskAction {
         TaskAction::Start,
         TaskAction::Submit,
         TaskAction::Close,
-        TaskAction::Return,
         TaskAction::Reopen,
+        TaskAction::CloseWithReason,
     ];
 
+    /// The move as the agent types it, which is also the key its retry
+    /// shape is filed under.
     #[must_use]
     pub(crate) fn word(self) -> &'static str {
         match self {
             TaskAction::Start => "start",
             TaskAction::Submit => "submit",
             TaskAction::Close => "close",
-            TaskAction::Return => "return",
             TaskAction::Reopen => "reopen",
+            TaskAction::CloseWithReason => "close --reason",
         }
     }
 
     fn target(self) -> TaskState {
         match self {
-            TaskAction::Start | TaskAction::Return => TaskState::Active,
+            TaskAction::Start => TaskState::Active,
             TaskAction::Submit => TaskState::Review,
-            TaskAction::Close => TaskState::Closed,
+            TaskAction::Close | TaskAction::CloseWithReason => TaskState::Closed,
             TaskAction::Reopen => TaskState::Open,
         }
     }
 
     /// The state that proves this action already happened, making its replay
-    /// safe. `Return` has none: an active Task may simply never have been
-    /// submitted, and reporting that as a replayed return would hide a
-    /// forbidden move.
-    fn already_state(self) -> Option<TaskState> {
+    /// safe.
+    fn already_state(self) -> TaskState {
         match self {
-            TaskAction::Start => Some(TaskState::Active),
-            TaskAction::Submit => Some(TaskState::Review),
-            TaskAction::Close => Some(TaskState::Closed),
-            TaskAction::Reopen => Some(TaskState::Open),
-            TaskAction::Return => None,
+            TaskAction::Start => TaskState::Active,
+            TaskAction::Submit => TaskState::Review,
+            TaskAction::Close | TaskAction::CloseWithReason => TaskState::Closed,
+            TaskAction::Reopen => TaskState::Open,
         }
     }
 
     fn sources(self) -> &'static [TaskState] {
         match self {
-            TaskAction::Start => &[TaskState::Open],
+            TaskAction::Start => &[TaskState::Open, TaskState::Review],
             TaskAction::Submit => &[TaskState::Active],
             TaskAction::Close => &[TaskState::Active, TaskState::Review],
-            TaskAction::Return => &[TaskState::Review],
             TaskAction::Reopen => &[TaskState::Closed],
+            TaskAction::CloseWithReason => &[TaskState::Open, TaskState::Active, TaskState::Review],
         }
     }
 }
@@ -350,8 +353,8 @@ impl Record {
     }
 
     #[must_use]
-    pub fn routed_to(&self) -> Option<&str> {
-        self.file.field("routed-to")
+    pub fn resolved_by(&self) -> Option<&str> {
+        self.file.field("resolved-by")
     }
 
     #[must_use]
@@ -379,7 +382,8 @@ const TYPE_BOUND_FIELDS: &[(&str, &[RecordType])] = &[
     ("hold", &[RecordType::Task]),
     ("hold-until", &[RecordType::Task]),
     ("blocked-by", &[RecordType::Task]),
-    ("routed-to", &[RecordType::Question]),
+    ("resolved-by", &[RecordType::Question]),
+    ("reason", &[RecordType::Task, RecordType::Question]),
 ];
 
 /// The record model's pass over one parsed file: per-type state and kind
@@ -394,7 +398,7 @@ fn semantic_findings(file: &RecordFile) -> Vec<Finding> {
     check_kind(record_type, file, &mut findings);
     check_type_bound_fields(record_type, file, &mut findings);
     check_hold_pairing(record_type, file, &mut findings);
-    check_routing(record_type, file, &mut findings);
+    check_resolution(record_type, file, &mut findings);
     check_dependencies(record_type, file, &mut findings);
     findings
 }
@@ -525,18 +529,17 @@ fn check_dependencies(record_type: RecordType, file: &RecordFile, findings: &mut
             findings.push(Finding::located(line, FindingCode::BadValue, message));
         } else if file.field("id") == Some(target) {
             let message = format!("blocked-by: `{target}` waits on itself");
-            findings.push(Finding::located(line, FindingCode::DepCycle, message));
+            findings.push(Finding::located(line, FindingCode::BlockCycle, message));
         }
     }
 }
 
-/// A Question recorded as routed must carry the thread of what closed it;
-/// whether the thread's far end exists is the notebook's to verify.
-fn check_routing(record_type: RecordType, file: &RecordFile, findings: &mut Vec<Finding>) {
-    if record_type != RecordType::Question {
-        return;
-    }
-    if let Some((target, line)) = file.field_entry("routed-to")
+/// A closed Question names what settled it: the Decision or Task it
+/// resolved into, or the reason it closed without one. A reason on a record
+/// that is not closed contradicts its own state. Whether a named resolver
+/// exists is the notebook's to verify.
+fn check_resolution(record_type: RecordType, file: &RecordFile, findings: &mut Vec<Finding>) {
+    if let Some((target, line)) = file.field_entry("resolved-by")
         && grammar::id_error(target).is_none()
         && let Some(target_type) = target
             .split_once('.')
@@ -544,17 +547,31 @@ fn check_routing(record_type: RecordType, file: &RecordFile, findings: &mut Vec<
         && !matches!(target_type, RecordType::Decision | RecordType::Task)
     {
         let message = format!(
-            "routed-to: a question routes into a decision or a task, not a {}",
+            "resolved-by: a question resolves into a decision or a task, not a {}",
             target_type.word()
         );
-        findings.push(Finding::located(line, FindingCode::BrokenRouting, message));
+        findings.push(Finding::located(line, FindingCode::BadValue, message));
     }
     let Some((state, line)) = file.field_entry("state") else {
         return;
     };
-    if state == "routed" && file.field_entry("routed-to").is_none() {
-        let message = "state: `routed` without `routed-to`".to_owned();
-        findings.push(Finding::located(line, FindingCode::BrokenRouting, message));
+    if state != "closed" {
+        if let Some((_, reason_line)) = file.field_entry("reason") {
+            let message = format!("reason: only a closed record carries one, this one is {state}");
+            findings.push(Finding::located(
+                reason_line,
+                FindingCode::BadValue,
+                message,
+            ));
+        }
+        return;
+    }
+    if record_type == RecordType::Question
+        && file.field_entry("resolved-by").is_none()
+        && file.field_entry("reason").is_none()
+    {
+        let message = "state: `closed` needs `resolved-by` or `reason`".to_owned();
+        findings.push(Finding::located(line, FindingCode::MissingField, message));
     }
 }
 
@@ -563,7 +580,7 @@ pub(crate) const REF_KEYS: [&str; 5] = [
     "from",
     "supersedes",
     "superseded-by",
-    "routed-to",
+    "resolved-by",
     "blocked-by",
 ];
 
@@ -578,30 +595,14 @@ pub(crate) fn linked_record(link: &str) -> Option<&str> {
     grammar::id_error(target).is_none().then_some(target)
 }
 
-/// The finding a reference into nothing deserves — every surface names one
-/// condition with one code: a routed Question pointing at nothing has lost
-/// what closed it, any other dangling reference is a `dangling-ref`.
-pub(crate) fn dangling_finding(
-    record: &Record,
-    key: &str,
-    target: &str,
-    line: Option<usize>,
-) -> Finding {
-    let routed =
-        record.record_type() == Some(RecordType::Question) && record.state() == Some("routed");
-    if key == "routed-to" && routed {
-        Finding::located(
-            line,
-            FindingCode::BrokenRouting,
-            format!("routed-to: `{target}` does not exist — the routing thread is lost"),
-        )
-    } else {
-        Finding::located(
-            line,
-            FindingCode::DanglingRef,
-            format!("{key}: `{target}` names no record"),
-        )
-    }
+/// The finding a reference into nothing deserves: one condition, one code,
+/// on every surface.
+pub(crate) fn dangling_finding(key: &str, target: &str, line: Option<usize>) -> Finding {
+    Finding::located(
+        line,
+        FindingCode::DanglingRef,
+        format!("{key}: `{target}` names no record"),
+    )
 }
 
 #[cfg(test)]
@@ -620,7 +621,7 @@ mod tests {
     }
 
     /// A question in its filed home: state and residence agree there, so a
-    /// routing finding is the only one these cases can produce.
+    /// resolution finding is the only one these cases can produce.
     fn archived_question(state_line: &str, extra: &[&str]) -> Record {
         let mut lines = vec![
             "id: question.demo",
@@ -704,13 +705,29 @@ mod tests {
     }
 
     #[test]
-    fn a_question_routed_into_a_type_no_answer_becomes_is_broken_routing() {
-        let record = archived_question("state: routed", &["routed-to: note.a-fact"]);
-        assert_eq!(codes(&record), vec![FindingCode::BrokenRouting]);
+    fn a_question_resolved_into_a_type_no_question_settles_into_is_a_bad_value() {
+        let record = archived_question("state: closed", &["resolved-by: note.a-fact"]);
+        assert_eq!(codes(&record), vec![FindingCode::BadValue]);
         assert!(
             record.findings()[0].message.contains("decision or a task"),
-            "the message names where a question may route: {}",
+            "the message names where a question may resolve: {}",
             record.findings()[0].message
+        );
+    }
+
+    #[test]
+    fn a_closed_question_naming_neither_resolver_nor_reason_misses_a_field() {
+        let record = archived_question("state: closed", &[]);
+        assert_eq!(codes(&record), vec![FindingCode::MissingField]);
+    }
+
+    #[test]
+    fn a_reason_on_a_record_that_is_not_closed_is_a_bad_value() {
+        let record = archived_question("state: open", &["reason: moot"]);
+        assert!(
+            codes(&record).contains(&FindingCode::BadValue),
+            "{:?}",
+            codes(&record)
         );
     }
 

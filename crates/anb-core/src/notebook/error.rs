@@ -31,7 +31,7 @@ pub enum NotebookError {
         expected: String,
     },
     /// The record's state does not allow this move; `valid` names the
-    /// commands it does allow.
+    /// moves it does allow, each the word its retry command is keyed by.
     InvalidTransition {
         id: String,
         state: String,
@@ -46,7 +46,7 @@ pub enum NotebookError {
         id: String,
         holder: String,
     },
-    /// An expunge would leave the notebook pointing at nothing. Every
+    /// A delete would leave the notebook pointing at nothing. Every
     /// blocker is named, since repairing them is the whole path forward.
     StillReferenced {
         id: String,
@@ -175,8 +175,7 @@ pub(super) fn type_list(types: &[RecordType]) -> String {
 pub(super) fn settling_commands(record_type: RecordType, state: &str) -> Vec<&'static str> {
     match (record_type, state) {
         (RecordType::Task, "open") => vec!["start"],
-        (RecordType::Task, _) => vec!["close"],
-        (RecordType::Question, _) => vec!["answer"],
+        (RecordType::Task | RecordType::Question, _) => vec!["close"],
         (RecordType::Decision | RecordType::Note, _) => vec!["retire"],
     }
 }

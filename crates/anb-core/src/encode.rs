@@ -15,7 +15,7 @@ use std::fmt::Write as _;
 /// What a command derives from the notebook is answered at a fixed size,
 /// whatever the notebook holds; a listing lifts that with `--all`, and a
 /// consequence named in passing has no lift. A record's own bytes are not
-/// derived, so `view` shows them as they stand — until a body outgrows a
+/// derived, so `show` prints them as they stand — until a body outgrows a
 /// reply on its own, when it too is bounded and `--all` lifts it.
 ///
 /// Where a reply heads a block with `label[n]`, `n` is the whole set and

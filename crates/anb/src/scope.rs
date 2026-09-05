@@ -9,7 +9,7 @@
 
 use crate::cli::Command;
 use crate::recovery::subject;
-use anb_core::NotebookError;
+use anb_core::{NotebookError, RecordType};
 
 /// Why `command` cannot act on the user's notebook, when `global` names it
 /// and the verb has nothing to reach there.
@@ -26,35 +26,31 @@ pub fn refused_globally(command: &Command, global: bool) -> Option<NotebookError
     })
 }
 
-/// Whether the verb can only create or move a task or a question, and so
+/// Whether the call can only create or move a task or a question, and so
 /// can act on nothing the user's notebook holds. Matched whole, so a verb
-/// added later is placed rather than assumed.
+/// added later is placed rather than assumed; `add` is judged by the type
+/// it creates.
 fn writes_work(command: &Command) -> bool {
     match command {
-        Command::Add(_)
-        | Command::Start { .. }
+        Command::Add(args) => matches!(args.record_type, RecordType::Task | RecordType::Question),
+        Command::Start { .. }
         | Command::Submit { .. }
         | Command::Close(_)
-        | Command::Return { .. }
         | Command::Reopen { .. }
         | Command::Hold { .. }
         | Command::Unhold { .. }
         | Command::Block { .. }
         | Command::Unblock { .. }
-        | Command::Comment { .. }
-        | Command::Ask(_)
-        | Command::Answer { .. } => true,
-        Command::Decide(_)
-        | Command::Note(_)
-        | Command::Retire { .. }
-        | Command::View { .. }
+        | Command::Comment { .. } => true,
+        Command::Retire { .. }
+        | Command::Show { .. }
         | Command::List { .. }
         | Command::Search { .. }
         | Command::Ready { .. }
         | Command::Check { .. }
         | Command::Archive { .. }
         | Command::Restore { .. }
-        | Command::Expunge { .. }
+        | Command::Delete { .. }
         | Command::Edit(_)
         | Command::Graph(_)
         | Command::Overview { .. }

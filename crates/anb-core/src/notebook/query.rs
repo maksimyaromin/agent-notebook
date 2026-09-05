@@ -1,5 +1,5 @@
 //! The folds a verb derives its answer from: the listing and dispatch
-//! rows, the membership edges, the consequences a close or an expunge must
+//! rows, the membership edges, the consequences a close or a delete must
 //! not bury.
 //!
 //! Nothing here reaches Storage — a fold runs over a corpus the Notebook
@@ -519,9 +519,9 @@ pub(super) fn live_counts(records: &[Record]) -> Counts {
 }
 
 /// The active Tasks, the most recently touched first: the dashboard's
-/// in-flight lines, the first carrying the last log line — the mechanical
+/// active lines, the first carrying the last log line — the mechanical
 /// "where I stopped".
-pub(super) fn in_flight_tasks(live_valid: &[&Record]) -> Vec<ActiveTask> {
+pub(super) fn active_tasks(live_valid: &[&Record]) -> Vec<ActiveTask> {
     let mut active: Vec<&Record> = live_valid
         .iter()
         .copied()

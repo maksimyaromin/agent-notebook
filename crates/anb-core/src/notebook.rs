@@ -3,12 +3,12 @@
 //!
 //! Write-time invariants live here, and they bind every author equally: a
 //! declared supersession writes the back-pointer and flips the victim, a
-//! Question closes only by routing or an explicit reasoned drop, a close
+//! Question closes into what resolved it or with a stated reason, a close
 //! carries its proof. A verb that moves a record already in the notebook is
 //! idempotent — a replayed call answers `already: true` and leaves every
 //! byte of every file unchanged. Creating and expunging are not replays of
 //! anything: a second `add` of the same title mints a second record, and a
-//! second `expunge` names an id the notebook no longer holds.
+//! second `delete` names an id the notebook no longer holds.
 //!
 //! The mutation gate holds a record's own error findings and its dangling
 //! references against it; findings that need a second record — a broken
@@ -45,9 +45,8 @@ use crate::record::{
     not_utf8_finding,
 };
 use crate::reply::{
-    Archived, CitedProof, Closed, Commented, Counts, Created, Dropped, Edged, Edited, Expunged,
-    Focus, Graph, GraphSlice, Held, ListedRecord, Overview, ReadyTask, Restored, Transitioned,
-    TypeSection, View,
+    Archived, CitedProof, Closed, Commented, Counts, Created, Deleted, Edged, Edited, Focus, Graph,
+    GraphSlice, Held, ListedRecord, Overview, ReadyTask, Restored, Transitioned, TypeSection, View,
 };
 use crate::request::{Draft, Edit, Proof};
 use crate::resolve::{
@@ -296,7 +295,7 @@ impl<'a> Notebook<'a> {
         let queue = query::ready_rows(records, &resolvable);
         let inputs = StatusInputs {
             counts: query::live_counts(records),
-            in_flight: query::in_flight_tasks(&live_valid),
+            active: query::active_tasks(&live_valid),
             review: query::review_tasks(&live_valid),
             rules: query::standing_rules(&live_valid),
             epics: query::epic_rows(records, &self.epic_kin(&corpus)?, &resolvable, &queue),
@@ -435,15 +434,15 @@ impl<'a> Notebook<'a> {
             None => None,
         };
 
-        // The kinds narrow what is drawn, never what the neighbourhood was
+        // The types narrow what is drawn, never what the neighbourhood was
         // walked over: a reader asking which Decisions stand around a Task
         // is asking about that Task's surroundings, and a walk that could
         // not step through a Task would answer that nothing does.
         let asked_for = |record: &Record| {
-            slice.kinds.is_empty()
+            slice.types.is_empty()
                 || record
                     .record_type()
-                    .is_some_and(|kind| slice.kinds.contains(&kind))
+                    .is_some_and(|record_type| slice.types.contains(&record_type))
         };
         let shown = |record: &Record| {
             let id = path_stem(record.path());
@@ -645,6 +644,54 @@ impl<'a> Notebook<'a> {
                 file.append_field("link", &link);
             }
         })?;
+        self.closed(id, transition, Vec::new(), None)
+    }
+
+    /// `open | active | review → closed` without work or without a record:
+    /// the Task or Question ends stating why. The reason lands in the
+    /// envelope as `reason` and the close date is stamped, but no proof link
+    /// is written — a proof would vouch for work that did not happen. The
+    /// state is the same `closed`, so dependents unblock and an epic counts
+    /// it like any close; the envelope carries the distinction.
+    ///
+    /// # Errors
+    /// [`NotebookError::InvalidArgument`] on an empty or multi-line reason,
+    /// plus the refusals of [`Notebook::close`].
+    pub fn close_with_reason(
+        &mut self,
+        id: &str,
+        reason: &str,
+        today: &str,
+    ) -> Result<Closed, NotebookError> {
+        let reason = write::guarded_reason("close", reason)?;
+        let transition = match write::parsed_type(id)? {
+            RecordType::Question => self.close_question(id, today, |file| {
+                file.set_field("reason", reason);
+            })?,
+            _ => self.task_transition(id, TaskAction::CloseWithReason, today, |file| {
+                file.set_field("closed", today);
+                file.set_field("reason", reason);
+            })?,
+        };
+        // A replay wrote nothing, so its reason has no citations to nudge on.
+        let dangling_mentions = if transition.already {
+            Vec::new()
+        } else {
+            self.dangling_mentions(reason)?
+        };
+        self.closed(id, transition, dangling_mentions, None)
+    }
+
+    /// The reply every way of closing shares: the move, plus the
+    /// consequences a close must not bury — the still-open Questions born
+    /// from the Task and the Tasks it was the last live blocker of.
+    fn closed(
+        &self,
+        id: &str,
+        transition: Transitioned,
+        dangling_mentions: Vec<String>,
+        resolved_by: Option<String>,
+    ) -> Result<Closed, NotebookError> {
         let corpus = self.live_corpus()?;
         let records = &corpus.records;
         let resolvable = corpus.resolver();
@@ -653,7 +700,8 @@ impl<'a> Notebook<'a> {
             open_questions: query::open_questions_from(records, &resolvable, id),
             unblocked: query::unblocked_by_close(records, &resolvable, id),
             report_note: None,
-            dangling_mentions: Vec::new(),
+            resolved_by,
+            dangling_mentions,
         })
     }
 
@@ -747,15 +795,6 @@ impl<'a> Notebook<'a> {
             .into_iter()
             .find(|note| note.origin() == Some(origin) && note.file().body() == wanted)
             .map(|note| path_stem(note.path()).to_owned()))
-    }
-
-    /// `review → active`: the human returned the work; what to fix comes
-    /// from them, not from the tool.
-    ///
-    /// # Errors
-    /// See [`Notebook::close`]; `return` carries no proof.
-    pub fn return_task(&mut self, id: &str, today: &str) -> Result<Transitioned, NotebookError> {
-        self.task_transition(id, TaskAction::Return, today, |_| {})
     }
 
     /// `closed → open`, dropping the close date; the proof links stay as
@@ -872,12 +911,9 @@ impl<'a> Notebook<'a> {
                 reason: "comment: the text must not be empty".to_owned(),
             });
         }
-        let author = author.map(str::trim).filter(|name| !name.is_empty());
-        if let Some(author) = author {
-            write::guard_single_line("author", author)?;
-        }
+        let author = write::guarded_author(author)?;
 
-        let entry = format!("- {today} {}: {text}", author.unwrap_or("-"));
+        let entry = write::log_entry(today, author, text);
         let loaded = self.load_live(id, &[RecordType::Task])?;
         // A replay carries the nudge too: the entry is the trail's tail, so
         // its citations stand in the body either way.
@@ -963,99 +999,74 @@ impl<'a> Notebook<'a> {
         })
     }
 
-    /// Route a Question into the Decision or Task its answer became:
-    /// `open → routed`, writing `routed-to` in the same move so the record
-    /// can never lose the thread of what closed it.
+    /// Close a Question into the Decision or Task that resolved it:
+    /// `open → closed`, writing `resolved-by` in the same move so the record
+    /// can never lose the thread of what settled it.
     ///
     /// # Errors
-    /// [`NotebookError::WrongType`] when `to` is not a decision or a task,
-    /// [`NotebookError::DanglingRef`] when it does not exist,
+    /// [`NotebookError::WrongType`] when `resolved_by` is not a decision or
+    /// a task, [`NotebookError::DanglingRef`] when it does not exist,
     /// [`NotebookError::InvalidTransition`] from a settled state, plus the
     /// resolution errors of [`Notebook::close`].
-    pub fn route(
+    pub fn resolve_question(
         &mut self,
         id: &str,
-        to: &str,
+        resolved_by: &str,
         today: &str,
-    ) -> Result<Transitioned, NotebookError> {
-        write::guard_today(today)?;
-        let target_type = write::parsed_type(to)?;
+    ) -> Result<Closed, NotebookError> {
+        let target_type = write::parsed_type(resolved_by)?;
         if !matches!(target_type, RecordType::Decision | RecordType::Task) {
             return Err(NotebookError::WrongType {
-                id: to.to_owned(),
+                id: resolved_by.to_owned(),
                 expected: "a decision or a task".to_owned(),
             });
         }
-        self.guard_ref_exists("routed-to", to)?;
+        self.guard_ref_exists("resolved-by", resolved_by)?;
+        let transition = self.close_question(id, today, |file| {
+            file.set_field("resolved-by", resolved_by);
+        })?;
+        // A replay wrote nothing, so the reply names the resolver the record
+        // holds, not the one this call carried.
+        let resolved_by = if transition.already {
+            self.load_live(id, &[RecordType::Question])?
+                .record
+                .resolved_by()
+                .map(str::to_owned)
+        } else {
+            Some(resolved_by.to_owned())
+        };
+        self.closed(id, transition, Vec::new(), resolved_by)
+    }
 
+    /// The shared shape of a Question's close: `open → closed` with the
+    /// close date stamped and the verb's own outcome field written; a
+    /// Question already closed answers with a replay and changes no byte.
+    fn close_question(
+        &mut self,
+        id: &str,
+        today: &str,
+        stamp_outcome: impl FnOnce(&mut RecordFile),
+    ) -> Result<Transitioned, NotebookError> {
+        write::guard_today(today)?;
         let loaded = self.load_live(id, &[RecordType::Question])?;
         let state = loaded.state_word();
-        if state == "routed" && loaded.record.routed_to() == Some(to) {
-            return Ok(Transitioned::replayed(id, "routed"));
+        if state == "closed" {
+            return Ok(Transitioned::replayed(id, "closed"));
         }
         if state != "open" {
             return Err(error::settled_question(id, state));
         }
         let mut file = loaded.record.into_file();
-        file.set_field("state", "routed");
-        file.set_field("routed-to", to);
+        file.set_field("state", "closed");
+        file.set_field("closed", today);
+        stamp_outcome(&mut file);
         file.set_field("updated", today);
         self.storage.write(&loaded.path, &file.render())?;
         Ok(Transitioned {
             id: id.to_owned(),
             from: "open",
-            to: "routed",
+            to: "closed",
             already: false,
-        })
-    }
-
-    /// Close a Question without routing: `open → dropped`, appending
-    /// `Dropped <date>: <reason>` to the body — deliberately not the Task-log
-    /// entry shape, whose author slot this line has no author for.
-    ///
-    /// # Errors
-    /// [`NotebookError::InvalidArgument`] on an empty reason,
-    /// [`NotebookError::InvalidTransition`] from a settled state, plus the
-    /// resolution errors of [`Notebook::close`].
-    pub fn drop_question(
-        &mut self,
-        id: &str,
-        reason: &str,
-        today: &str,
-    ) -> Result<Dropped, NotebookError> {
-        write::guard_today(today)?;
-        let reason = reason.trim();
-        write::guard_single_line("drop reason", reason)?;
-        if reason.is_empty() {
-            return Err(NotebookError::InvalidArgument {
-                reason: "drop: the reason must not be empty".to_owned(),
-            });
-        }
-
-        let loaded = self.load_live(id, &[RecordType::Question])?;
-        let state = loaded.state_word();
-        if state == "dropped" {
-            return Ok(Dropped {
-                transition: Transitioned::replayed(id, "dropped"),
-                dangling_mentions: Vec::new(),
-            });
-        }
-        if state != "open" {
-            return Err(error::settled_question(id, state));
-        }
-        let mut file = loaded.record.into_file();
-        file.set_field("state", "dropped");
-        file.set_field("updated", today);
-        file.append_body(&format!("Dropped {today}: {reason}"));
-        self.storage.write(&loaded.path, &file.render())?;
-        Ok(Dropped {
-            transition: Transitioned {
-                id: id.to_owned(),
-                from: "open",
-                to: "dropped",
-                already: false,
-            },
-            dangling_mentions: self.dangling_mentions(reason)?,
         })
     }
 
@@ -1160,7 +1171,7 @@ impl<'a> Notebook<'a> {
     /// alone. The reports the archive move carried are retired history and
     /// stay history.
     ///
-    /// No verb that corrects a record resolves an archived id — `expunge`
+    /// No verb that corrects a record resolves an archived id — `delete`
     /// reaches the archive only to delete — so this move is how a finding
     /// on an archived record becomes repairable at all. The bytes travel
     /// unjudged past one bar, readability: a broken record must be able to
@@ -1359,14 +1370,14 @@ impl<'a> Notebook<'a> {
     /// The guard is the whole verb: every inbound edge is named and the
     /// call refuses, since the only alternative to repairing them first is
     /// a notebook pointing at nothing. Alone among the verbs it does not
-    /// replay — with the record gone, nothing tells an expunge already
+    /// replay — with the record gone, nothing tells a delete already
     /// done from an id that never existed.
     ///
     /// # Errors
     /// [`NotebookError::StillReferenced`] naming every blocker,
     /// [`NotebookError::UnknownId`], [`NotebookError::InvalidArgument`] on
     /// a malformed id, or a storage failure.
-    pub fn expunge(&mut self, id: &str) -> Result<Expunged, NotebookError> {
+    pub fn delete(&mut self, id: &str) -> Result<Deleted, NotebookError> {
         write::parsed_type(id)?;
         let paths = self.holder_paths(id)?;
         if paths.is_empty() {
@@ -1382,7 +1393,7 @@ impl<'a> Notebook<'a> {
         for path in &paths {
             self.storage.remove(path)?;
         }
-        Ok(Expunged {
+        Ok(Deleted {
             id: id.to_owned(),
             paths,
         })
@@ -1557,7 +1568,7 @@ impl<'a> Notebook<'a> {
                     continue;
                 }
                 if self.holder_path(target)?.is_none() {
-                    errors.push(dangling_finding(record, key, target, line));
+                    errors.push(dangling_finding(key, target, line));
                 }
             }
         }
@@ -1662,7 +1673,7 @@ impl<'a> Notebook<'a> {
 
     /// Every canonical path holding `id`, live before archived. Two is the
     /// `duplicate-id` corruption an interrupted archive move leaves, and
-    /// only expunge, which must leave nothing behind, needs them all.
+    /// only delete, which must leave nothing behind, needs them all.
     fn holder_paths(&self, id: &str) -> Result<Vec<String>, NotebookError> {
         let mut holders = Vec::new();
         for path in canonical_paths(id) {
@@ -1757,7 +1768,7 @@ fn read_records_in(storage: &dyn Storage, dir: &str) -> Result<Vec<Record>, Note
             // file stays a visible invalid record, not an abort.
             Err(StorageError::NotUtf8 { .. }) => records.push(Record::unreadable(&path)),
             // A listing is a snapshot. Between it and this read another
-            // process may have filed or expunged the record, and a
+            // process may have filed or deleted the record, and a
             // reader that answered `not found` for the whole notebook
             // would be reporting someone else's completed work as its
             // own failure.

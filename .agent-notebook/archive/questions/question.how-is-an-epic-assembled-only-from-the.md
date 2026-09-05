@@ -1,12 +1,12 @@
 ---
 id: question.how-is-an-epic-assembled-only-from-the
 type: question
-state: routed
+state: closed
 title: How is an epic assembled only from the hub side discovered?
 by: Maksim Yaromin
 from: task.epic-pattern-scoped-queries-status-hub-g
 tags: cli
-routed-to: decision.an-epic-is-the-pairing-a-tag-is-for
+resolved-by: decision.an-epic-is-the-pairing-a-tag-is-for
 created: 2026-08-29
 updated: 2026-08-30
 ---

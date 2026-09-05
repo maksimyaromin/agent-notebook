@@ -21,8 +21,8 @@ pub struct DebtThresholds {
     pub task_stale: u32,
     pub question_age: u32,
     pub question_age_task_born: u32,
-    pub hold_quiet: u32,
-    pub review_wait: u32,
+    pub hold_stale: u32,
+    pub review_stale: u32,
 }
 
 /// One sign of decay: a clock past its threshold, a mention-borne hint, or
@@ -37,15 +37,15 @@ pub enum DebtSignal {
     /// that makes it cheap to route is being archived, so it surfaces now.
     OriginClosed { id: String, origin: String },
     /// A held Task whose `updated` stopped moving.
-    HoldQuiet { id: String, days: u32 },
+    HoldStale { id: String, days: u32 },
     /// A review Task waiting on a human.
-    ReviewWait { id: String, days: u32 },
+    ReviewStale { id: String, days: u32 },
     /// A `review-by` date that has arrived, on any record type.
     ReviewDue { id: String, date: String },
     /// A body citation of an id no record carries.
     DanglingMention { id: String, target: String },
     /// Two live Decisions where one cites the other with no declared edge.
-    UndeclaredPair { first: Cited, second: Cited },
+    MayConflict { first: Cited, second: Cited },
     /// A live project Decision and a standing Decision of the user's
     /// notebook, paired by a citation. Where the two disagree the project's
     /// governs this repository — that is what a scope is — so the pair is
@@ -67,11 +67,11 @@ impl DebtSignal {
             DebtSignal::TaskStale { .. } => "task-stale",
             DebtSignal::QuestionAge { .. } => "question-age",
             DebtSignal::OriginClosed { .. } => "origin-closed",
-            DebtSignal::HoldQuiet { .. } => "hold-quiet",
-            DebtSignal::ReviewWait { .. } => "review-wait",
+            DebtSignal::HoldStale { .. } => "hold-stale",
+            DebtSignal::ReviewStale { .. } => "review-stale",
             DebtSignal::ReviewDue { .. } => "review-due",
             DebtSignal::DanglingMention { .. } => "dangling-mention",
-            DebtSignal::UndeclaredPair { .. } => "undeclared-pair",
+            DebtSignal::MayConflict { .. } => "may-conflict",
             DebtSignal::Shadow { .. } => "shadow",
             DebtSignal::Invalid { .. } => "invalid",
             DebtSignal::LostProof { .. } => "lost-proof",
@@ -85,14 +85,14 @@ impl DebtSignal {
         match self {
             DebtSignal::TaskStale { id, days }
             | DebtSignal::QuestionAge { id, days }
-            | DebtSignal::HoldQuiet { id, days }
-            | DebtSignal::ReviewWait { id, days } => format!("{code}: {id} ({days}d)"),
+            | DebtSignal::HoldStale { id, days }
+            | DebtSignal::ReviewStale { id, days } => format!("{code}: {id} ({days}d)"),
             DebtSignal::OriginClosed { id, origin } => format!("{code}: {id} ({origin} closed)"),
             DebtSignal::ReviewDue { id, date } => format!("{code}: {id} ({date})"),
             DebtSignal::DanglingMention { id, target } => {
                 format!("{code}: {id} -> {}", quoted_if_delimited(target))
             }
-            DebtSignal::UndeclaredPair { first, second } => format!(
+            DebtSignal::MayConflict { first, second } => format!(
                 "{code}: {} ({}) <-> {} ({})",
                 first.id,
                 first.author(),
@@ -186,7 +186,7 @@ pub(crate) fn signals(sources: &DebtSources<'_>, thresholds: &DebtThresholds) ->
         collect_clock_signals(record, sources, thresholds, &mut classes);
         collect_dangling_mentions(record, sources.resolvable, &behind, &mut classes);
     }
-    classes.pairs = undeclared_pairs(&valid, sources.resolvable);
+    classes.pairs = may_conflict_pairs(&valid, sources.resolvable);
     classes.shadows = shadows(&valid, sources.resolvable, &behind);
     classes.lost_proofs = lost_proofs(sources);
     // A corrupt live file is a hint the reader can act on today; a corrupt
@@ -209,7 +209,7 @@ struct SignalClasses {
     aging: Vec<DebtSignal>,
     origin_closed: Vec<DebtSignal>,
     quiet_holds: Vec<DebtSignal>,
-    review_waits: Vec<DebtSignal>,
+    review_stales: Vec<DebtSignal>,
     review_due: Vec<DebtSignal>,
     dangling: Vec<DebtSignal>,
     pairs: Vec<DebtSignal>,
@@ -226,7 +226,7 @@ impl SignalClasses {
             self.aging,
             self.origin_closed,
             self.quiet_holds,
-            self.review_waits,
+            self.review_stales,
             self.review_due,
             self.dangling,
             self.pairs,
@@ -279,12 +279,12 @@ fn signal_rank(signal: &DebtSignal) -> (i64, String) {
     match signal {
         DebtSignal::TaskStale { id, days }
         | DebtSignal::QuestionAge { id, days }
-        | DebtSignal::HoldQuiet { id, days }
-        | DebtSignal::ReviewWait { id, days } => (-i64::from(*days), id.clone()),
+        | DebtSignal::HoldStale { id, days }
+        | DebtSignal::ReviewStale { id, days } => (-i64::from(*days), id.clone()),
         DebtSignal::OriginClosed { id, .. } => (0, id.clone()),
         DebtSignal::ReviewDue { id, date } => (0, format!("{date} {id}")),
         DebtSignal::DanglingMention { id, target } => (0, format!("{id} {target}")),
-        DebtSignal::UndeclaredPair { .. } | DebtSignal::Shadow { .. } => (0, String::new()),
+        DebtSignal::MayConflict { .. } | DebtSignal::Shadow { .. } => (0, String::new()),
         DebtSignal::Invalid { path, .. } => (0, path.clone()),
         DebtSignal::LostProof { id, proof } => (0, format!("{id} {proof}")),
     }
@@ -339,8 +339,8 @@ fn collect_task_clocks(
     classes: &mut SignalClasses,
 ) {
     if record.hold().is_some() {
-        if quiet_days >= thresholds.hold_quiet {
-            classes.quiet_holds.push(DebtSignal::HoldQuiet {
+        if quiet_days >= thresholds.hold_stale {
+            classes.quiet_holds.push(DebtSignal::HoldStale {
                 id: id.to_owned(),
                 days: quiet_days,
             });
@@ -354,8 +354,8 @@ fn collect_task_clocks(
                 days: quiet_days,
             });
         }
-        Some("review") if quiet_days >= thresholds.review_wait => {
-            classes.review_waits.push(DebtSignal::ReviewWait {
+        Some("review") if quiet_days >= thresholds.review_stale => {
+            classes.review_stales.push(DebtSignal::ReviewStale {
                 id: id.to_owned(),
                 days: quiet_days,
             });
@@ -435,7 +435,7 @@ fn collect_dangling_mentions(
 /// envelope reference to a record this notebook does not hold is a dangling
 /// reference, which `check` refuses, so a citation is the edge that
 /// survives. A typed id in prose is deliberate, the same construction
-/// [`undeclared_pairs`] rests on.
+/// [`may_conflict_pairs`] rests on.
 ///
 /// A citation this notebook answers with a live record of its own is about
 /// that record and belongs to the pair below; only what this notebook has
@@ -479,7 +479,7 @@ fn is_standing(record: &Record, behind: &Resolver<'_>) -> bool {
 /// invalid record is out of every derived query, half a pair included.
 /// Ranked by the older member's `created`, oldest first. High precision by
 /// construction — a typed id in prose is a deliberate reference.
-fn undeclared_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSignal> {
+fn may_conflict_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSignal> {
     let mut found: Vec<RankedPair> = Vec::new();
     let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
     let live_decision =
@@ -521,7 +521,7 @@ fn undeclared_pairs(valid: &[&Record], resolvable: &Resolver<'_>) -> Vec<DebtSig
     found.sort_by(|left, right| left.rank().cmp(&right.rank()));
     found
         .into_iter()
-        .map(|pair| DebtSignal::UndeclaredPair {
+        .map(|pair| DebtSignal::MayConflict {
             first: pair.first,
             second: pair.second,
         })

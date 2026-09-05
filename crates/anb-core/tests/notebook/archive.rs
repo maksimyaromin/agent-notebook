@@ -1,8 +1,8 @@
-mod expunge_verb {
+mod delete_verb {
     use crate::*;
 
     fn blockers_of(storage: &mut MemoryStorage, id: &str) -> Vec<Blocker> {
-        match Notebook::new(storage).expunge(id).unwrap_err() {
+        match Notebook::new(storage).delete(id).unwrap_err() {
             NotebookError::StillReferenced { blockers, .. } => blockers,
             other => panic!("expected a refusal naming the blockers, got {other:?}"),
         }
@@ -24,7 +24,7 @@ mod expunge_verb {
             ),
             ("tasks/task.demo.md", &task_file("open", &[])),
         ]);
-        let gone = Notebook::new(&mut storage).expunge("note.mistake").unwrap();
+        let gone = Notebook::new(&mut storage).delete("note.mistake").unwrap();
 
         assert_eq!(gone.paths, vec!["notes/note.mistake.md"]);
         assert_eq!(storage.list("notes").unwrap(), Vec::<String>::new());
@@ -62,12 +62,12 @@ mod expunge_verb {
                 ),
             ),
             (
-                "questions/question.routed.md",
+                "questions/question.resolved.md",
                 &record_file(
-                    "question.routed",
+                    "question.resolved",
                     "question",
-                    "routed",
-                    &["routed-to: note.mistake"],
+                    "closed",
+                    &["resolved-by: note.mistake"],
                     "",
                 ),
             ),
@@ -105,7 +105,7 @@ mod expunge_verb {
                 held_by("task.proved", "link"),
                 held_by("note.heir", "supersedes"),
                 held_by("note.replaced", "superseded-by"),
-                held_by("question.routed", "routed-to"),
+                held_by("question.resolved", "resolved-by"),
             ]
         );
     }
@@ -153,7 +153,7 @@ mod expunge_verb {
             ),
         ]);
         assert!(
-            Notebook::new(&mut storage).expunge("note.mistake").is_ok(),
+            Notebook::new(&mut storage).delete("note.mistake").is_ok(),
             "a path and a URL are not references, however they read"
         );
     }
@@ -165,7 +165,7 @@ mod expunge_verb {
             ("notes/note.mistake.md", &text),
             ("archive/notes/note.mistake.md", &text),
         ]);
-        let gone = Notebook::new(&mut storage).expunge("note.mistake").unwrap();
+        let gone = Notebook::new(&mut storage).delete("note.mistake").unwrap();
         assert_eq!(
             gone.paths,
             vec!["notes/note.mistake.md", "archive/notes/note.mistake.md"],
@@ -219,7 +219,7 @@ mod expunge_verb {
         Notebook::new(&mut storage)
             .unblock("task.waiting", "task.mistake", TODAY)
             .unwrap();
-        assert!(Notebook::new(&mut storage).expunge("task.mistake").is_ok());
+        assert!(Notebook::new(&mut storage).delete("task.mistake").is_ok());
     }
 
     #[test]
@@ -240,7 +240,7 @@ mod expunge_verb {
                 ),
             ),
         ]);
-        assert!(Notebook::new(&mut storage).expunge("note.mistake").is_ok());
+        assert!(Notebook::new(&mut storage).delete("note.mistake").is_ok());
     }
 
     #[test]
@@ -255,7 +255,7 @@ mod expunge_verb {
                 "note.mistake was a slip\n",
             ),
         )]);
-        assert!(Notebook::new(&mut storage).expunge("note.mistake").is_ok());
+        assert!(Notebook::new(&mut storage).delete("note.mistake").is_ok());
     }
 
     #[test]
@@ -264,7 +264,7 @@ mod expunge_verb {
             "archive/notes/note.mistake.md",
             &record_file("note.mistake", "note", "retired", &[], ""),
         )]);
-        let gone = Notebook::new(&mut storage).expunge("note.mistake").unwrap();
+        let gone = Notebook::new(&mut storage).delete("note.mistake").unwrap();
         assert_eq!(gone.paths, vec!["archive/notes/note.mistake.md"]);
     }
 
@@ -293,10 +293,10 @@ mod expunge_verb {
             "notes/note.mistake.md",
             &record_file("note.mistake", "note", "active", &[], ""),
         )]);
-        Notebook::new(&mut storage).expunge("note.mistake").unwrap();
+        Notebook::new(&mut storage).delete("note.mistake").unwrap();
         assert_eq!(
             Notebook::new(&mut storage)
-                .expunge("note.mistake")
+                .delete("note.mistake")
                 .unwrap_err(),
             NotebookError::UnknownId {
                 id: "note.mistake".to_owned()
@@ -364,8 +364,8 @@ mod archive_verb {
                 &record_file(
                     "question.q",
                     "question",
-                    "routed",
-                    &["routed-to: decision.new"],
+                    "closed",
+                    &["resolved-by: decision.new"],
                     "",
                 ),
             ),
@@ -773,7 +773,7 @@ mod archive_verb {
         for (id, state, valid) in [
             ("task.open", "open", vec!["start"]),
             ("task.working", "active", vec!["close"]),
-            ("question.q", "open", vec!["answer"]),
+            ("question.q", "open", vec!["close"]),
             ("decision.d", "active", vec!["retire"]),
         ] {
             assert_eq!(

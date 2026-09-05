@@ -14,7 +14,8 @@ supersedes: task.old-demo
 superseded-by: task.new-demo
 blocked-by: task.other-work
 blocked-by: task.more-work
-routed-to: question.why-demo
+resolved-by: question.why-demo
+reason: a demo reason
 priority: 3
 hold: waiting for the demo review
 hold-until: 2026-09-01

@@ -189,6 +189,36 @@ pub(super) fn guard_single_line(field: &str, value: &str) -> Result<(), Notebook
     }
     Ok(())
 }
+
+/// The author slot of a log entry: trimmed, one line, and `None` when
+/// nothing was given.
+pub(super) fn guarded_author(author: Option<&str>) -> Result<Option<&str>, NotebookError> {
+    let author = author.map(str::trim).filter(|name| !name.is_empty());
+    if let Some(author) = author {
+        guard_single_line("author", author)?;
+    }
+    Ok(author)
+}
+
+/// The reason a record ends without work, or without a record to close
+/// into, refused under `verb`: trimmed, one line, never empty — unreasoned,
+/// the ending is where work vanishes without a trace.
+pub(super) fn guarded_reason<'a>(verb: &str, reason: &'a str) -> Result<&'a str, NotebookError> {
+    let reason = reason.trim();
+    guard_single_line(&format!("{verb} reason"), reason)?;
+    if reason.is_empty() {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!("{verb}: the reason must not be empty"),
+        });
+    }
+    Ok(reason)
+}
+
+/// One Task-log entry. An unsigned one carries `-` in the author slot, so
+/// every entry keeps the same shape.
+pub(super) fn log_entry(today: &str, author: Option<&str>, text: &str) -> String {
+    format!("- {today} {}: {text}", author.unwrap_or("-"))
+}
 pub(super) fn parsed_type(id: &str) -> Result<RecordType, NotebookError> {
     match grammar::id_error(id) {
         Some(why) => Err(NotebookError::InvalidArgument {
@@ -426,7 +456,7 @@ pub(super) fn render_draft(draft: &Draft, id: &str, today: &str) -> String {
 
 /// How much of a title an id carries. An id must stay recognisable at a
 /// glance and must fit the id grammar's own length limit with room for a
-/// collision suffix; the rest of the title is a `view` away.
+/// collision suffix; the rest of the title is a `show` away.
 const SLUG_CAP: usize = 40;
 
 /// The slug an id takes from a title: ASCII alphanumerics lowercased, every

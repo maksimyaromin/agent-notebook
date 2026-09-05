@@ -1,11 +1,11 @@
 ---
 id: question.does-the-record-open-in-a-side-panel-as
 type: question
-state: routed
+state: closed
 title: Does the record open in a side panel, as shipped, or in the modal the design names?
 by: Maksim Yaromin
 from: task.graph-emit-html
-routed-to: task.claude-code-skill-the-notebook-drawn-and
+resolved-by: task.claude-code-skill-the-notebook-drawn-and
 created: 2026-08-30
 updated: 2026-08-31
 ---

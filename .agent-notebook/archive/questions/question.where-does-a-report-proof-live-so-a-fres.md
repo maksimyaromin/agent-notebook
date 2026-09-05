@@ -1,12 +1,12 @@
 ---
 id: question.where-does-a-report-proof-live-so-a-fres
 type: question
-state: routed
+state: closed
 title: Where does a report proof live so a fresh clone can reach it?
 by: Maksim Yaromin
 via: claude-code
 from: task.milestone-self-host-switch
-routed-to: decision.close-proofs-are-equals-default-note
+resolved-by: decision.close-proofs-are-equals-default-note
 created: 2026-08-29
 updated: 2026-08-29
 ---

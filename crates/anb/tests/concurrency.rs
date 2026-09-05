@@ -46,7 +46,7 @@ fn ended(writer: Child) -> String {
 /// processes at once.
 fn notebook_with_a_task(dir: &TempDir) -> std::path::PathBuf {
     let root = dir.path().join("nb");
-    let added = anb(&root, &["add", "Contended"]);
+    let added = anb(&root, &["add", "task", "Contended"]);
     assert!(added.status.success(), "the fixture's Task is created");
     root
 }
@@ -83,7 +83,7 @@ fn twenty_concurrent_adds_each_mint_their_own_record() {
     let root = dir.path().join("nb");
 
     let writers: Vec<Child> = (0..20)
-        .map(|_| spawn(&root, &["add", "Parallel"]))
+        .map(|_| spawn(&root, &["add", "task", "Parallel"]))
         .collect();
     let minted: std::collections::BTreeSet<String> = writers
         .into_iter()
@@ -171,7 +171,11 @@ fn a_refused_first_command_brings_no_notebook_into_being() {
         assert!(!refusal.status.success(), "{line:?} was not refused");
         assert!(!root.exists(), "{line:?} brought a notebook into being");
     }
-    assert!(anb(&root, &["add", "The first record"]).status.success());
+    assert!(
+        anb(&root, &["add", "task", "The first record"])
+            .status
+            .success()
+    );
     assert!(root.is_dir());
 }
 
@@ -191,31 +195,30 @@ fn a_read_against_no_notebook_answers_and_creates_nothing() {
 #[test]
 fn the_lock_is_taken_by_every_writing_verb_and_by_no_reading_one() {
     let writes = [
-        &["add", "Fresh"][..],
+        &["add", "task", "Fresh"][..],
         &["start", "task.absent"],
         &["submit", "task.absent"],
         &["close", "task.absent", "--no-proof"],
-        &["return", "task.absent"],
         &["reopen", "task.absent"],
         &["hold", "task.absent", "--reason", "waiting"],
         &["unhold", "task.absent"],
         &["block", "task.absent", "task.other"],
         &["unblock", "task.absent", "task.other"],
         &["comment", "task.absent", "text"],
-        &["decide", "Fresh"],
-        &["note", "Fresh"],
-        &["ask", "Fresh"],
-        &["answer", "question.absent", "--drop", "moot"],
+        &["add", "decision", "Fresh"],
+        &["add", "note", "Fresh"],
+        &["add", "question", "Fresh"],
+        &["close", "question.absent", "--reason", "moot"],
         &["retire", "decision.absent"],
         &["archive", "task.absent"],
         &["restore", "task.absent"],
-        &["expunge", "task.absent"],
+        &["delete", "task.absent"],
         &["edit", "task.absent", "--title", "New"],
     ];
     let reads = [
         &["ready"][..],
         &["list"],
-        &["view", "task.absent"],
+        &["show", "task.absent"],
         &["status"],
         &["check"],
         &["search", "anything"],
@@ -296,7 +299,7 @@ mod the_notebooks_own_ignore_file {
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join(".gitignore"), "mine\n").unwrap();
 
-        anb(&root, &["add", "Fresh"]);
+        anb(&root, &["add", "task", "Fresh"]);
         assert_eq!(
             fs::read_to_string(root.join(".gitignore")).unwrap(),
             "mine\n"
@@ -321,7 +324,7 @@ fn a_root_that_refuses_the_lock_refuses_the_write() {
         return;
     }
 
-    let refused = anb(&root, &["add", "Fresh"]);
+    let refused = anb(&root, &["add", "task", "Fresh"]);
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
 
     let payload = String::from_utf8_lossy(&refused.stderr);

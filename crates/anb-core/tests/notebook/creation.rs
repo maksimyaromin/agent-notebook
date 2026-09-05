@@ -696,28 +696,28 @@ mod mention_nudge {
     }
 
     #[test]
-    fn a_drop_reason_citing_no_record_warns_in_the_reply() {
+    fn a_close_reason_citing_no_record_warns_in_the_reply() {
         let mut storage = storage_with(&[(
             "questions/question.demo.md",
             &record_file("question.demo", "question", "open", &[], ""),
         )]);
-        let dropped = Notebook::new(&mut storage)
-            .drop_question("question.demo", "absorbed into task.ghost", TODAY)
+        let closed = Notebook::new(&mut storage)
+            .close_with_reason("question.demo", "absorbed into task.ghost", TODAY)
             .unwrap();
-        assert_eq!(dropped.dangling_mentions, vec!["task.ghost"]);
+        assert_eq!(closed.dangling_mentions, vec!["task.ghost"]);
     }
 
     #[test]
-    fn a_replayed_drop_carries_no_nudge_for_a_reason_that_never_landed() {
+    fn a_replayed_close_by_reason_carries_no_nudge_for_a_reason_that_never_landed() {
         let mut storage = storage_with(&[(
             "questions/question.demo.md",
             &record_file("question.demo", "question", "open", &[], ""),
         )]);
         Notebook::new(&mut storage)
-            .drop_question("question.demo", "a plain reason", TODAY)
+            .close_with_reason("question.demo", "a plain reason", TODAY)
             .unwrap();
         let replay = Notebook::new(&mut storage)
-            .drop_question("question.demo", "absorbed into task.ghost", TODAY)
+            .close_with_reason("question.demo", "absorbed into task.ghost", TODAY)
             .unwrap();
         assert!(replay.transition.already);
         assert_eq!(

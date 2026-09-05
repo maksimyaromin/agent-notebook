@@ -44,6 +44,8 @@ pub struct Closed {
     pub unblocked: Vec<String>,
     /// The Note this close ingested its report into, when it did.
     pub report_note: Option<String>,
+    /// The Decision or Task a Question resolved into, when it did.
+    pub resolved_by: Option<String>,
     /// The ingested report's own dangling citations; a report names ids as
     /// freely as any body, and the nudge belongs at the write.
     pub dangling_mentions: Vec<String>,
@@ -153,15 +155,7 @@ pub struct Commented {
     pub dangling_mentions: Vec<String>,
 }
 
-/// A Question dropped; the replay of an already-dropped one carries no
-/// mention nudge, since its reason wrote nothing.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Dropped {
-    pub transition: Transitioned,
-    pub dangling_mentions: Vec<String>,
-}
-
-/// One record standing in the way of an expunge, and the edge that holds
+/// One record standing in the way of a delete, and the edge that holds
 /// it: an envelope key, or the body that cites the id in prose. One carrier
 /// can hold several, so a blocker is an edge, not a record.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,7 +184,7 @@ pub fn carriers_of(blockers: &[Blocker]) -> impl Iterator<Item = &str> {
 /// claim two files after a move interrupted in either direction; leaving
 /// no trace means leaving neither.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Expunged {
+pub struct Deleted {
     pub id: String,
     pub paths: Vec<String>,
 }
@@ -289,9 +283,9 @@ pub struct GraphNode {
 /// same notebook, so asking for two asks for the intersection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GraphSlice {
-    /// Which kinds of record the graph holds; empty asks for all of them,
-    /// the records with no readable kind among them.
-    pub kinds: Vec<RecordType>,
+    /// Which types of record the graph holds; empty asks for all of them,
+    /// the records with no readable type among them.
+    pub types: Vec<RecordType>,
     /// One epic's scope: the hub, what it waits on, and what was born
     /// inside it.
     pub hub: Option<String>,

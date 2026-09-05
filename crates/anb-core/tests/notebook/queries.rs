@@ -360,19 +360,19 @@ mod task_map {
     /// much a record as the Task that cites it, and a reader drawing the
     /// notebook needs both.
     #[test]
-    fn every_kind_of_record_is_a_node() {
+    fn every_type_of_record_is_a_node() {
         assert_eq!(
             map_of(&mut a_task_and_a_decision(), &whole()),
             vec!["task.open", "decision.rule"]
         );
     }
 
-    /// The kinds are a slice a caller asks for, so one kind can be had
+    /// The types are a slice a caller asks for, so one type can be had
     /// without losing the others from the vocabulary.
     #[test]
-    fn a_kind_asked_for_is_the_only_kind_drawn() {
+    fn a_type_asked_for_is_the_only_type_drawn() {
         let only_decisions = GraphSlice {
-            kinds: vec![RecordType::Decision],
+            types: vec![RecordType::Decision],
             ..whole()
         };
 
