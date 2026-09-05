@@ -110,9 +110,10 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     }
     let mut storage = FsStorage::new(root.clone());
     // The user's notebook is held to the same rules as any other root, and
-    // a root that cannot hold a notebook is no root: Status pairs a project
-    // rule against nothing rather than against a directory the seam would
-    // refuse to serve.
+    // a root that cannot hold a notebook is no root: every surface that
+    // reads behind the project — the Status pairs, the write-time nudge,
+    // the reach of a link under check — then reads nothing rather than a
+    // directory the seam would refuse to serve.
     let user = user_root(std::env::home_dir().as_deref())
         .ok()
         .filter(|user| unusable_root(user).is_none())

@@ -10,7 +10,7 @@ use crate::date;
 use crate::encode::quoted_if_delimited;
 use crate::grammar;
 use crate::mention;
-use crate::record::{REF_KEYS, Record, RecordType};
+use crate::record::{REF_KEYS, Record, RecordType, linked_record};
 use crate::reply::{Cited, CitedProof};
 use crate::resolve::{Resolver, path_stem};
 use std::collections::BTreeSet;
@@ -431,11 +431,11 @@ fn collect_dangling_mentions(
 
 /// The cross-scope pairs, in the order the project records name them.
 ///
-/// A project Decision reaches one of the user's only through its prose: an
-/// envelope reference to a record this notebook does not hold is a dangling
-/// reference, which `check` refuses, so a citation is the edge that
-/// survives. A typed id in prose is deliberate, the same construction
-/// [`may_conflict_pairs`] rests on.
+/// A project Decision reaches one of the user's through its prose or through
+/// a `link`: the envelope edges must be answered by this notebook, which
+/// `check` enforces, so a citation and a link are the edges that survive. A
+/// typed id in either is deliberate, the construction [`may_conflict_pairs`]
+/// rests on.
 ///
 /// A citation this notebook answers with a live record of its own is about
 /// that record and belongs to the pair below; only what this notebook has
@@ -449,7 +449,7 @@ fn shadows(valid: &[&Record], resolvable: &Resolver<'_>, behind: &Resolver<'_>) 
         .copied()
         .filter(|record| record.record_type() == Some(RecordType::Decision) && record.is_live())
     {
-        for target in mention::mentions(record.file().body()) {
+        for target in cited_ids(record) {
             if resolvable.read(target).is_some() {
                 continue;
             }
@@ -463,6 +463,24 @@ fn shadows(valid: &[&Record], resolvable: &Resolver<'_>, behind: &Resolver<'_>) 
         }
     }
     found
+}
+
+/// The ids a record names as a reader would follow them, each once and in
+/// the order the record names them: bare ids in its prose, then the records
+/// its `link` lines point at. One id named both ways is one edge, so it is
+/// one pair.
+fn cited_ids(record: &Record) -> Vec<&str> {
+    let mut seen = BTreeSet::new();
+    mention::mentions(record.file().body())
+        .into_iter()
+        .chain(
+            record
+                .file()
+                .field_entries("link")
+                .filter_map(|(link, _)| linked_record(link)),
+        )
+        .filter(|id| seen.insert(*id))
+        .collect()
 }
 
 /// Whether a record of the notebook behind this one is a rule still

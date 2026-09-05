@@ -1,12 +1,95 @@
 use crate::*;
 
 fn findings_for(storage: &mut MemoryStorage) -> Vec<(String, FindingCode)> {
+    findings_behind(storage, None)
+}
+
+/// [`findings_for`] with the user's notebook standing behind this one.
+fn findings_behind(
+    storage: &mut MemoryStorage,
+    user: Option<&dyn Storage>,
+) -> Vec<(String, FindingCode)> {
     Notebook::new(storage)
+        .with_user(user)
         .check()
         .unwrap()
         .into_iter()
         .map(|located| (located.path, located.finding.code))
         .collect()
+}
+
+mod the_users_notebook_behind_the_gate {
+    use crate::*;
+
+    fn users_notebook() -> MemoryStorage {
+        storage_with(&[
+            (
+                "notes/note.practice.md",
+                &record_file("note.practice", "note", "active", &[], ""),
+            ),
+            (
+                "decisions/decision.tabs.md",
+                &record_file("decision.tabs", "decision", "active", &[], ""),
+            ),
+        ])
+    }
+
+    /// A link points outward by nature, so a record the user's notebook
+    /// holds is within its reach: declaring the edge to a rule this project
+    /// stands against must not fail the gate.
+    #[test]
+    fn a_link_to_a_record_the_users_notebook_holds_is_no_dangling_ref() {
+        let user = users_notebook();
+        let mut storage = storage_with(&[(
+            "decisions/decision.spaces.md",
+            &record_file(
+                "decision.spaces",
+                "decision",
+                "active",
+                &["link: against decision.tabs", "link: note note.practice"],
+                "",
+            ),
+        )]);
+        assert_eq!(super::findings_behind(&mut storage, Some(&user)), vec![]);
+    }
+
+    /// The envelope edges are this notebook's own structure, and each must
+    /// be answered here: an origin in the user's home would key a clock on
+    /// a record no project verb can reach.
+    #[test]
+    fn an_origin_in_the_users_notebook_still_dangles() {
+        let user = users_notebook();
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &task_file("open", &["from: decision.tabs"]),
+        )]);
+        assert_eq!(
+            super::findings_behind(&mut storage, Some(&user)),
+            vec![("tasks/task.demo.md".to_owned(), FindingCode::DanglingRef)]
+        );
+    }
+
+    #[test]
+    fn a_users_notebook_that_cannot_be_read_leaves_the_gate_to_this_notebook_alone() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.spaces.md",
+            &record_file(
+                "decision.spaces",
+                "decision",
+                "active",
+                &["link: against decision.tabs"],
+                "",
+            ),
+        )]);
+        assert_eq!(
+            super::findings_behind(&mut storage, Some(&UnreadableNotebook)),
+            vec![(
+                "decisions/decision.spaces.md".to_owned(),
+                FindingCode::DanglingRef
+            )],
+            "a root that cannot answer vouches for nothing, and the gate still runs"
+        );
+    }
 }
 
 /// A finding quotes the value it condemns, and a hand can write a field
