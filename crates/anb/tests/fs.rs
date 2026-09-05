@@ -60,7 +60,7 @@ fn list_is_non_recursive_sorted_and_prefixed() {
 
 /// The root is the seam's whole universe, so a link out of it is not a
 /// record however sound its target: a file a project commits could
-/// otherwise decide what a later `view` prints.
+/// otherwise decide what a later `show` prints.
 #[cfg(unix)]
 #[test]
 fn a_symlink_is_no_record_of_the_notebook() {
@@ -521,7 +521,8 @@ mod the_users_notebook {
             first.path(),
             None,
             &[
-                "decide",
+                "add",
+                "decision",
                 "Rust for command-line tools",
                 "--id",
                 "decision.rust-for-clis",
@@ -554,7 +555,7 @@ mod the_users_notebook {
     fn the_same_note_reads_the_same_in_either_scope() {
         let home = TempDir::new().unwrap();
         let project = a_project();
-        let filed = ["note", "A shared practice", "--id", "note.practice"];
+        let filed = ["add", "note", "A shared practice", "--id", "note.practice"];
 
         served(
             &home,
@@ -569,9 +570,9 @@ mod the_users_notebook {
                 &home,
                 project.path(),
                 None,
-                &["view", "note.practice", "--global"]
+                &["show", "note.practice", "--global"]
             ),
-            served(&home, project.path(), None, &["view", "note.practice"]),
+            served(&home, project.path(), None, &["show", "note.practice"]),
             "the output contract does not know which scope it is reading"
         );
         assert_eq!(
@@ -597,7 +598,7 @@ mod the_users_notebook {
             &home,
             project.path(),
             None,
-            &["--json", "add", "Work with no project", "--global"],
+            &["--json", "add", "task", "Work with no project", "--global"],
         );
 
         assert!(!refused.status.success());
@@ -685,7 +686,7 @@ mod the_users_notebook {
             &home,
             project.path(),
             None,
-            &["add", "Work with a project", "--id", "task.work"],
+            &["add", "task", "Work with a project", "--id", "task.work"],
         );
         fs::write(home.path().join(".agent-notebook"), "not a notebook").unwrap();
 
@@ -720,7 +721,8 @@ mod the_users_notebook {
             project.path(),
             None,
             &[
-                "decide",
+                "add",
+                "decision",
                 "Indent with tabs",
                 "--id",
                 "decision.tabs",
@@ -736,7 +738,8 @@ mod the_users_notebook {
             project.path(),
             None,
             &[
-                "decide",
+                "add",
+                "decision",
                 "Indent with spaces here",
                 "--id",
                 "decision.spaces",
@@ -784,7 +787,7 @@ mod the_users_notebook {
             &home,
             project.path(),
             None,
-            &["add", "Work with a project", "--id", "task.work"],
+            &["add", "task", "Work with a project", "--id", "task.work"],
         );
         assert!(
             project
@@ -836,6 +839,7 @@ mod a_notebook_that_moved {
                 "--notebook",
                 ".tmp/from-the-flag",
                 "add",
+                "task",
                 "Named on the line",
             ],
         );
@@ -857,7 +861,11 @@ mod a_notebook_that_moved {
         let deep = project.path().join("crates/anb/src");
         fs::create_dir_all(&deep).unwrap();
 
-        anb(&project, ".tmp/private", &["add", "Filed from the root"]);
+        anb(
+            &project,
+            ".tmp/private",
+            &["add", "task", "Filed from the root"],
+        );
         let listed = anb_in(&deep, ".tmp/private", &["list"]);
 
         assert!(
@@ -873,7 +881,7 @@ mod a_notebook_that_moved {
     #[test]
     fn a_notebook_outside_any_repository_takes_the_cycle_too() {
         let loose = TempDir::new().unwrap();
-        anb(&loose, "notes", &["add", "No repository in sight"]);
+        anb(&loose, "notes", &["add", "task", "No repository in sight"]);
         anb(&loose, "notes", &["start", "task.no-repository-in-sight"]);
         anb(
             &loose,
@@ -893,7 +901,7 @@ mod a_notebook_that_moved {
         let project = a_project();
         let elsewhere = ".tmp/private-notebook";
 
-        anb(&project, elsewhere, &["add", "Work kept to myself"]);
+        anb(&project, elsewhere, &["add", "task", "Work kept to myself"]);
         anb(&project, elsewhere, &["start", "task.work-kept-to-myself"]);
         anb(
             &project,

@@ -27,16 +27,6 @@ pub fn render(reply: &Reply, today: &str) -> String {
             command,
             transition,
         } => transition_line(command, transition),
-        Reply::Routed { transition, to } => {
-            let mut out = transition_line("answer", transition);
-            let _ = writeln!(out, "routed-to: {to}");
-            out
-        }
-        Reply::Dropped(dropped) => {
-            let mut out = transition_line("answer", &dropped.transition);
-            dangling_mention_line(&mut out, &dropped.dangling_mentions);
-            out
-        }
         Reply::Closed(closed) => closed_lines(closed),
         Reply::Held { held, until } => {
             let outcome = match until {
@@ -83,8 +73,8 @@ pub fn render(reply: &Reply, today: &str) -> String {
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
         Reply::Archived(moved) => archive_lines(moved),
         Reply::Restored(moved) => restore_lines(moved),
-        Reply::Expunged(gone) => format!(
-            "ok: expunge {} — {} removed\n",
+        Reply::Deleted(gone) => format!(
+            "ok: delete {} — {} removed\n",
             gone.id,
             gone.paths.join(", ")
         ),
@@ -168,6 +158,9 @@ fn closed_lines(closed: &anb_core::Closed) -> String {
     let mut out = transition_line("close", &closed.transition);
     if let Some(note) = &closed.report_note {
         let _ = writeln!(out, "report: {note}");
+    }
+    if let Some(resolver) = &closed.resolved_by {
+        let _ = writeln!(out, "resolved-by: {resolver}");
     }
     dangling_mention_line(&mut out, &closed.dangling_mentions);
     named_line(&mut out, "unblocked", &closed.unblocked, ROW_BOUND, None);
@@ -487,7 +480,7 @@ fn truncation_hint(out: &mut String, total: usize, shown: usize, restore: &str) 
     }
 }
 
-/// An envelope line as `view` shows it: a record's own text, cut like
+/// An envelope line as `show` shows it: a record's own text, cut like
 /// every other reply's unless the caller asked for the record whole.
 fn field_value(value: &str, all: bool) -> String {
     if all {
@@ -511,7 +504,7 @@ fn single_record(view: &View, all: bool) -> String {
         &mut out,
         view.fields.len(),
         fields,
-        &format!("anb view {} --all", view.id),
+        &format!("anb show {} --all", view.id),
     );
     if view.archived {
         out.push_str("archived: true\n");
@@ -523,7 +516,7 @@ fn single_record(view: &View, all: bool) -> String {
                 indented(&mut out, head);
                 let _ = writeln!(
                     out,
-                    "  \u{2026} {dropped} more lines: anb view {} --all",
+                    "  \u{2026} {dropped} more lines: anb show {} --all",
                     view.id
                 );
                 indented(&mut out, tail);
@@ -540,7 +533,7 @@ fn single_record(view: &View, all: bool) -> String {
             label,
             ids,
             shown(ids.len(), all),
-            Some(&format!("anb view {} --all", view.id)),
+            Some(&format!("anb show {} --all", view.id)),
         );
     }
     out

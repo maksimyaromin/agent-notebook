@@ -1,12 +1,12 @@
 ---
 id: question.can-a-task-die-without-ever-being
 type: question
-state: routed
+state: closed
 title: Can a Task die without ever being started?
 by: Maksim Yaromin
 from: task.graph-lavish-loop
 tags: cli
-routed-to: task.close-drop-ends-a-task-without-work
+resolved-by: task.close-drop-ends-a-task-without-work
 created: 2026-08-31
 updated: 2026-09-02
 ---

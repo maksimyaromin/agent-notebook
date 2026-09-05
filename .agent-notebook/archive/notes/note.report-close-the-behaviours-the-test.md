@@ -1,12 +1,12 @@
 ---
 id: note.report-close-the-behaviours-the-test
 type: note
-state: active
+state: retired
 title: Report: Close the behaviours the test audit proved unguarded
 by: Maksim Yaromin
 from: task.close-the-behaviours-the-test-audit
 created: 2026-09-02
-updated: 2026-09-02
+updated: 2026-09-05
 ---
 
 # Report: closing the behaviours the test audit proved unguarded

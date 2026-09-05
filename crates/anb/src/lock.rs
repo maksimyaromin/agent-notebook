@@ -79,10 +79,7 @@ fn opened(root: &Path) -> std::io::Result<File> {
 /// record that must already be there, so against a notebook that does not
 /// exist it can only be refused.
 fn creates(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::Add(_) | Command::Decide(_) | Command::Note(_) | Command::Ask(_)
-    )
+    matches!(command, Command::Add(_))
 }
 
 /// Whether the command writes. A writing verb reads the records it needs,
@@ -97,25 +94,20 @@ fn writes(command: &Command) -> bool {
         | Command::Start { .. }
         | Command::Submit { .. }
         | Command::Close(_)
-        | Command::Return { .. }
         | Command::Reopen { .. }
         | Command::Hold { .. }
         | Command::Unhold { .. }
         | Command::Block { .. }
         | Command::Unblock { .. }
         | Command::Comment { .. }
-        | Command::Decide(_)
-        | Command::Note(_)
-        | Command::Ask(_)
-        | Command::Answer { .. }
         | Command::Retire { .. }
         | Command::Archive { .. }
         | Command::Restore { .. }
-        | Command::Expunge { .. }
+        | Command::Delete { .. }
         | Command::Edit(_) => true,
         Command::Ready { .. }
         | Command::List { .. }
-        | Command::View { .. }
+        | Command::Show { .. }
         | Command::Status { .. }
         | Command::Graph(_)
         | Command::Check { .. }

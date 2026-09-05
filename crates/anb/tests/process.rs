@@ -101,7 +101,7 @@ fn an_unknown_verb_answers_in_the_format_the_caller_asked_for() {
     assert_eq!(parsed["error"], "unknown-command");
 }
 
-/// A reader that stops early — `anb view <id> | head` — closes the pipe
+/// A reader that stops early — `anb show <id> | head` — closes the pipe
 /// mid-write. That is the reader's choice, not a failed command.
 #[test]
 fn a_reader_that_stops_early_ends_the_reply_quietly() {
@@ -121,7 +121,7 @@ fn a_reader_that_stops_early_ends_the_reply_quietly() {
     );
 
     let mut view = Command::new(env!("CARGO_BIN_EXE_anb"))
-        .args(["--notebook", root.to_str().unwrap(), "view", "task.big"])
+        .args(["--notebook", root.to_str().unwrap(), "show", "task.big"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

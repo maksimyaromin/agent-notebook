@@ -11,7 +11,8 @@ blocked-by: task.other-work
 title: Everything the table allows
 via: claude-code
 supersedes: task.old-demo
-routed-to: question.why-demo
+resolved-by: question.why-demo
+reason: a demo reason
 link: pr https://example.com/pull/7
 kind: feature
 priority: 3

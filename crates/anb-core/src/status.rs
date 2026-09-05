@@ -2,12 +2,12 @@
 //! records.
 //!
 //! Only synthesized, uninferable state enters — never prose, never
-//! instructions: counts, the in-flight Task with its last log line, review
+//! instructions: counts, the active Task with its last log line, review
 //! Tasks waiting on a human, standing rules, the ready top rows, where each
 //! epic stands, Debt. The gate keeps a quiet notebook to one line.
 //!
 //! Over Budget the sections collapse one rung at a time up [`Collapse`],
-//! and the first in-flight line survives every rung: no notebook, however
+//! and the first active line survives every rung: no notebook, however
 //! much it holds in flight, can make a Status grow without bound. Every
 //! dashboard ends with the budget line, which names what was cut and
 //! carries the command that restores it.
@@ -54,7 +54,7 @@ impl Budget {
     }
 }
 
-/// An active Task on the dashboard: the `in-flight:` line, plus the last
+/// An active Task on the dashboard: the `active:` line, plus the last
 /// log line for the one most recently touched.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveTask {
@@ -77,7 +77,7 @@ pub struct Status {
     pub text: String,
     pub quiet: bool,
     pub counts: Counts,
-    pub in_flight: Vec<ActiveTask>,
+    pub active: Vec<ActiveTask>,
     pub review: Vec<String>,
     pub rules: Vec<StatusRule>,
     pub ready: Vec<ReadyTask>,
@@ -91,7 +91,7 @@ pub struct Status {
 
 pub(crate) struct StatusInputs {
     pub counts: Counts,
-    pub in_flight: Vec<ActiveTask>,
+    pub active: Vec<ActiveTask>,
     pub review: Vec<String>,
     pub rules: Vec<StatusRule>,
     pub ready: Vec<ReadyTask>,
@@ -105,16 +105,14 @@ impl StatusInputs {
     /// dispatchable work, or decay. Review counts deliberately: a Task
     /// parked at acceptance is not a quiet notebook.
     fn has_signal(&self) -> bool {
-        !self.in_flight.is_empty()
+        !self.active.is_empty()
             || !self.review.is_empty()
             || !self.ready.is_empty()
             || !self.debt.is_empty()
     }
 
     fn has_log(&self) -> bool {
-        self.in_flight
-            .first()
-            .is_some_and(|task| task.log.is_some())
+        self.active.first().is_some_and(|task| task.log.is_some())
     }
 }
 
@@ -133,7 +131,7 @@ enum Collapse {
 
 /// The degradation ladder: each rung buys tokens by collapsing one
 /// section, ready rows first and then up [`Collapse`]; the floor keeps
-/// counts, the first in-flight line, and the budget line.
+/// counts, the first active line, and the budget line.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Ladder {
     ready_trimmed: usize,
@@ -169,12 +167,12 @@ impl Ladder {
             return None;
         }
         if self.reached(Collapse::Floor) {
-            // The floor keeps the counts line and the first in-flight
+            // The floor keeps the counts line and the first active
             // Task, so with nothing in flight it keeps the counts alone.
-            return Some(if inputs.in_flight.is_empty() {
+            return Some(if inputs.active.is_empty() {
                 "all but the counts".to_owned()
             } else {
-                "all but the first in-flight".to_owned()
+                "all but the first active".to_owned()
             });
         }
         let mut cuts = Vec::new();
@@ -230,7 +228,7 @@ fn status_from(inputs: StatusInputs, text: String, spent: u32, quiet: bool) -> S
         text,
         quiet,
         counts: inputs.counts,
-        in_flight: inputs.in_flight,
+        active: inputs.active,
         review: inputs.review,
         rules: inputs.rules,
         ready: inputs.ready,
@@ -294,7 +292,7 @@ fn budget_line(spent: u32, budget: Budget, cut: Option<&str>) -> String {
 
 fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> String {
     let mut out = format!("ok: notebook — {}\n", counts_phrase(&inputs.counts));
-    render_in_flight(&mut out, &inputs.in_flight, ladder);
+    render_active(&mut out, &inputs.active, ladder);
     if ladder.reached(Collapse::Floor) {
         return out;
     }
@@ -314,28 +312,23 @@ fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> Str
 /// What is in motion, and where the first of it stopped. The floor keeps
 /// that one line — a session cannot resume without it — and counts the
 /// rest.
-fn render_in_flight(out: &mut String, in_flight: &[ActiveTask], ladder: Ladder) {
+fn render_active(out: &mut String, active: &[ActiveTask], ladder: Ladder) {
     let shown = if ladder.reached(Collapse::Floor) {
         1
     } else {
         SECTION_ROWS
     }
-    .min(in_flight.len());
-    for task in in_flight.iter().take(shown) {
-        let _ = writeln!(
-            out,
-            "in-flight: {} {}",
-            task.id,
-            quoted_line_text(&task.title)
-        );
+    .min(active.len());
+    for task in active.iter().take(shown) {
+        let _ = writeln!(out, "active: {} {}", task.id, quoted_line_text(&task.title));
         if !ladder.reached(Collapse::Log)
             && let Some(log) = &task.log
         {
             let _ = writeln!(out, "log: {}", quoted_line_text(log));
         }
     }
-    if in_flight.len() > shown {
-        let _ = writeln!(out, "  \u{2026} {} more in flight", in_flight.len() - shown);
+    if active.len() > shown {
+        let _ = writeln!(out, "  \u{2026} {} more active", active.len() - shown);
     }
 }
 

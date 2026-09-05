@@ -1,13 +1,13 @@
 ---
 id: question.should-state-vs-residence-disagreement-b
 type: question
-state: routed
+state: closed
 title: Should state vs residence disagreement be a Check finding?
 by: Maksim Yaromin
 via: claude-code
 from: task.cli-check-archive-edit-search-overview
 tags: cli
-routed-to: task.check-finding-state-vs-residence-mismatc
+resolved-by: task.check-finding-state-vs-residence-mismatc
 created: 2026-08-29
 updated: 2026-08-29
 ---

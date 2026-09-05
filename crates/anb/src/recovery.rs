@@ -6,43 +6,46 @@ use crate::cli::Command;
 use anb_core::StorageError;
 use anb_core::encode::ROW_BOUND;
 use anb_core::path_stem;
-use anb_core::{Finding, NotebookError};
+use anb_core::{Finding, NotebookError, RecordType};
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 
-/// What a refusal can point back at: the verb and the record it named.
+/// What a refusal can point back at: the verb, the record it named, and
+/// for `add` the type it was creating.
 pub struct Subject {
     pub verb: &'static str,
     pub id: Option<String>,
+    pub record_type: Option<RecordType>,
 }
 
 /// The command's subject, taken before dispatch consumes the command.
 #[must_use]
 pub fn subject(command: &Command) -> Subject {
     let (verb, id) = match command {
-        Command::Add(_) => ("add", None),
+        Command::Add(args) => {
+            return Subject {
+                verb: "add",
+                id: None,
+                record_type: Some(args.record_type),
+            };
+        }
         Command::Start { id } => ("start", Some(id)),
         Command::Submit { id } => ("submit", Some(id)),
         Command::Close(args) => ("close", Some(&args.id)),
-        Command::Return { id } => ("return", Some(id)),
         Command::Reopen { id } => ("reopen", Some(id)),
         Command::Hold { id, .. } => ("hold", Some(id)),
         Command::Unhold { id } => ("unhold", Some(id)),
         Command::Block { id, .. } => ("block", Some(id)),
         Command::Unblock { id, .. } => ("unblock", Some(id)),
         Command::Comment { id, .. } => ("comment", Some(id)),
-        Command::Decide(_) => ("decide", None),
-        Command::Note(_) => ("note", None),
-        Command::Ask(_) => ("ask", None),
-        Command::Answer { id, .. } => ("answer", Some(id)),
         Command::Retire { id } => ("retire", Some(id)),
-        Command::View { id, .. } => ("view", Some(id)),
+        Command::Show { id, .. } => ("show", Some(id)),
         Command::Ready { .. } => ("ready", None),
         Command::List { .. } => ("list", None),
         Command::Status { .. } => ("status", None),
         Command::Check { .. } => ("check", None),
         Command::Archive { id } => ("archive", Some(id)),
         Command::Restore { id } => ("restore", Some(id)),
-        Command::Expunge { id } => ("expunge", Some(id)),
+        Command::Delete { id } => ("delete", Some(id)),
         Command::Edit(args) => ("edit", Some(&args.id)),
         Command::Search { .. } => ("search", None),
         Command::Graph(_) => ("graph", None),
@@ -51,6 +54,7 @@ pub fn subject(command: &Command) -> Subject {
     Subject {
         verb,
         id: id.cloned(),
+        record_type: None,
     }
 }
 
@@ -86,27 +90,34 @@ impl Recovery {
                 if target.starts_with("task.") {
                     recovery
                         .tries
-                        .push(format!("anb add \"<title>\" --id {target}"));
+                        .push(format!("anb add task \"<title>\" --id {target}"));
                 }
                 recovery.tries.push("anb list".to_owned());
             }
-            // `view` leads: it is right on every archived record, while
+            // `show` leads: it is right on every archived record, while
             // `restore` pulls settled history back into the working set —
             // right only when the reader means to.
             NotebookError::Archived { id } => {
-                recovery.tries.push(format!("anb view {id}"));
+                recovery.tries.push(format!("anb show {id}"));
                 recovery.tries.push(format!("anb restore {id}"));
             }
             NotebookError::WrongType { id, .. } => {
-                recovery.tries.push(format!("anb view {id}"));
+                recovery.tries.push(format!("anb show {id}"));
             }
             NotebookError::InvalidRecord { path, findings } => {
                 recovery.details = bounded(findings.iter().map(finding_line).collect());
-                recovery.tries.push(format!("anb view {}", path_stem(path)));
+                recovery.tries.push(format!("anb show {}", path_stem(path)));
             }
             NotebookError::InvalidTransition { id, valid, .. } => {
-                for action in valid {
-                    recovery.tries.extend(transition_retries(action, id));
+                // `close` and `close --reason` both offer the reason shape;
+                // one line suffices however many moves reach it.
+                for retry in valid
+                    .iter()
+                    .flat_map(|action| transition_retries(action, id))
+                {
+                    if !recovery.tries.contains(&retry) {
+                        recovery.tries.push(retry);
+                    }
                 }
             }
             NotebookError::StillReferenced { blockers, .. } => {
@@ -114,12 +125,12 @@ impl Recovery {
                 recovery.tries.extend(
                     anb_core::carriers_of(blockers)
                         .take(ROW_BOUND)
-                        .map(|carrier| format!("anb view {carrier}")),
+                        .map(|carrier| format!("anb show {carrier}")),
                 );
             }
             NotebookError::DuplicateId { id, .. } => {
-                recovery.tries.push(format!("anb view {id}"));
-                recovery.tries.push("anb add \"<title>\"".to_owned());
+                recovery.tries.push(format!("anb show {id}"));
+                recovery.tries.push("anb add task \"<title>\"".to_owned());
             }
             NotebookError::InvalidArgument { .. } => {
                 recovery.tries = argument_retries(subject);
@@ -167,21 +178,20 @@ fn bounded(details: Vec<String>) -> Vec<String> {
 #[must_use]
 pub fn runnable(verb: &str, id: Option<&str>) -> Option<Vec<String>> {
     let shapes = match (verb, id) {
+        ("close", Some(id)) if id.starts_with("question.") => vec![
+            format!("anb close {id} --resolved-by <id>"),
+            format!("anb close {id} --reason \"<why>\""),
+        ],
         ("close", Some(id)) => vec![
             format!("anb close {id} --note <path>"),
             format!("anb close {id} --no-proof"),
+            format!("anb close {id} --reason \"<why>\""),
         ],
-        ("answer", Some(id)) => vec![
-            format!("anb answer {id} --to <id>"),
-            format!("anb answer {id} --drop \"<why>\""),
-        ],
+        ("close --reason", Some(id)) => vec![format!("anb close {id} --reason \"<why>\"")],
         ("hold", Some(id)) => vec![format!("anb hold {id} --reason \"<why>\"")],
         ("comment", Some(id)) => vec![format!("anb comment {id} \"<one line>\"")],
         ("edit", Some(id)) => vec![format!("anb edit {id} --title \"<title>\"")],
-        ("add", _) => vec!["anb add \"<title>\"".to_owned()],
-        ("decide", _) => vec!["anb decide \"<title>\" --kind rule".to_owned()],
-        ("note", _) => vec!["anb note \"<title>\" --kind fact".to_owned()],
-        ("ask", _) => vec!["anb ask \"<title>\"".to_owned()],
+        ("add", _) => vec!["anb add task \"<title>\"".to_owned()],
         ("search", _) => vec!["anb search \"<text>\"".to_owned()],
         _ => return None,
     };
@@ -197,6 +207,9 @@ fn transition_retries(action: &str, id: &str) -> Vec<String> {
 /// carries what it was missing. A verb whose bare form already runs has
 /// nothing to offer — repeating what was just refused is no recovery.
 fn argument_retries(subject: &Subject) -> Vec<String> {
+    if let Some(record_type) = subject.record_type {
+        return vec![format!("anb add {} \"<title>\"", record_type.word())];
+    }
     runnable(subject.verb, subject.id.as_deref()).unwrap_or_default()
 }
 

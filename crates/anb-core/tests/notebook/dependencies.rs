@@ -1035,7 +1035,7 @@ mod epics {
     }
 
     #[test]
-    fn a_closed_hub_is_no_longer_an_epic_in_flight() {
+    fn a_closed_hub_is_no_longer_an_active_epic() {
         let mut storage = storage_with(&[
             (
                 "tasks/task.epic.md",

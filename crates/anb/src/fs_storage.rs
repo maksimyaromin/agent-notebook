@@ -6,7 +6,7 @@
 //!
 //! A symlink is never a record, wherever it points: the seam cannot vouch
 //! for a file it did not write, and following one would let a link
-//! committed to a project decide what a later reader's `view` prints.
+//! committed to a project decide what a later reader's `show` prints.
 
 use anb_core::{ARCHIVE_DIR, RecordType, Storage, StorageError};
 use std::ffi::OsStr;

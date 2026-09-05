@@ -1,7 +1,7 @@
 mod budget_ladder {
     use crate::*;
 
-    /// A notebook with every section populated: an in-flight Task with a
+    /// A notebook with every section populated: an active Task with a
     /// log, review work, rules, seven ready rows, an epic, and aged debt.
     fn full_notebook() -> MemoryStorage {
         let mut files: Vec<(String, String)> = vec![
@@ -68,7 +68,7 @@ mod budget_ladder {
     }
 
     /// A notebook whose every listing section overflows its bound: eight
-    /// Tasks in flight, eight waiting on a human, eight standing rules, and
+    /// active Tasks, eight waiting on a human, eight standing rules, and
     /// eight epics.
     fn crowded_notebook() -> MemoryStorage {
         let mut files: Vec<(String, String)> = Vec::new();
@@ -130,11 +130,11 @@ mod budget_ladder {
         assert_eq!(
             sections,
             "ok: notebook — 32 tasks, 8 decisions, 0 notes, 0 questions\n\
-             in-flight: task.flight0 \"A demo record\"\n\
-             in-flight: task.flight1 \"A demo record\"\n\
-             in-flight: task.flight2 \"A demo record\"\n\
-             in-flight: task.flight3 \"A demo record\"\n\
-             in-flight: task.flight4 \"A demo record\"\n  \u{2026} 3 more in flight\n\
+             active: task.flight0 \"A demo record\"\n\
+             active: task.flight1 \"A demo record\"\n\
+             active: task.flight2 \"A demo record\"\n\
+             active: task.flight3 \"A demo record\"\n\
+             active: task.flight4 \"A demo record\"\n  \u{2026} 3 more active\n\
              review[8]: task.waiting0, task.waiting1, task.waiting2, task.waiting3, \
              task.waiting4, \u{2026} 3 more — waiting on a human\n\
              rules[8]:\n\
@@ -171,7 +171,7 @@ mod budget_ladder {
     }
 
     #[test]
-    fn the_floor_keeps_one_in_flight_line_however_many_are_flying() {
+    fn the_floor_keeps_one_active_line_however_many_are_active() {
         let mut storage = crowded_notebook();
         let status = Notebook::new(&mut storage)
             .status(TODAY, Budget::Tokens(1), no_lost_proofs, None)
@@ -183,7 +183,7 @@ mod budget_ladder {
             status.text
         );
         assert!(
-            status.text.contains("  \u{2026} 7 more in flight\n"),
+            status.text.contains("  \u{2026} 7 more active\n"),
             "{}",
             status.text
         );
@@ -193,7 +193,7 @@ mod budget_ladder {
     fn an_unbounded_budget_prints_every_section_and_the_no_ceiling_line() {
         let full = rendered(Budget::Unbounded);
         for section in [
-            "in-flight: task.flight",
+            "active: task.flight",
             "log: \"- 2026-08-25 claude: stopped at the ladder\"",
             "review[1]: task.waiting — waiting on a human",
             "rules[1]:",
@@ -247,7 +247,7 @@ mod budget_ladder {
         let full = rendered(Budget::Unbounded);
         assert!(
             full.text.contains("epics[1]:\n  task.epic: 0/1 closed"),
-            "an epic whose only child is in flight has nothing ready: {}",
+            "an epic whose only child is active has nothing ready: {}",
             full.text
         );
 
@@ -398,8 +398,8 @@ mod budget_ladder {
                     status.text
                 );
                 assert!(
-                    !cut.contains("in-flight"),
-                    "no Task was in flight to keep at {ceiling}: {}",
+                    !cut.contains("active"),
+                    "no Task was active to keep at {ceiling}: {}",
                     status.text
                 );
             }
@@ -407,19 +407,19 @@ mod budget_ladder {
     }
 
     #[test]
-    fn the_floor_keeps_counts_in_flight_and_the_budget_line() {
+    fn the_floor_keeps_counts_the_active_line_and_the_budget_line() {
         let floor = rendered(Budget::Tokens(1));
         let lines: Vec<&str> = floor.text.lines().collect();
         assert_eq!(lines.len(), 3, "{}", floor.text);
         assert!(lines[0].starts_with("ok: notebook — "), "{}", floor.text);
         assert!(
-            lines[1].starts_with("in-flight: task.flight"),
+            lines[1].starts_with("active: task.flight"),
             "{}",
             floor.text
         );
         assert!(
             lines[2].starts_with(&format!(
-                "budget: ~{}/1 tokens; cut: all but the first in-flight",
+                "budget: ~{}/1 tokens; cut: all but the first active",
                 floor.spent
             )),
             "the floor ships over budget, reported honestly: {}",
