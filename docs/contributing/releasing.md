@@ -20,7 +20,7 @@ The Release workflow runs this check before publishing.
 A release is named by its date, `v2026.09.05`, and the packages carry their own version. Bump the package version only when the packages change; a release that ships the same packages again is refused by the registry, and the workflow runs to that point without harm.
 
 1. When the packages change, update `Cargo.toml` and every `packages/*/package.json`, including the launcher's `optionalDependencies`, and run the version check.
-2. Write the release's entry in `CHANGELOG.md` under a heading that ends with the tag, `## agent-notebook v2026.09.05`: a paragraph on what the release means for a user, then `New`, `Improved` and `Fixed` with the pull requests in parentheses, and the package version the release ships. The workflow refuses a tag without an entry; `sh scripts/release/changelog-notes.sh v<date>` prints the entry it will use.
+2. Write the release's entry in `CHANGELOG.md` under a heading that ends with the tag, `## anb v2026.09.05`: a paragraph on what the release means for a user, then `New`, `Improved` and `Fixed` with the pull requests in parentheses, and the package version the release ships. The workflow refuses a tag without an entry; `sh scripts/release/changelog-notes.sh v<date>` prints the entry it will use.
 3. Merge through a pull request, then push `v<date>` on the merged commit.
 4. Inspect the Release workflow. It builds the platform binaries, creates the GitHub release named after the tag with one archive per platform, a `SHA256SUMS` file and the changelog entry as its notes, checks that the manifests agree and smoke-tests the launcher with the Linux binary. It publishes the platform packages before the launcher.
 
