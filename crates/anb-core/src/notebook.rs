@@ -66,11 +66,27 @@ struct IngestedReport {
 
 pub struct Notebook<'a> {
     storage: &'a mut dyn Storage,
+    /// The user's notebook standing behind this one, read and never
+    /// written — the shared reference keeps that a fact of the type. An id
+    /// it holds is no dangling citation and no dangling `link` target, and
+    /// its standing rules are what a project rule shadows. `None` names no
+    /// such root; a root that cannot be read counts as one, since a second
+    /// notebook is consulted for a hint and never fails a write or the gate.
+    user: Option<&'a dyn Storage>,
 }
 
 impl<'a> Notebook<'a> {
     pub fn new(storage: &'a mut dyn Storage) -> Self {
-        Notebook { storage }
+        Notebook {
+            storage,
+            user: None,
+        }
+    }
+
+    /// The same notebook with the user's own standing behind it.
+    #[must_use]
+    pub fn with_user(self, user: Option<&'a dyn Storage>) -> Self {
+        Notebook { user, ..self }
     }
 
     /// Read one record by id, live or archived.
@@ -270,7 +286,6 @@ impl<'a> Notebook<'a> {
         today: &str,
         budget: Budget,
         settle: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
-        user: Option<&dyn Storage>,
     ) -> Result<Status, NotebookError> {
         let today_day = write::guarded_day(today)?;
         let thresholds = self.config()?.debt_thresholds();
@@ -283,7 +298,7 @@ impl<'a> Notebook<'a> {
             .collect();
 
         let lost = settle(&query::cited_proofs(records));
-        let behind = user_scope(user);
+        let behind = user_scope(self.user);
         let sources = DebtSources {
             records,
             resolvable: &resolvable,
@@ -1576,17 +1591,27 @@ impl<'a> Notebook<'a> {
     }
 
     /// The write-time half of the quotation rule: the bare ids `text` cites
-    /// that resolve to no record, live or archived. A nudge for the reply,
-    /// never a gate — a forward reference is legal and the text lands as
-    /// given.
+    /// that neither this notebook nor the user's holds, live or archived. A
+    /// nudge for the reply, never a gate — a forward reference is legal and
+    /// the text lands as given.
     fn dangling_mentions(&self, text: &str) -> Result<Vec<String>, NotebookError> {
         let mut dangling = Vec::new();
         for target in mention::mentions(text) {
-            if self.holder_path(target)?.is_none() {
+            if self.holder_path(target)?.is_none() && !self.user_holds(target) {
                 dangling.push(target.to_owned());
             }
         }
         Ok(dangling)
+    }
+
+    /// Whether the user's notebook holds `id` at a canonical path. A root
+    /// that cannot answer holds nothing: the hint is dropped, the write goes
+    /// on.
+    fn user_holds(&self, id: &str) -> bool {
+        let Some(user) = self.user else {
+            return false;
+        };
+        canonical_paths(id).any(|path| user.exists(&path).unwrap_or(false))
     }
 
     fn guard_ref_exists(&self, field: &'static str, target: &str) -> Result<(), NotebookError> {
@@ -1745,11 +1770,12 @@ fn read_live_corpus(storage: &dyn Storage) -> Result<Corpus, NotebookError> {
 /// The user's notebook standing behind a project's, read by the same rules
 /// as any other: its live records, and the ids its archive holds.
 ///
-/// A second root is read for a hint on somebody else's dashboard, so a root
-/// that cannot be read leaves the hint out instead of taking that dashboard
-/// down. What is wrong with that notebook is what a `check` against it
-/// reports.
-fn user_scope(user: Option<&dyn Storage>) -> Corpus {
+/// A second root is read for a hint on somebody else's dashboard, a nudge
+/// in somebody else's reply, or the reach of a `link` in somebody else's
+/// gate, so a root that cannot be read leaves the hint out instead of
+/// taking those down. What is wrong with that notebook is what a `check`
+/// against it reports.
+pub(super) fn user_scope(user: Option<&dyn Storage>) -> Corpus {
     user.and_then(|storage| read_live_corpus(storage).ok())
         .unwrap_or_else(Corpus::empty)
 }
@@ -1782,7 +1808,7 @@ fn read_records_in(storage: &dyn Storage, dir: &str) -> Result<Vec<Record>, Note
 /// The records one query reads, beside the ids the archive holds. The two
 /// are separate because they cost differently: a record is a file opened,
 /// an archived id is a name in a listing.
-struct Corpus {
+pub(super) struct Corpus {
     records: Vec<Record>,
     archived: BTreeSet<String>,
     archive: Counts,

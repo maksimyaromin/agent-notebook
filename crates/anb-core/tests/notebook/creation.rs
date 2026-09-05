@@ -624,6 +624,78 @@ mod conflict_nudge {
 mod mention_nudge {
     use crate::*;
 
+    /// The user's notebook standing behind the project's: one Note, one
+    /// standing Decision.
+    fn users_notebook() -> MemoryStorage {
+        storage_with(&[
+            (
+                "notes/note.practice.md",
+                &record_file("note.practice", "note", "active", &[], ""),
+            ),
+            (
+                "decisions/decision.tabs.md",
+                &record_file("decision.tabs", "decision", "active", &[], ""),
+            ),
+        ])
+    }
+
+    #[test]
+    fn a_body_citing_a_record_the_users_notebook_holds_warns_nothing() {
+        let user = users_notebook();
+        let mut storage = MemoryStorage::new();
+        let mut draft = Draft::new(RecordType::Decision, "Spaces here");
+        draft.body =
+            "Against decision.tabs, following note.practice; task.ghost is unwritten.".to_owned();
+        let created = Notebook::new(&mut storage)
+            .with_user(Some(&user))
+            .create(&draft, TODAY)
+            .unwrap();
+        assert_eq!(
+            created.dangling_mentions,
+            vec!["task.ghost"],
+            "what either notebook holds is no dangling citation; what neither holds still is"
+        );
+    }
+
+    #[test]
+    fn a_comment_citing_a_record_the_users_notebook_holds_warns_nothing() {
+        let user = users_notebook();
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let reply = Notebook::new(&mut storage)
+            .with_user(Some(&user))
+            .comment("task.demo", None, "follows note.practice", TODAY)
+            .unwrap();
+        assert_eq!(reply.dangling_mentions, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_close_reason_citing_a_record_the_users_notebook_holds_warns_nothing() {
+        let user = users_notebook();
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
+        let closed = Notebook::new(&mut storage)
+            .with_user(Some(&user))
+            .close_with_reason("task.demo", "settled by decision.tabs", TODAY)
+            .unwrap();
+        assert_eq!(closed.dangling_mentions, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_users_notebook_that_cannot_be_read_drops_the_hint_and_fails_no_write() {
+        let mut storage = MemoryStorage::new();
+        let mut draft = Draft::new(RecordType::Task, "A demo record");
+        draft.body = "Follows note.practice.".to_owned();
+        let created = Notebook::new(&mut storage)
+            .with_user(Some(&UnreadableNotebook))
+            .create(&draft, TODAY)
+            .unwrap();
+        assert_eq!(
+            created.dangling_mentions,
+            vec!["note.practice"],
+            "a root that cannot answer vouches for nothing"
+        );
+        assert!(storage.read(&created.path).is_ok(), "the write went on");
+    }
+
     #[test]
     fn a_body_citing_no_record_warns_in_the_reply_and_still_lands() {
         let mut storage = MemoryStorage::new();

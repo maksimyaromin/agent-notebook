@@ -382,6 +382,20 @@ mod task_cycle {
     }
 
     #[test]
+    fn a_report_citing_a_record_the_users_notebook_holds_carries_no_nudge() {
+        let user = storage_with(&[(
+            "notes/note.practice.md",
+            &record_file("note.practice", "note", "active", &[], ""),
+        )]);
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let closed = Notebook::new(&mut storage)
+            .with_user(Some(&user))
+            .close_with_report("task.demo", "follows note.practice\n", None, TODAY)
+            .unwrap();
+        assert_eq!(closed.dangling_mentions, Vec::<String>::new());
+    }
+
+    #[test]
     fn a_report_citing_an_unwritten_id_carries_the_quotation_nudge() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let closed = Notebook::new(&mut storage)
