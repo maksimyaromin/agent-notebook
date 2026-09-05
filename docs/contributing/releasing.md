@@ -18,8 +18,9 @@ Pass a tag as an argument to check it against the package versions too. The Rele
 ## Publish a release
 
 1. Update `Cargo.toml` and every `packages/*/package.json`, including the launcher's `optionalDependencies`. Run the version check.
-2. Merge through a pull request, then push `v<version>` on the merged commit.
-3. Inspect the Release workflow. It builds the platform binaries, packages them, checks versions against the tag and smoke-tests the launcher with the Linux binary. It publishes the platform packages before the launcher.
+2. Regenerate `CHANGELOG.md` from the commits: `pnpm dlx git-cliff --tag v<version> -o CHANGELOG.md`; its configuration lives in `Cargo.toml`. The workflow refuses a tag without an entry, and `sh scripts/release/changelog-notes.sh v<version>` prints the entry it will use.
+3. Merge through a pull request, then push `v<version>` on the merged commit.
+4. Inspect the Release workflow. It builds the platform binaries, creates the GitHub release for the tag with one archive per platform, a `SHA256SUMS` file and the changelog entry as its notes, checks versions against the tag and smoke-tests the launcher with the Linux binary. It publishes the platform packages before the launcher.
 
 The repository variable `RELEASE_DRY_RUN` controls publication. Unless its value is `false`, the workflow runs without publishing to npm.
 
