@@ -5,7 +5,7 @@ description: 'Project memory in plain files, with explicit lifecycles and a smal
 
 An agent learns more about a project as it works: which approach failed, why a constraint matters, where an investigation stopped. That knowledge is useful beyond the session that produced it. Keeping it usable means knowing what still applies, what was replaced, and what remains unresolved.
 
-agent notebooks gives that memory a reliable interface. The `anb` CLI owns the record rules and reports the result of each operation. Skills describe how an agent uses those operations to work. This separation lets you change the process without asking the agent to reimplement the bookkeeping.
+agent-notebook gives that memory a reliable interface. The `anb` CLI owns the record rules and reports the result of each operation. Skills describe how an agent uses those operations to work. This separation lets you change the process without asking the agent to reimplement the bookkeeping.
 
 ## The method is separate from the rules
 

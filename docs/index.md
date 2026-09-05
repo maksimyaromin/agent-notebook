@@ -1,5 +1,5 @@
 ---
-title: agent notebooks
+title: agent-notebook
 description: 'A dependable CLI for agent working memory, with skills you can make your own.'
 template: splash
 hero:
@@ -15,7 +15,7 @@ hero:
 
 The effort you put into working with an agent should outlast the conversation. Its findings should be usable by the next session, and its decisions should remain clear when the work changes direction. You should be able to choose a different agent or a different process and keep that accumulated knowledge.
 
-agent notebooks provides a deterministic CLI for that memory and skills for working with it. The CLI checks changes and returns concise, structured results. The skills describe the method, and you can rewrite them. A shared notebook committed with the project, private notes outside git, or a workflow of your own all use the same record rules.
+agent-notebook provides a deterministic CLI for that memory and skills for working with it. The CLI checks changes and returns concise, structured results. The skills describe the method, and you can rewrite them. A shared notebook committed with the project, private notes outside git, or a workflow of your own all use the same record rules.
 
 At the start of a session, the agent reads a summary:
 
