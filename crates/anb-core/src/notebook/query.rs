@@ -14,7 +14,7 @@ use crate::record::{REF_KEYS, Record, RecordType, TaskState, linked_record};
 use crate::reply::{Blocker, Cited, CitedProof, Counts, Epic, GraphNode, ListedRecord, ReadyTask};
 use crate::request::Draft;
 use crate::resolve::{Resolver, is_archived, path_stem, type_of};
-use crate::status::{ActiveTask, StatusRule};
+use crate::status::{ActiveTask, HeldTask, StatusRule};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Every proof these records cite that names something outside the
@@ -518,15 +518,41 @@ pub(super) fn live_counts(records: &[Record]) -> Counts {
     }))
 }
 
-/// The active Tasks, the most recently touched first: the dashboard's
-/// active lines, the first carrying the last log line — the mechanical
-/// "where I stopped".
+/// The live Tasks on hold, in id order: each with the reason it waits for
+/// and the day it resumes on, when one was set. A closed Task still
+/// carrying its hold line is settled work, not something that waits.
+pub(super) fn held_tasks(live_valid: &[&Record]) -> Vec<HeldTask> {
+    let mut held: Vec<&Record> = live_valid
+        .iter()
+        .copied()
+        .filter(|record| {
+            record.record_type() == Some(RecordType::Task)
+                && record.is_live()
+                && record.hold().is_some()
+        })
+        .collect();
+    held.sort_by(|left, right| path_stem(left.path()).cmp(path_stem(right.path())));
+    held.iter()
+        .map(|record| HeldTask {
+            id: path_stem(record.path()).to_owned(),
+            reason: encode::bounded_text(record.hold().unwrap_or_default().to_owned()),
+            until: record.hold_until().map(str::to_owned),
+        })
+        .collect()
+}
+
+/// The active Tasks not on hold, the most recently touched first: the
+/// dashboard's active lines, the first carrying the last log line — the
+/// mechanical "where I stopped". A held one is paused on purpose and is
+/// not where a session resumes; [`held_tasks`] names it instead.
 pub(super) fn active_tasks(live_valid: &[&Record]) -> Vec<ActiveTask> {
     let mut active: Vec<&Record> = live_valid
         .iter()
         .copied()
         .filter(|record| {
-            record.record_type() == Some(RecordType::Task) && record.state() == Some("active")
+            record.record_type() == Some(RecordType::Task)
+                && record.state() == Some("active")
+                && record.hold().is_none()
         })
         .collect();
     active.sort_by(|left, right| {
