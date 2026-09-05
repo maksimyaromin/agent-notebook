@@ -3,7 +3,7 @@ mod status_dashboard {
 
     fn status_text(storage: &mut MemoryStorage) -> String {
         Notebook::new(storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap()
             .text
     }
@@ -79,7 +79,7 @@ mod status_dashboard {
             let sound = record_file(id, type_word, state, extra, "");
             let mut storage = storage_with(&[(path, &sound)]);
             let seen = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+                .status(TODAY, Budget::Unbounded, no_lost_proofs)
                 .unwrap();
             let named: Vec<&str> = seen
                 .active
@@ -97,7 +97,7 @@ mod status_dashboard {
             let broken = record_file(id, type_word, state, &broken_lines, "");
             let mut storage = storage_with(&[(path, &broken)]);
             let seen = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+                .status(TODAY, Budget::Unbounded, no_lost_proofs)
                 .unwrap();
             assert_eq!(seen.active, vec![], "{case}");
             assert_eq!(seen.review, Vec::<String>::new(), "{case}");
@@ -168,7 +168,7 @@ mod status_dashboard {
     fn the_dashboard_opens_on_a_task_waiting_for_a_human_alone() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("review", &[]))]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
         assert!(!status.quiet, "{}", status.text);
         assert!(
@@ -182,7 +182,7 @@ mod status_dashboard {
     fn the_dashboard_opens_on_ready_work_alone() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
         assert!(!status.quiet);
         assert!(
@@ -200,7 +200,7 @@ mod status_dashboard {
             "---\nid: question.demo\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n",
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
         assert!(!status.quiet);
         assert!(
@@ -217,7 +217,7 @@ mod status_dashboard {
             &record_file("decision.demo", "decision", "active", &["kind: rule"], ""),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
         assert!(
             status.quiet,
@@ -360,12 +360,8 @@ mod debt_signals {
     /// [`debt_of`] with the user's notebook standing behind this one.
     fn debt_behind(storage: &mut MemoryStorage, user: Option<&MemoryStorage>) -> Vec<DebtSignal> {
         Notebook::new(storage)
-            .status(
-                TODAY,
-                Budget::Unbounded,
-                no_lost_proofs,
-                user.map(|user| user as &dyn Storage),
-            )
+            .with_user(user.map(|user| user as &dyn Storage))
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap()
             .debt
     }
@@ -378,7 +374,8 @@ mod debt_signals {
     fn debt_behind_storage(storage: &mut MemoryStorage, user: &dyn Storage) -> Vec<String> {
         lines_of(
             &Notebook::new(storage)
-                .status(TODAY, Budget::Unbounded, no_lost_proofs, Some(user))
+                .with_user(Some(user))
+                .status(TODAY, Budget::Unbounded, no_lost_proofs)
                 .unwrap()
                 .debt,
         )
@@ -755,7 +752,7 @@ mod debt_signals {
             ),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
         assert_eq!(
             status.debt,
@@ -819,7 +816,7 @@ mod debt_signals {
             ),
         ]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
         let pairs: Vec<&DebtSignal> = status
             .debt
@@ -1045,7 +1042,7 @@ mod debt_signals {
             &record_file("note.demo", "note", "active", &[], &format!("{body}\n")),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs, None)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
         assert_eq!(status.debt.len(), 6, "the model keeps every signal");
         assert_eq!(
@@ -1086,15 +1083,10 @@ mod debt_signals {
         ]);
         let mut offered = Vec::new();
         Notebook::new(&mut storage)
-            .status(
-                TODAY,
-                Budget::Unbounded,
-                |cited| {
-                    offered = cited.to_vec();
-                    Vec::new()
-                },
-                None,
-            )
+            .status(TODAY, Budget::Unbounded, |cited| {
+                offered = cited.to_vec();
+                Vec::new()
+            })
             .unwrap();
         assert_eq!(
             offered,
@@ -1129,7 +1121,7 @@ mod debt_signals {
             ),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, <[CitedProof]>::to_vec, None)
+            .status(TODAY, Budget::Unbounded, <[CitedProof]>::to_vec)
             .unwrap();
         assert_eq!(
             status.debt,
@@ -1167,7 +1159,7 @@ mod debt_signals {
         }];
         assert!(
             Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, |_| lost.clone(), None)
+                .status(TODAY, Budget::Unbounded, |_| lost.clone())
                 .unwrap()
                 .debt
                 .iter()
@@ -1283,6 +1275,55 @@ mod debt_signals {
                 debt_lines(&mut project, Some(&user)),
                 vec!["shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)"],
                 "the project rule leads: it is the one this repository follows"
+            );
+        }
+
+        /// The edge a project rule declares to the user's is a link, since
+        /// the envelope edges must be answered by this notebook; a shadow
+        /// surfaces from it as from a citation in prose.
+        #[test]
+        fn a_project_rule_linking_the_users_own_names_the_pair_too() {
+            let user = storage_with(&[(
+                "decisions/decision.tabs.md",
+                &rule("decision.tabs", "active", "Reader", ""),
+            )]);
+            let mut project = storage_with(&[(
+                "decisions/decision.spaces.md",
+                &record_file(
+                    "decision.spaces",
+                    "decision",
+                    "active",
+                    &["by: Teammate", "link: against decision.tabs"],
+                    "",
+                ),
+            )]);
+            assert_eq!(
+                debt_lines(&mut project, Some(&user)),
+                vec!["shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)"]
+            );
+        }
+
+        /// One rule named in prose and declared as a link is one edge to the
+        /// user's, so it is one pair, not two.
+        #[test]
+        fn a_rule_cited_in_prose_and_linked_names_the_pair_once() {
+            let user = storage_with(&[(
+                "decisions/decision.tabs.md",
+                &rule("decision.tabs", "active", "Reader", ""),
+            )]);
+            let mut project = storage_with(&[(
+                "decisions/decision.spaces.md",
+                &record_file(
+                    "decision.spaces",
+                    "decision",
+                    "active",
+                    &["by: Teammate", "link: against decision.tabs"],
+                    &cites("decision.tabs"),
+                ),
+            )]);
+            assert_eq!(
+                debt_lines(&mut project, Some(&user)),
+                vec!["shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)"]
             );
         }
 
@@ -1474,37 +1515,6 @@ mod debt_signals {
                 alone,
                 "the hint is left out, and nothing else changes"
             );
-        }
-
-        /// A root that is there and cannot be served: a medium that names
-        /// no missing file, only a failure.
-        struct UnreadableNotebook;
-
-        impl Storage for UnreadableNotebook {
-            fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
-                Err(Self::failure(dir))
-            }
-
-            fn read(&self, path: &str) -> Result<String, StorageError> {
-                Err(Self::failure(path))
-            }
-
-            fn write(&mut self, path: &str, _content: &str) -> Result<(), StorageError> {
-                Err(Self::failure(path))
-            }
-
-            fn remove(&mut self, path: &str) -> Result<(), StorageError> {
-                Err(Self::failure(path))
-            }
-        }
-
-        impl UnreadableNotebook {
-            fn failure(path: &str) -> StorageError {
-                StorageError::Io {
-                    path: path.to_owned(),
-                    detail: "the medium answered nothing".to_owned(),
-                }
-            }
         }
     }
 }

@@ -46,6 +46,17 @@ fn run_with(
     line: &[&str],
     read_report: &dyn Fn(&str) -> Result<String, StorageError>,
 ) -> Result<String, String> {
+    run_behind(storage, None, line, read_report)
+}
+
+/// [`run_with`] against a project whose user's notebook, when one is given,
+/// stands behind it.
+fn run_behind(
+    storage: &mut MemoryStorage,
+    user_notebook: Option<&dyn anb_core::Storage>,
+    line: &[&str],
+    read_report: &dyn Fn(&str) -> Result<String, StorageError>,
+) -> Result<String, String> {
     let mut args = vec!["anb"];
     args.extend_from_slice(line);
     let cli = Cli::try_parse_from(args).expect("the test drives a well-formed command line");
@@ -55,7 +66,7 @@ fn run_with(
         git_by: || Some(GIT_IDENTITY.to_owned()),
         read_report,
         lost_proofs: &nothing_lost,
-        user_notebook: None,
+        user_notebook,
         today: TODAY,
     };
     match execute(cli.command, storage, host) {
@@ -3388,5 +3399,70 @@ mod the_global_scope {
             .map(clap::Command::get_name)
             .collect();
         assert_eq!(placed, surface);
+    }
+}
+
+/// The user's notebook stands behind every surface of the project's, not
+/// only its Status: what it holds is no dangling citation in a reply and
+/// no dangling link under the gate.
+mod the_users_notebook_behind_every_surface {
+    use super::*;
+
+    fn users_notebook() -> MemoryStorage {
+        storage_with(&[(
+            "decisions/decision.tabs.md".to_owned(),
+            record_file(
+                "decision.tabs",
+                "decision",
+                "active",
+                "Tabs",
+                &["by: Reader"],
+                "",
+            ),
+        )])
+    }
+
+    #[test]
+    fn recording_the_rule_that_shadows_a_global_one_is_nudged_about_nothing() {
+        let user = users_notebook();
+        let mut storage = MemoryStorage::new();
+        let reply = run_behind(
+            &mut storage,
+            Some(&user),
+            &[
+                "add",
+                "decision",
+                "Spaces here",
+                "--body",
+                "This repository decides otherwise, against decision.tabs.",
+            ],
+            &missing_report,
+        )
+        .expect("the command must succeed");
+        assert_eq!(
+            reply, "ok: add decision.spaces-here — decisions/decision.spaces-here.md\n",
+            "the same fact Status names as a shadow is no dangling mention at the write"
+        );
+    }
+
+    #[test]
+    fn a_link_to_a_global_rule_passes_the_gate() {
+        let user = users_notebook();
+        let mut storage = storage_with(&[(
+            "decisions/decision.spaces.md".to_owned(),
+            record_file(
+                "decision.spaces",
+                "decision",
+                "active",
+                "Spaces here",
+                &["link: against decision.tabs"],
+                "",
+            ),
+        )]);
+        assert_eq!(
+            run_behind(&mut storage, Some(&user), &["check"], &missing_report)
+                .expect("the command must succeed"),
+            "count: 0\n"
+        );
     }
 }

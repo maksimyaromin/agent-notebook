@@ -79,6 +79,38 @@ impl Storage for RemoveFails {
     }
 }
 
+/// A root that is there and cannot be served: a medium that names no
+/// missing file, only a failure. What a notebook read behind another does
+/// with it is what every case posing it asks.
+struct UnreadableNotebook;
+
+impl Storage for UnreadableNotebook {
+    fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
+        Err(Self::failure(dir))
+    }
+
+    fn read(&self, path: &str) -> Result<String, StorageError> {
+        Err(Self::failure(path))
+    }
+
+    fn write(&mut self, path: &str, _content: &str) -> Result<(), StorageError> {
+        Err(Self::failure(path))
+    }
+
+    fn remove(&mut self, path: &str) -> Result<(), StorageError> {
+        Err(Self::failure(path))
+    }
+}
+
+impl UnreadableNotebook {
+    fn failure(path: &str) -> StorageError {
+        StorageError::Io {
+            path: path.to_owned(),
+            detail: "the medium answered nothing".to_owned(),
+        }
+    }
+}
+
 /// [`MemoryStorage`] holds strings, so the adapter's duty is simulated:
 /// the marked paths answer reads with [`StorageError::NotUtf8`].
 struct BinaryHolding {
