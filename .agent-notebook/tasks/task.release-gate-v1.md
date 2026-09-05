@@ -21,6 +21,8 @@ blocked-by: task.readme-the-page-a-stranger-reads-first
 blocked-by: task.docs-site-full-usable-published-on
 blocked-by: task.commit-history-carries-no-agent
 blocked-by: task.agents-md-rewritten-for-a-public
+blocked-by: task.public-text-carries-no-internal
+blocked-by: task.skills-common-mistakes-that-are-real-and
 created: 2026-08-29
 updated: 2026-09-05
 ---
