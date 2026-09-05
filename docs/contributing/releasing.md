@@ -1,28 +1,36 @@
 ---
 title: Releasing
-description: 'How a version reaches npm: one version everywhere, a tag, the Release workflow, and the first publish from a maintainer’s machine.'
+description: 'Build and publish the native binaries and npm launcher with matching versions.'
 ---
 
-The command ships on npm as `@supolka/agent-notebook`, a shim package whose `bin/anb.js` hands the command line to a binary that arrives as an optional dependency, one package per platform: `@supolka/agent-notebook-darwin-arm64`, `-darwin-x64`, `-linux-x64`, `-linux-arm64` and `-win32-x64`. Nothing is downloaded and nothing runs at install time, and `npx -y @supolka/agent-notebook` works from zero.
+The npm package `@supolka/agent-notebook` supplies the `anb` launcher. It selects a native binary from an optional platform dependency. The packages cover macOS and Linux on x64 and arm64, and Windows on x64. npm downloads the packages during installation; no postinstall script fetches a binary.
 
-## One version everywhere
+## Keep versions together
 
-The Cargo workspace version is the version of every npm package and of the pins the shim puts on its platform packages. `scripts/release/check-versions.sh` fails when any of them disagree, and with a tag as its argument when the tag disagrees too. The Release workflow runs it before publishing.
+The Cargo workspace, every npm package and the launcher's platform dependency pins use the same version. Check them before releasing:
 
-## A release
+```sh
+sh scripts/release/check-versions.sh
+```
 
-1. Set the version in `Cargo.toml` and in every `packages/*/package.json`, including the shim's `optionalDependencies`; run `sh scripts/release/check-versions.sh` until it answers `ok`.
-2. Merge through a pull request, then push the tag `v<version>` on the merged commit.
-3. The Release workflow builds the binary on five runners, places each in its platform package, checks the versions against the tag, runs the shim against the Linux binary, and publishes the platform packages first and the shim last. While the repository variable `RELEASE_DRY_RUN` holds anything but `false`, every step runs and nothing reaches the registry.
+Pass a tag as an argument to check it against the package versions too. The Release workflow runs this check before publishing.
 
-## The first publish
+## Publish a release
 
-Trusted Publishing needs the packages to exist on the registry, so the first publish of a new package is made from a maintainer's machine:
+1. Update `Cargo.toml` and every `packages/*/package.json`, including the launcher's `optionalDependencies`. Run the version check.
+2. Merge through a pull request, then push `v<version>` on the merged commit.
+3. Inspect the Release workflow. It builds the platform binaries, packages them, checks versions against the tag and smoke-tests the launcher with the Linux binary. It publishes the platform packages before the launcher.
 
-1. Push the tag and let the workflow build. Note its run id.
-2. `sh scripts/release/fetch-binaries.sh <run-id>` downloads the five binaries into the platform packages.
-3. `sh scripts/release/publish.sh` runs a dry run of every package; `sh scripts/release/publish.sh --publish` publishes.
+The repository variable `RELEASE_DRY_RUN` controls publication. Unless its value is `false`, the workflow runs without publishing to npm.
 
-The script's header says what it needs and how it authenticates; it publishes the platform packages before the shim and refuses to publish as anyone but the account it expects.
+## Bootstrap a package
 
-After that first publish, a Trusted Publisher on npm for this repository and the `release.yml` workflow, and `RELEASE_DRY_RUN` set to `false`, let the workflow publish by OIDC with no secret. Provenance statements are generated once the repository is public; the workflow derives the setting from the repository's visibility.
+The release process uses a local publish to create packages before configuring Trusted Publishing:
+
+1. Push the tag and wait for the workflow's build artifacts. Record the run id.
+2. Run `sh scripts/release/fetch-binaries.sh <run-id>` to download binaries into the platform packages.
+3. Run `sh scripts/release/publish.sh` to inspect a dry run, then `sh scripts/release/publish.sh --publish` to publish.
+
+The publish script documents its authentication inputs and checks the expected npm account. It publishes platform packages first so the launcher can resolve its dependencies.
+
+After the initial publish, configure each package's Trusted Publisher for this repository and `release.yml`, then set `RELEASE_DRY_RUN` to `false`. The workflow uses OIDC for publication and enables provenance when the repository is public.

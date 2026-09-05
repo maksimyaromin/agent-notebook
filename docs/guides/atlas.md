@@ -1,28 +1,42 @@
 ---
 title: Drawing the notebook
-description: 'The graph anb serves as data, and the atlas skill that draws it into one page where a reader decides by pointing.'
+description: 'Explore dependencies and project history in an interactive map, then send comments back to the agent.'
 ---
 
-The CLI serves the notebook as data and draws nothing. Whoever wants a picture builds one from the data, in the shape the question needs; a page for "pick the next Task" is not the page for "show me the whole notebook", and only the asker knows which one they wanted.
+Ask your agent to draw the notebook when a list no longer answers the question. A map can show what blocks a release, how an epic divides into work, or where a Decision came from. The `anb-atlas` skill installed by `anb setup` teaches the agent to build that view from the CLI's graph data.
 
-## The graph
+## Ask for the view you need
 
-`anb graph` answers with the records and the edges between them, on any slice:
+"Show what is blocking the parser epic" and "show the whole notebook, including finished work" need different amounts of context. Name the question when asking for a map. The agent selects the graph slice and builds an interactive HTML file with the data embedded.
 
-| Question | Command |
+You can open a record beside the map to read its body and relationships. Filters narrow the view, and completed and archived work remain visually distinct. The page identifies the command that produced its data, so you can reproduce the view or ask for a fresh one.
+
+## Review on the map
+
+Leave comments on individual records or on the view as a whole, then return the batch to the agent. It translates the comments into notebook commands and reports the result of each. For example, a comment asking to pause a Task needs a reason before it can become `anb hold`.
+
+The page never writes record files. It is a snapshot you can keep or share; changes go through `anb`, with the same checks as any other command. Ask for a new map after changes if you need the updated state.
+
+## Get the graph directly
+
+`anb graph --json` supplies data for your own renderer too:
+
+| View | Command |
 |---|---|
-| the whole notebook, archive included | `anb --json graph --archive --full --all` |
-| one epic's branch | `anb --json graph --for <hub> --full --all` |
-| what can start now | `anb --json graph --ready --full --all` |
-| around one record | `anb --json graph --focus <id> --depth 2 --full --all` |
-| one kind of record | `anb --json graph --type task --full --all` |
+| Whole notebook, including the archive | `anb graph --json --archive --full` |
+| One epic | `anb graph --json --for <hub> --full` |
+| Ready work | `anb graph --json --ready --full` |
+| Neighbors of one record | `anb graph --json --focus <id> --depth 2 --full` |
+| Tasks | `anb graph --json --type task --full` |
 
-The JSON carries `v`, the format version; `slice`, every narrowing that made the document; `nodes`, each with `id`, `type`, `state`, `ready`, `archived`, `degree`, `created`, `title`, a Task's `priority` when it has one, a hub's `epic` progress, and under `--full` the envelope and body; and `edges` of three kinds. `waits` runs out of the record that must settle first into the one waiting on it; `born` runs out of the origin into the record born from it; `mentions` runs the way it was written. The plain text is bounded like every listing; the JSON never is, because a drawing made from some of the edges is a picture of a notebook that does not exist.
+Graph JSON is never truncated. `--all` is only needed to remove bounds from the plain text rendering. `--full` includes record envelopes and bodies; omit it when ids, titles and state are enough.
 
-## The atlas skill
+The document contains `v` for the format version, `slice` for the query, `nodes` and `edges`. Nodes include identity, type, state, readiness, archive status, degree, creation date and title. Tasks may include priority, and hubs include epic progress.
 
-The `anb-atlas` skill, installed by `anb setup` beside the `anb` skill, carries what a good page needs: one command as the whole input, printed under the map with the slice it made; one self-contained file with the data embedded, no library and nothing fetched; one visual channel per fact (kind by hue, settled by fill, archived by opacity, degree by radius, relation by stroke); beside the map one narrow column and nothing more, a find box, the legends that are the filters, the arrangement; a page that opens with names readable; a web for a notebook and a ranked stack for one branch; finished work drawn distinct and hubs carrying `closed/total`; a record that opens beside the map in a side panel on its body and relations, never in a covering modal; and the layout lessons that cost the most to learn, from pointer capture to label placement.
+| Edge | Direction |
+|---|---|
+| `waits` | The prerequisite points to the Task waiting on it |
+| `born` | The origin points to the record created from it |
+| `mentions` | The citing record points to the cited record |
 
-The page is where the reader decides, and the CLI is where the notebook changes. Comments made on the page are addressed to a record id or to the slice, come back to the agent as one batch, and become one command each, run through `anb` and reported per comment. Nothing writes the notebook from the page.
-
-Read the skill itself in the repository under `.agents/skills/anb-atlas/`, or install it into any project with `anb setup`.
+The CLI defines the graph; the skill defines the presentation and review workflow. Its installed files contain the layout guidance for agents building a page.

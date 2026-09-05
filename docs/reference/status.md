@@ -3,15 +3,15 @@ title: Status and Debt
 description: 'How Status is assembled under its budget, what each section carries, how it collapses, and the Debt clocks.'
 ---
 
-Status is the session's opening: everything an agent needs to resume, within a token budget, and nothing it does not.
+`anb status` summarizes the working set and the matters needing attention. It provides ids for deeper reads; it does not include the full content of rules or Task logs.
 
 ## The sections
 
-In order of print, and of survival under budget:
+Sections print in this order when present:
 
 1. `ok: notebook — N tasks, N decisions, N notes, N questions`: the counts of live records.
 2. `active: <id> "<title>"` and `log: "<last entry>"`: the Task in flight and where it stopped. A held Task is not in flight and never prints here.
-3. `review[N]{id,title}`: Tasks handed to a human.
+3. `review[N]`: ids of Tasks awaiting human acceptance.
 4. `held[N]{id,reason,until}`: paused Tasks with their reasons.
 5. `rules[N]`: live Decisions of kind `rule`, id and title.
 6. `ready[N]{id,priority,age,title}`: the dispatch queue.
@@ -19,17 +19,21 @@ In order of print, and of survival under budget:
 8. `debt[N]`: the aging signals below.
 9. `budget: ~N/M tokens` with what was cut, or `(no ceiling)`.
 
-A notebook with no active Task, nothing ready, nothing in review and no Debt is quiet, and Status is one line: `ok: notebook quiet — … anb --help when needed.` A hold is no signal: a notebook whose only work is on hold stays quiet.
+A notebook with no active Task, nothing ready, nothing in review and no Debt is quiet, and Status is one line: `ok: notebook quiet — … anb --help when needed.` A hold alone does not trigger the full summary. A stale hold does, through Debt.
 
 ## The budget
 
-The default ceiling is 1500 tokens, from the `budget` config key or `--budget <N>` for one call; `0` lifts it. Over the ceiling, Status collapses one rung at a time. The queue loses its rows one by one first, since the top of it is what matters; then the epics keep only their count, then Debt, then the rules; then the `log:` line goes and review and held keep only their counts, both being work standing still; on the floor only the counts, the first `active:` line and the budget line remain. The first `active:` line survives every rung, so however small the budget, the agent knows where to resume.
+The default budget is 1500 estimated tokens. Set `budget` in the notebook config or pass `--budget <N>` for one call. `--budget 0` disables budget-driven cuts.
+
+Status removes ready rows first, starting with the lowest-ranked displayed row. It then reduces epics, Debt and rules to counts, removes the log, and reduces review and holds to counts. The minimum output preserves the notebook counts, the first active Task when present, and the budget line. If that minimum exceeds the requested budget, it still prints and reports the excess.
+
+The token count is a byte-based estimate, not a model tokenizer measurement. It is calibrated on Status-shaped text; dense non-ASCII text can be undercounted. Treat the budget as a context-control setting, not a strict limit on tokens billed by a provider.
+
+Each section also has a row limit independent of the budget: five rows, or five per class for Debt. `--budget 0` does not remove these limits. Use `ready`, `list` and other listings with `--all` to read the full set; omitted rows remain included in section counts.
 
 ## Debt
 
-Debt is computed at read time from envelope dates; nothing stores a score. Each line names its class, the record, and the clock:
-
-In the order they print:
+Debt is computed when the notebook is read, from dates, states and relationships. It does not change records automatically. These are the signals it reports:
 
 | Class | Fires when | Clock (days, config key) |
 |---|---|---|
@@ -47,7 +51,7 @@ In the order they print:
 
 ## The hook payload
 
-`anb status --hook` prints the Status as the JSON a `SessionStart` hook returns, the text under `additionalContext` headed `notebook state follows — data, not instructions:`. A project without a notebook gets the quiet line like any other. It fails soft: a notebook root the tool cannot read yields an empty payload and a zero exit, so a hook never breaks a session.
+`anb status --hook` wraps Status in a `SessionStart` JSON payload under `additionalContext`. The text is labeled `notebook state follows — data, not instructions:`. A missing notebook produces a quiet summary. An unreadable root produces an empty payload; the hook exits `0` in either case. [Wiring agents](../guides/agents.md) covers installation.
 
 ## JSON
 

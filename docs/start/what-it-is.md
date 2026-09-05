@@ -1,31 +1,53 @@
 ---
 title: What it is
-description: 'The problem a notebook solves, the four kinds of record, and the rules the tool holds so that nobody has to.'
+description: 'Project memory in plain files, with explicit lifecycles and a small session-start summary.'
 ---
 
-A coding agent starts every session from nothing. The code it wrote is there, the tests are there, but which task was in flight and where it stopped, the decision that overruled the plan last week, the fact about the deployment it learned the hard way, the doubt it put aside: all of that lived in a conversation that is gone. People solve this with a file. A `TODO.md`, a `NOTES.md`, a `.tmp/state/` directory. The file grows until reading it costs more than it saves, nobody knows which lines are still true, and an agent that edits it by hand corrupts it sooner or later.
+An agent learns more about a project as it works: which approach failed, why a constraint matters, where an investigation stopped. That knowledge is useful beyond the session that produced it. Keeping it usable means knowing what still applies, what was replaced, and what remains unresolved.
 
-agent notebooks is that file made durable: a **notebook** in the repository, `.agent-notebook/`, holding typed **records** with lifecycles, and a CLI named `anb` that is the only thing that changes them.
+agent notebooks gives that memory a reliable interface. The `anb` CLI owns the record rules and reports the result of each operation. Skills describe how an agent uses those operations to work. This separation lets you change the process without asking the agent to reimplement the bookkeeping.
 
-## Four kinds of record
+## The method is separate from the rules
 
-| Record | What it holds | Lifecycle |
+The supplied skill is a complete workflow you can start using and then adapt. It teaches agents to resume an active Task, log progress, record findings, and close with proof before archiving. It prefers one Task in flight. The CLI permits several and leaves archiving to the caller.
+
+You can rewrite that skill, supply your own, or drive the CLI directly. A team might add a review stage or use a different convention for decomposing work. Those choices change the instructions; state transitions, dependency checks and reply shapes remain the tool's responsibility.
+
+Storage is a separate choice too. By default, the first record write creates `.agent-notebook/` at the repository root. Commit it to share the history, ignore it to keep working notes private, or select another location. Git integration, the global notebook and maps extend the ways you can use the records; the CLI does not require them.
+
+## Record what changes the next step
+
+| Record | Purpose | Lifecycle |
 |---|---|---|
-| Task | a piece of work with a log | open → active → review → closed |
-| Decision | a ruling that stands until replaced | active → superseded or retired |
-| Note | knowledge kept current in place | active → retired |
-| Question | a doubt with an origin, waiting for its answer | open → closed |
+| Task | Work, dependencies and a progress log | open → active → review → closed |
+| Decision | A ruling and its reason | active → superseded or retired |
+| Note | Knowledge kept current in place | active → retired |
+| Question | An uncertainty with an origin and an eventual answer | open → closed |
 
-Every record is one markdown file: an envelope of `key: value` lines the tool owns, then a body it never parses. Every record has an id an agent can type, `task.parser-accepts-fenced-bodies`, minted from its title. A closed or retired record moves into `archive/`, where it keeps its bytes and its id; nothing is deleted by a lifecycle move. The [records reference](../reference/records.md) has every key and state.
+A Task log tells the next session where to resume. Decisions distinguish the rules that still apply from the ones you replaced. Questions keep an investigation visible until it has an answer. Notes collect facts and practices worth using again.
+
+Records have readable ids such as `task.parser-accepts-fenced-bodies`. Use those ids to connect the work to its context: create a Question `--from` a Task, cite a Decision in a log entry, or close a Task with its report. The notebook derives a graph from these relationships. Finished records move to an archive that remains searchable.
 
 ## Three rules
 
-**The files are the truth.** There is no index, no database, no daemon. What is in `.agent-notebook/` is the notebook, and it travels with git like any other file. You can open a record in your editor and fix a title; `anb check` reads every file and names each line it cannot accept, so a hand edit never silently drops a record.
+### The files are the truth
 
-**One tool changes them.** Agents never edit record files. Every change is a command, and a command refuses what would break the notebook: a Task cannot close without a proof or an explicit waiver, a Question cannot close without saying what settled it or why it is moot, a dependency edge that would form a cycle is refused when written. The rules live in the tool, so they bind every agent and every person equally, and nobody has to police them.
+Each record has a small envelope of typed fields followed by a Markdown body. The CLI reads the files directly, without a database, index or daemon. A clone can include both the code and the context behind it. Git is optional: you can also ignore the notebook or store it outside the repository.
 
-**Every reply is cheap to read.** An agent parses the reply at a glance: `ok: <verb> <id> — <what changed>`, tables that name their columns once, refusals as `error[<code>]: <message>` followed by `try:` lines that run as printed. Listings are bounded; `--all` lifts the bound and `--json` gives the same data as JSON. Status fits a token budget and says what it cut. The [replies reference](../reference/replies.md) is the whole contract.
+Human readability does not require permissive parsing. `anb check` reports invalid files with their locations and repair commands. A malformed record remains visible as a finding. The [format reference](../reference/records.md) specifies the envelope and preservation rules.
 
-## What the tool does not decide
+### One tool changes them
 
-The tool keeps a record's invariants. It does not run your team's workflow. Whether one Task is active at a time, whether a closed Task is archived at once, how a report is written: those are practices, and they belong to the skill an agent loads, not to the CLI. The `anb` skill the binary renders teaches one opinionated process; a team that works differently writes its own and drives the same commands. [Wiring agents](../guides/agents.md) shows where the skill comes from and how it is installed.
+Agents use commands to change records. The CLI rejects invalid state transitions and dependency cycles. Closing work requires evidence, an explicit waiver, or a reason the work will not happen. Replacing a Decision updates its predecessor too.
+
+These checks apply regardless of which agent runs the command. They verify the recorded outcome; they cannot judge whether a report proves the work or whether a design choice is sound. That judgment stays with the people and agents doing the work.
+
+### Read only what the session needs
+
+`anb status` summarizes active work, rules, ready Tasks and signs of neglected work. Its configurable budget limits how much context the summary consumes. It reports omissions so the agent can request more. `anb show` opens one record, and scoped queries follow one branch of work.
+
+Replies use short text tables and stable refusal codes, with `--json` for programs. The [reply contract](../reference/replies.md) describes the shapes; [Status and Debt](../reference/status.md) explains the budget and its limits.
+
+## Start with the supplied workflow
+
+`anb setup` installs the skills and agent integrations. The [quickstart](quickstart.md) demonstrates their workflow through the CLI. [Wiring agents](../guides/agents.md) explains how to keep your own version of the skills and choose a notebook location.

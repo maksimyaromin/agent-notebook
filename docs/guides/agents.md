@@ -1,47 +1,53 @@
 ---
 title: Wiring agents
-description: 'What anb setup writes for Claude Code, Codex, Pi and any agent that reads AGENTS.md, and where the skills come from.'
+description: 'Install the notebook instructions, session-start hooks and skills, or adapt them to your workflow.'
 ---
 
-One command wires a project. Run it in the project's root, and run it again after an upgrade: it patches in place.
+Run `anb setup` in the project root after installing `anb` on your PATH. Setup installs instructions and skills so agents can use the notebook, plus session-start hooks for Claude Code and Codex. Run it again after an upgrade to refresh the managed files.
 
-```
-$ anb setup
-ok: setup — 18 files
-  AGENTS.md: written
-  CLAUDE.md: written
-  .claude/settings.json: written
-  .codex/hooks.json: written
-  .claude/skills/anb/SKILL.md: written
-  ...
-notice: Codex runs a project hook after you review it: run /hooks in Codex from this directory
+```sh
+anb setup
 ```
 
-## What it writes
+The reply lists each file and whether it was written, already present, or left alone. Setup does not create the notebook itself; the first `anb add` does that.
 
-| File | What setup puts there | Who reads it |
-|---|---|---|
-| `AGENTS.md` | one descriptive line between markers: the notebook exists, `anb status` shows its state, `anb --help` the commands | Codex, Pi, OpenCode and any agent that reads `AGENTS.md` |
-| `CLAUDE.md` | the same line, unless the file already links `AGENTS.md` or imports it with a bare `@AGENTS.md` line | Claude Code, which reads `CLAUDE.md` and not `AGENTS.md` |
-| `.claude/settings.json` | a `hooks.SessionStart` group running `anb status --hook` with a 15-second timeout, beside any group another tool has | Claude Code |
-| `.codex/hooks.json` | the same group in the same shape | Codex, after you trust the project and review the hook with `/hooks` |
-| `.claude/skills/anb/`, `.agents/skills/anb/` | the `anb` skill: `SKILL.md` and three references | Claude Code from `.claude/skills/`; Codex and Pi from `.agents/skills/` |
-| `.claude/skills/anb-atlas/`, `.agents/skills/anb-atlas/` | the atlas skill: drawing the notebook and the intent loop | the same |
+## What setup writes
 
-Every file is read and judged before the first is written, so a refusal leaves the project as it was: a settings file that is not JSON, or an instruction file with a stray marker, refuses the whole run. A file that is a link to somewhere else is left alone and reported. Each file's line says what happened to it: `written`, `already`, `removed`, `absent`, `a link, left alone`, `yours, left alone`, or for a `CLAUDE.md` that already reaches `AGENTS.md`, `links AGENTS.md` or `imports AGENTS.md`.
+| File | Contents |
+|---|---|
+| `AGENTS.md` | A marked instruction block pointing to `anb status` and `anb --help` |
+| `CLAUDE.md` | The same block, unless the file already links to or imports `AGENTS.md` |
+| `.claude/settings.json` | A `SessionStart` hook running `anb status --hook` with a 15-second timeout |
+| `.codex/hooks.json` | The corresponding Codex hook |
+| `.claude/skills/anb/`, `.agents/skills/anb/` | The workflow skill, command reference, worked session and refusal reference |
+| `.claude/skills/anb-atlas/`, `.agents/skills/anb-atlas/` | The skill for drawing and reviewing the notebook |
 
-`anb setup --remove` takes out what setup put in and nothing else: other tools' lines and hook groups survive, and a skill directory goes only when setup emptied it.
+Setup adds its hook beside existing hook groups. It validates the files before writing: invalid JSON or an unmatched instruction marker causes a refusal before those changes are applied. Symlinks are reported and left alone, including an existing `CLAUDE.md` link to `AGENTS.md`.
 
-## The hook
+## Enable the session hook
 
-The `SessionStart` hook runs `anb status --hook`, which prints the Status wrapped as additional context for the model and fails soft: a notebook root the tool cannot read yields an empty payload and a zero exit. Claude Code runs a project hook as soon as it is in `.claude/settings.json`. Codex runs a project hook only after the project is trusted in its configuration and the hook is reviewed with `/hooks`; setup prints that notice, since the step is yours.
+For Codex, trust the project in its configuration and review the installed hook with `/hooks`. Setup prints a reminder. Claude Code uses the hook in `.claude/settings.json`.
 
-## The skills
+The hook gives the model Status as additional context. If the notebook root cannot be read, it returns an empty payload and exits successfully. Hook failure therefore does not prevent the session from starting. To inspect the notebook directly, run `anb status`.
 
-The `anb` skill teaches the method: open from Status, resume the active Task or take the next ready one, log as you go, file every friction as a record, close with a proof, archive in the same breath, close Questions when they settle, hold with a reason, leave the notebook clean. Its three references carry the depth an agent opens on demand: every command with its flags, a worked session with every reply as printed, and every refusal code with its repair.
+For an agent without a compatible hook, make `anb status` the opening command in its instructions. An agent that reads `AGENTS.md` can find that command there. Point it to the installed `anb` skill for the workflow; the CLI itself needs only shell access.
 
-The skill is not written by hand. The binary renders `SKILL.md` and the references from the same definitions that print `--help`, and produces every example by running the command on a scratch notebook, so what agents are taught cannot drift from what the tool does. `anb skill` prints it; `anb skill <dir>` writes it; `anb skill <dir> --check` compares a directory with the rendering and fails on any difference, which is how this repository's committed copy is held in CI.
+## The supplied workflow
 
-The atlas skill is written by hand and carried in the binary. It teaches an agent to draw a notebook from `anb graph --json` into one page and to turn the reader's comments on that page into commands; [Drawing the notebook](atlas.md) is the summary.
+The `anb` skill teaches agents to resume the active Task or select ready work, log progress, record Decisions and Questions, and close with proof before archiving. It keeps one Task in flight, groups larger work into epics, and requires a reason for a hold. By default, the agent checks the notebook before stopping and commits it with the code it describes. Maintaining the notebook is part of the agent's work. Detailed command and refusal references are separate files, so the agent can load them when needed.
 
-A skill file you edit becomes yours. Both skills carry `managed-by: anb` in their frontmatter; drop that line and setup reports the file as `yours, left alone`, rewriting nothing and removing nothing from then on. A team that works differently overrides the process this way, or writes its own skill and drives the same commands; the CLI carries no opinion.
+The binary generates the workflow skill and references. Command definitions also supply `--help`, and worked examples run against a scratch notebook during generation. CI compares the committed skill with that output. This checks command and example drift; the authored workflow guidance still needs review when behavior changes.
+
+```sh
+anb skill                       # print the skill
+anb skill path/to/skill          # write it to a directory
+anb skill path/to/skill --check  # fail if the directory differs
+```
+
+The `anb-atlas` skill is authored separately and bundled with the binary. It uses graph data to build an interactive page and routes review comments back through the CLI. See [Drawing the notebook](atlas.md).
+
+## Customize or remove the integration
+
+[Make the workflow yours](customization.md) gives complete recipes for a private notebook in `.tmp/xxx`, another storage location, custom skills and a review stage. Remove `managed-by: anb` from each skill file you maintain yourself; setup then reports it as `yours, left alone` during updates and removal.
+
+`anb setup --remove` removes managed instructions, hooks and skill files. Other tools' instruction text and hook groups remain, and a skill directory is removed only if it is empty. The notebook records are not removed.

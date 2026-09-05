@@ -1,11 +1,11 @@
 ---
 title: Records and files
-description: 'The four record types with their states and envelope keys, the file format a person reads and the tool round-trips, and the layout under .agent-notebook.'
+description: 'Record fields, lifecycles, file preservation and notebook configuration.'
 ---
 
 ## The file
 
-A record is one markdown file: a `---`-fenced envelope of single-line `key: value` fields the tool owns, then a body the tool never parses.
+Each record is a Markdown file with a `---`-fenced envelope of single-line `key: value` fields followed by a body. The envelope stores state and relationships; the body contains prose and log entries.
 
 ```markdown
 ---
@@ -23,7 +23,9 @@ closed: 2026-09-05
 - 2026-09-05 Alex: fences parse; the indented-body case is next
 ```
 
-The envelope looks like YAML frontmatter and is not YAML: each value is typed by its key, never guessed from its shape, so `state: no` cannot become a boolean. Parsing is total: any input parses into a file whose rendering reproduces the input byte for byte, and what the grammar cannot accept becomes a named finding rather than a dropped byte. A Task's body is its log, one line per entry; every other body is prose.
+The envelope uses its own line grammar, not YAML. Each key defines the allowed value; `state: no` is an invalid state, not a boolean. Parsing and rendering unchanged input preserves its bytes, including malformed lines. Validation reports those lines as findings instead of discarding them.
+
+Commands update the fields they own. The grammar preserves the body as text; separate queries scan it for record mentions and the latest Task log entry. Use `anb` to change records, and run `anb check` after an external edit or merge.
 
 ## Envelope keys
 
@@ -48,7 +50,7 @@ The envelope looks like YAML frontmatter and is not YAML: each value is typed by
 | `created`, `updated`, `closed` | dates | `created` required | the tool, on every write |
 | `review-by` | a date | any | `edit --review-by`: the explicit resurfacing date |
 
-A key on a type it does not belong to is an `orphan-field` finding. Dates mean notebook time: the day the tool wrote the line.
+A key on a type it does not belong to is an `orphan-field` finding. Creation, update and closure dates record when the notebook learned or changed something. Put dates from project history in the body. Scheduling fields such as `review-by` and `hold-until` name future actions.
 
 ## The lifecycles
 
@@ -75,13 +77,15 @@ stateDiagram-v2
     }
 ```
 
-A Note has two states, `active` and `retired`: `retire` ends it, and a successor added with `--supersedes` retires it too, writing `superseded-by` on the old one. A Task also carries two computed conditions the state does not: **held**, while a `hold` line stands, and **blocked**, while any Task it waits on is not closed. `ready` is open, unblocked and unheld.
+Notes are `active` or `retired`. `retire` ends a Note; adding a successor with `--supersedes` also retires the predecessor and writes its `superseded-by` field.
 
-Closing carries one of seven: `--note`, `--pr`, `--sha`, `--report`, `--no-proof`, `--reason`, or for a Question `--resolved-by`. A close with none is refused; the message names all seven and the `try:` lines offer the three most common.
+Tasks can be held or blocked independently of their lifecycle state. A `hold` field makes a Task held; an unresolved dependency makes it blocked. `ready` selects open Tasks that are neither held nor blocked.
+
+Closing a completed Task requires `--note`, `--pr`, `--sha`, `--report` or `--no-proof`. `--reason` ends a Task without completing it, including from open. Questions close with `--resolved-by` or `--reason`. See [Tasks](../guides/tasks.md#closing-with-a-proof) for proof selection.
 
 ## Ids
 
-An id is `<type>.<slug>`, the slug `[a-z0-9-]+`, minted from the title and shortened to whole words. Ids are unique across the working set and the archive, and never reused by a lifecycle move; only `delete`, for a record born by mistake, frees one.
+Ids use `<type>.<slug>`, with a slug matching `[a-z0-9-]+`. `add` derives one from the title and shortens it at word boundaries, or accepts an explicit `--id`. Ids are unique across the working set and archive. Lifecycle moves preserve them; `delete` frees the id of a record created by mistake.
 
 ## The layout
 
@@ -100,11 +104,11 @@ An id is `<type>.<slug>`, the slug `[a-z0-9-]+`, minted from the title and short
     questions/
 ```
 
-`archive` moves a settled record into `archive/<type>/` and carries the report Notes linked to it; `restore` moves it back. A live record found in the archive, or a settled one left live, is a check finding, and the finding names the move that repairs it.
+`archive` moves a settled record into the corresponding directory under `archive/` and archives its linked report Notes. `restore` returns an archived record to the working set without changing its state. `check` reports a mismatch between state and location and names the appropriate move.
 
 ## Configuration
 
-`.agent-notebook/config` holds `key: value` lines; every key has a default, and a line the tool cannot read falls back to it with a warning in `check`.
+`.agent-notebook/config` uses `key: value` lines. Omitted settings use the defaults below. Invalid settings produce warnings in `check` and fall back to their defaults.
 
 | Key | Default | Meaning |
 |---|---|---|

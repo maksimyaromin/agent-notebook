@@ -1,58 +1,72 @@
 ---
 title: Decisions, Notes and Questions
-description: 'Rulings that stand until replaced, knowledge kept current in place, doubts that close by naming what settled them, and how citations are checked.'
+description: 'Record what the project knows, distinguish current rules from old ones, and resolve open questions.'
 ---
 
-Three record types hold what a project knows rather than what it does.
+Choose the record by how the information changes. A ruling needs an explicit replacement, a fact needs correction, and a question needs an answer. Keeping them separate lets the notebook show what still applies.
 
 ## Decisions
 
-A Decision is a ruling. It carries a kind: `rule` for how we work, `shape` for a design ruling, `drift` for a deviation that stands until superseded.
+Record a Decision when a choice should guide later work. Include the reason: the next reader needs to know the constraint behind the choice, especially when that constraint changes.
 
-```
+```text
 $ anb add decision "Fences never nest" --kind rule --tag parser --tag grammar --body "A fence closes at the first closing marker."
 ok: add decision.fences-never-nest — decisions/decision.fences-never-nest.md
 ```
 
-Rules print in every Status, so the project's standing rules apply without anyone reading the log. A Decision is never edited into a different ruling; it is replaced: `anb add decision "<title>" --supersedes <old>` writes the new one and flips the old to `superseded` in the same move, and `anb retire <id>` ends one that has no successor. A dead rule cannot be read as live.
+Use `rule` for working rules, `shape` for design decisions, and `drift` for an accepted deviation. Status includes active `rule` Decisions by id and title, subject to its display limits. Open the record to read the reason.
 
-When a new Decision shares ground with a live one, the reply says so:
+When the ruling changes, use `anb add decision "<title>" --supersedes <old>`. The command links the records and marks the predecessor `superseded`. Use `anb retire <id>` when a Decision no longer applies and has no replacement. Editing a Decision is for corrections to the same ruling, not for replacing it with another.
 
-```
+### Possible conflicts
+
+A new Decision may overlap an existing one:
+
+```text
 $ anb add decision "A fence body is opaque" --kind rule --tag parser --tag grammar
 ok: add decision.a-fence-body-is-opaque — decisions/decision.a-fence-body-is-opaque.md
 may-conflict[1]: decision.fences-never-nest (Alex)
 ```
 
-The nudge fires at write time when the new Decision shares two or more tags with a live one, or cites it in its body, and it stops there: the writing agent, holding the full context, is the cheapest judge that will ever see the pair. Read the named Decision before going on, and supersede it if yours replaces it. Status keeps a `may-conflict` Debt line only for a pair where one cites the other and neither supersedes, since a shared tag is a hint and a citation is a claim.
+The tool reports a possible conflict when Decisions share at least two tags or the new one cites an active Decision. It does not compare their meaning. Read the named record and decide whether the new ruling replaces it.
+
+Status keeps a `may-conflict` Debt signal for a citation between active Decisions without a supersession relationship. Shared tags alone trigger the write-time hint, not persistent Debt.
 
 ## Notes
 
-A Note is curated knowledge, kinds `fact`, `term` and `guide`. Unlike a Decision it is corrected in place with `anb edit`, because a fact that changed is the same fact, updated. A `term` defines a word of the project's domain language, so an agent names things the way the project does. A report ingested by `anb close --note` is a Note too, born from the Task it closes.
+Use a Note for knowledge you want to maintain: `fact` for an observation, `term` for a domain definition, `guide` for a practice. Correct it with `anb edit <id> --body "<text>"` as your understanding changes. Retire it when it is no longer useful.
+
+A report imported with `anb close --note` is also a Note, linked to the Task it documents. This keeps the evidence accessible through the same commands as the work.
 
 ## Questions
 
-A Question is a doubt parked without widening the Task that met it:
+Record a Question when work exposes an uncertainty that deserves its own resolution:
 
-```
+```text
 $ anb add question "Do fences nest?" --from task.parser-accepts-fenced-bodies
 ok: add question.do-fences-nest — questions/question.do-fences-nest.md
 ```
 
-It closes by naming what settled it, `anb close <question> --resolved-by <decision-or-task>`, or by saying why it no longer applies, `anb close <question> --reason "<why>"`. A Question cannot close any other way, so it cannot rot open unnoticed: an open Question older than its clock surfaces as Debt, and a Question whose origin Task closed surfaces at once.
+Use `anb close <question> --resolved-by <decision-or-task>` when a record answers it. Use `anb close <question> --reason "<why>"` when it closes without such a record. A Question cannot close without one of these outcomes.
+
+Open Questions become Debt after their age threshold. If the origin Task closes first, the Question surfaces immediately. The reminder asks you to resolve the uncertainty; it does not assume that finishing the Task answered it.
 
 ## Citations
 
-In a body or a comment, a bare id is a reference and a backticked one is a quotation. The tool scans prose for id-shaped tokens on demand and derives read-only value from them: `anb show` lists what a record mentions and what mentions it, and a citation of an id that exists nowhere comes back at write time:
+Write a bare record id in a body or comment to reference it. Put the id in backticks when you are discussing its spelling or using it as an example. `anb show` derives incoming and outgoing mentions from the prose.
 
-```
+A reference to an unknown id produces a hint without rejecting the write:
+
+```text
 $ anb comment task.grammar-parser-accepts-fences "see task.typo-in-the-id"
 ok: comment task.grammar-parser-accepts-fences — logged
 dangling-mention[1]: task.typo-in-the-id — backtick to quote, or create the record
 ```
 
-A forward reference is legal, since the record may come; a typo is not. A dangling mention that stays becomes a Debt line in Status until the record exists or the id is quoted.
+This allows a forward reference. If it was a typo, correct it; if it was an example, quote it. Until it resolves, the reference also appears as Debt. Envelope relationships such as `--from` are stricter and require an existing target.
 
-## Archiving knowledge
+## Archive settled knowledge
 
-A superseded or retired Decision, a retired Note, a closed Question: each is archived with `anb archive <id>`, keeps its id and bytes under `archive/`, and comes back with `anb restore <id>` if it was filed too early. Nothing is deleted by a lifecycle move. `anb delete <id>` exists for a record born by mistake, and refuses while anything cites it.
+Archive a superseded or retired Decision, a retired Note, or a closed Question with `anb archive <id>`. `show` and `search` still find archived records. `anb restore <id>` returns one to the working set without changing its state or contents.
+
+Use `anb delete <id>` only for a record created by mistake. It removes the file and frees the id, but refuses while another record references it.

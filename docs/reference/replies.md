@@ -1,13 +1,13 @@
 ---
 title: Replies
-description: 'The reply contract every command keeps: ok lines, tables, bounds, JSON, refusals and the try lines that run as printed.'
+description: 'Success replies, retries, listing limits, JSON and refusal codes.'
 ---
 
-Every reply is written to be parsed at a glance by an agent and read without effort by a person. The shapes are few and every command uses them.
+The CLI uses short plain text replies for interactive work and compact JSON for programs. Named fields distinguish a result, its consequences and any suggested next action.
 
 ## The ok line
 
-A mutation answers with one line: `ok: <verb> <id> — <what changed>`. A state move says the transition; a creation says the file; an idempotent repeat says so and changes nothing.
+A mutation starts with `ok: <verb> <id> — <what changed>`. A state move says the transition; a creation says the file; an idempotent repeat says so and changes nothing.
 
 ```
 ok: start task.parser-accepts-fenced-bodies — open→active
@@ -15,7 +15,13 @@ ok: add task.ship-the-parser — tasks/task.ship-the-parser.md
 ok: archive task.ship-the-parser — archived (already)
 ```
 
-Consequences follow on their own lines, each a named list: `unblocked[N]`, `carried[N]`, `may-conflict[N]`, `dangling-mention[N]`, `resolved-by:`, `report:`.
+Consequences follow on named lines: `unblocked[N]`, `carried[N]`, `may-conflict[N]`, `dangling-mention[N]`, `resolved-by:`, `report:`.
+
+## Repeating a command
+
+Commands that move an existing record report `(already)` when the requested change is already applied. They preserve the record bytes on that repeat. An immediate repeat of the same log entry, with the same author and date, also leaves the log unchanged.
+
+Creation is different: `add` without `--id` can mint another id from the same title. An explicit id already in use produces `duplicate-id`. Read the named record before deciding whether to create another.
 
 ## Tables
 
@@ -30,22 +36,24 @@ ready[1]{id,priority,age,title}:
 
 ## Bounds
 
-Every listing is bounded by default, so a large notebook never floods a session; the bound is stated and `--all` lifts it. A long body or a crowded mention block in `show` is cut the same way, with the cut marked inline. The JSON of `graph` is the one exception: it is never bounded, because a graph missing edges is not a smaller graph but a wrong one.
+Listings have default row limits and report omissions. Use `--all` to lift them. `show` also bounds long bodies and mention lists, marking where content was omitted. Graph JSON is unbounded so consumers receive the complete selected graph.
 
 ## JSON
 
-`--json` on any command gives the same data as compact JSON, keys in the order the text prints them, `ok` first. Lists are `{count, rows}`; a cut body is `{lines, head, tail}`; a refusal is `{error, message, try}`, with `findings` beside them when a record's own findings caused it.
+`--json` selects compact JSON. Mutation replies identify the operation with `ok`; read commands use fields appropriate to the result. For example, `ready` returns `count` and `ready`, `list` returns `count` and `records`, and `search` returns `count` and `matches`.
+
+Nested lists of consequences use `{count, rows}`. A truncated body uses `{lines, head, tail}`. Refusals provide `error`, `message`, `findings` and `try`. Parse these fields by name. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their own result structures.
 
 ## Refusals
 
-A refusal is `error[<code>]: <message>` followed by `try:` lines, each a command that runs as printed:
+A refusal is `error[<code>]: <message>` followed by `try:` lines suggesting the next command:
 
 ```
 error[unknown-id]: no record `task.nope`
 try: anb list
 ```
 
-The codes are stable and the message names the record and the fact. A refusal changes nothing: every file is judged before the first is written. The [refusals reference](refusals.md) has every code with an example.
+Refusal codes are stable. Messages identify the failed condition, and `try:` lines suggest a command or an argument template to fill in. Validation happens before record writes. Storage failures during a multi-file operation can leave partial progress; inspect the reported findings and follow the recovery instructions. The [refusals reference](refusals.md) lists codes and repairs.
 
 ## Exit codes
 
