@@ -130,7 +130,7 @@ fn read_values(text: &str) -> (Vec<(String, u32)>, Vec<Finding>) {
             Ok(parsed) => {
                 if key == FORMAT.key && parsed != FORMAT.default {
                     let message = format!(
-                        "format: `{parsed}` is not the format this anb reads (`{}`) — the notebook was written by another version",
+                        "format: `{parsed}` is not the format this anb reads (`{}`); the notebook was written by another version",
                         FORMAT.default
                     );
                     findings.push(Finding::at(line, FindingCode::BadValue, message));
