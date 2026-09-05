@@ -133,6 +133,7 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
         read_report: &read_report,
         lost_proofs: &lost,
         user_notebook: user.as_ref().map(|user| user as &dyn anb_core::Storage),
+        project_dir: &cwd,
         today: &today,
     };
     match execute(cli.command, &mut storage, host) {

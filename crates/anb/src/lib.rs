@@ -12,4 +12,5 @@ pub mod reconcile;
 pub mod recovery;
 pub mod reply;
 pub mod scope;
+pub mod setup;
 pub mod text;

@@ -73,6 +73,7 @@ pub fn render(reply: &Reply, today: &str) -> String {
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
         Reply::Archived(moved) => archive_lines(moved),
         Reply::Restored(moved) => restore_lines(moved),
+        Reply::SetUp(done) => setup_lines(done),
         Reply::Deleted(gone) => format!(
             "ok: delete {} — {} removed\n",
             gone.id,
@@ -535,6 +536,24 @@ fn single_record(view: &View, all: bool) -> String {
             shown(ids.len(), all),
             Some(&format!("anb show {} --all", view.id)),
         );
+    }
+    out
+}
+
+/// One line per file setup looked at, then the notice a host's own trust
+/// step earns.
+fn setup_lines(done: &crate::setup::SetUp) -> String {
+    let verb = if done.removed {
+        "setup --remove"
+    } else {
+        "setup"
+    };
+    let mut out = format!("ok: {verb} — {} files\n", done.files.len());
+    for wired in &done.files {
+        let _ = writeln!(out, "  {}: {}", wired.path, wired.outcome.word());
+    }
+    if let Some(notice) = done.notice {
+        let _ = writeln!(out, "notice: {notice}");
     }
     out
 }

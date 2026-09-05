@@ -82,6 +82,20 @@ pub fn render(reply: &Reply) -> String {
         Reply::Archived(moved) => archived_value(moved),
         Reply::Restored(moved) => restored_value(moved),
         Reply::Deleted(gone) => json!({"ok": "delete", "id": gone.id, "paths": gone.paths}),
+        Reply::SetUp(done) => Value::Object(fields([
+            ("ok", json!("setup")),
+            ("removed", json!(done.removed)),
+            (
+                "files",
+                json!(
+                    done.files
+                        .iter()
+                        .map(|wired| json!({"path": wired.path, "outcome": wired.outcome.word()}))
+                        .collect::<Vec<Value>>()
+                ),
+            ),
+            ("notice", json!(done.notice)),
+        ])),
         Reply::Edited(edited) => edited_value(edited),
         Reply::Searched { rows, all, .. } => json!({
             "count": rows.len(),
