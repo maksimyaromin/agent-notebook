@@ -10,3 +10,6 @@
 # npm auth for the @supolka scope: a project-level file, never committed
 .npmrc
 .env
+node_modules/
+apps/docs/dist/
+apps/docs/.astro/

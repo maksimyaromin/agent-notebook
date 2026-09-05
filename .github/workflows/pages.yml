@@ -1,0 +1,52 @@
+name: Pages
+
+# Astro reads the book from docs/ in place and everything around it from apps/docs, so a change that reaches neither
+# produces the same site and leaves the live deployment where it is. workflow_dispatch redeploys when that judgement
+# is wrong. A pull request does not deploy: the CI workflow builds the site and checks it there.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'apps/docs/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.nvmrc'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A run that has started uploading to Cloudflare finishes.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  site:
+    name: Build and deploy the documentation site
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm docs:build
+
+      # Cloudflare serves a deployment as production only when its branch is the project's production branch; any
+      # other name lands on a preview URL: https://developers.cloudflare.com/pages/configuration/branch-build-controls/
+      # The two secrets are the owner's: an API token with Pages edit rights and the account id.
+      - name: Upload the site to Cloudflare Pages
+        run: pnpm dlx wrangler@4 pages deploy apps/docs/dist --project-name agent-notebook --branch main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

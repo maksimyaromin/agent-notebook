@@ -1,0 +1,15 @@
+{
+  "name": "agent-notebook",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@11.14.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "docs:dev": "pnpm --filter @supolka/agent-notebook-docs dev",
+    "docs:build": "pnpm --filter @supolka/agent-notebook-docs build",
+    "docs:check": "node tools/docs/check.mjs"
+  }
+}
