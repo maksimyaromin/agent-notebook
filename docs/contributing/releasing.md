@@ -17,12 +17,12 @@ The Cargo workspace version is the version of every npm package and of the pins 
 
 ## The first publish
 
-Trusted Publishing needs the packages to exist, so the first publish is made from a maintainer's machine:
+Trusted Publishing needs the packages to exist on the registry, so the first publish of a new package is made from a maintainer's machine:
 
 1. Push the tag and let the workflow build. Note its run id.
 2. `sh scripts/release/fetch-binaries.sh <run-id>` downloads the five binaries into the platform packages.
-3. `sh scripts/release/publish.sh` runs a dry run of every package; `sh scripts/release/publish.sh --publish` publishes, npm asking for the one-time code.
+3. `sh scripts/release/publish.sh` runs a dry run of every package; `sh scripts/release/publish.sh --publish` publishes.
 
-The publish token lives in the repository's git-ignored `.env` as `NPM_TOKEN=…`. The script reads it from that file and never from the environment, hands it to npm through a temporary user config so `~/.npmrc` plays no part, and refuses unless `npm whoami` answers with the account that owns `@supolka`.
+The script's header says what it needs and how it authenticates; it publishes the platform packages before the shim and refuses to publish as anyone but the account it expects.
 
-After the first publish, add a Trusted Publisher on npm for this repository and the `release.yml` workflow, set `RELEASE_DRY_RUN` to `false`, and the workflow publishes by OIDC with no secret. Provenance statements are generated once the repository is public; the workflow derives the setting from the repository's visibility.
+After that first publish, a Trusted Publisher on npm for this repository and the `release.yml` workflow, and `RELEASE_DRY_RUN` set to `false`, let the workflow publish by OIDC with no secret. Provenance statements are generated once the repository is public; the workflow derives the setting from the repository's visibility.
