@@ -1318,6 +1318,47 @@ mod session_status {
         )])
     }
 
+    /// A held Task is paused on purpose, so it is not the active line a
+    /// session resumes from: it waits in its own section, reason and all,
+    /// on both renderings.
+    #[test]
+    fn a_held_task_waits_in_its_own_section_not_among_the_active() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.parked.md".to_owned(),
+                record_file(
+                    "task.parked",
+                    "task",
+                    "active",
+                    "A parked record",
+                    &["hold: waits for the API key", "hold-until: 2026-09-20"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.demo.md".to_owned(),
+                record_file("task.demo", "task", "active", "A demo record", &[], ""),
+            ),
+        ]);
+        assert_snapshot!(
+            ok(&mut storage, &["status", "--budget", "0"]),
+            @r#"
+        ok: notebook — 2 tasks, 0 decisions, 0 notes, 0 questions
+        active: task.demo "A demo record"
+        held[1]{id,reason,until}:
+          task.parked,waits for the API key,2026-09-20
+        budget: ~58 tokens (no ceiling)
+        "#
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
+        assert_eq!(value["active"]["count"], serde_json::json!(1));
+        assert_eq!(
+            value["held"]["rows"][0],
+            serde_json::json!({"id": "task.parked", "reason": "waits for the API key", "until": "2026-09-20"})
+        );
+    }
+
     #[test]
     fn a_quiet_notebook_is_one_line() {
         let mut storage = storage_with(&[(

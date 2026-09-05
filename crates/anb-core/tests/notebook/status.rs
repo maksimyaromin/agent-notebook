@@ -123,6 +123,149 @@ mod status_dashboard {
         );
     }
 
+    /// A hold is a pause somebody chose, so the paused Task is not the one
+    /// a session resumes from: it waits in its own section, with the
+    /// reason it waits for, whatever state the hold froze it in.
+    #[test]
+    fn a_held_task_is_not_active_but_waits_with_its_reason() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.parked.md",
+                &record_file(
+                    "task.parked",
+                    "task",
+                    "active",
+                    &["hold: waits for the API key", "hold-until: 2026-09-20"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.working.md",
+                &record_file("task.working", "task", "active", &[], ""),
+            ),
+            (
+                "tasks/task.shelved.md",
+                &record_file(
+                    "task.shelved",
+                    "task",
+                    "open",
+                    &["hold: after the release"],
+                    "",
+                ),
+            ),
+        ]);
+        let text = status_text(&mut storage);
+        let active: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with("active: "))
+            .collect();
+        assert_eq!(active, ["active: task.working \"A demo record\""], "{text}");
+        assert!(
+            text.contains(
+                "held[2]{id,reason,until}:\n  task.parked,waits for the API key,2026-09-20\n  task.shelved,after the release,-\n"
+            ),
+            "{text}"
+        );
+    }
+
+    /// A hold line left on settled work is not a wait: closing a held Task
+    /// ends it, and the dashboard lists what still waits.
+    #[test]
+    fn a_closed_task_still_carrying_its_hold_line_is_not_held() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.parked.md",
+                &record_file(
+                    "task.parked",
+                    "task",
+                    "closed",
+                    &["hold: waits for the API key", "closed: 2026-08-26"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.working.md",
+                &record_file("task.working", "task", "active", &[], ""),
+            ),
+        ]);
+        let text = status_text(&mut storage);
+        assert!(!text.contains("held"), "{text}");
+    }
+
+    /// A reason is a value in a comma table, so one holding the delimiter
+    /// is quoted the way a ready row quotes its title.
+    #[test]
+    fn a_hold_reason_holding_a_comma_is_quoted_in_its_row() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.parked.md",
+                &record_file(
+                    "task.parked",
+                    "task",
+                    "open",
+                    &["hold: waiting on legal, still pending"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.working.md",
+                &record_file("task.working", "task", "active", &[], ""),
+            ),
+        ]);
+        let text = status_text(&mut storage);
+        assert!(
+            text.contains("  task.parked,\"waiting on legal, still pending\",-\n"),
+            "{text}"
+        );
+    }
+
+    /// A notebook whose only work is on hold has nothing for a session to
+    /// pick up, so the gate stays closed; a hold gone stale is Debt's to
+    /// raise.
+    #[test]
+    fn a_notebook_whose_only_work_is_held_is_quiet() {
+        let mut storage = storage_with(&[(
+            "tasks/task.parked.md",
+            &record_file(
+                "task.parked",
+                "task",
+                "active",
+                &["hold: waits for the API key"],
+                "",
+            ),
+        )]);
+        let text = status_text(&mut storage);
+        assert!(text.starts_with("ok: notebook quiet"), "{text}");
+    }
+
+    /// The held section stands still with review: over budget it collapses
+    /// to a count at the same rung, and the floor drops it altogether.
+    #[test]
+    fn the_held_section_collapses_with_review_and_leaves_the_floor() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.parked.md",
+                &record_file(
+                    "task.parked",
+                    "task",
+                    "active",
+                    &["hold: waits for the API key"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.working.md",
+                &record_file("task.working", "task", "active", &[], ""),
+            ),
+        ]);
+        let floor = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Tokens(1), no_lost_proofs)
+            .unwrap()
+            .text;
+        assert!(!floor.contains("held"), "{floor}");
+        assert!(floor.contains("cut: all but the first active"), "{floor}");
+    }
+
     /// Two active Tasks is a session that lost track of one of them, so
     /// the dashboard leads with the one last touched and spends its log
     /// line there.
