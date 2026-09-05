@@ -620,7 +620,7 @@ mod tests {
     fn removing_the_only_hook_leaves_no_empty_container_behind() {
         let ours = hook_applied(json!({})).unwrap();
         assert_eq!(hook_removed(ours).unwrap(), json!({}));
-        assert_eq!(hook_removed(json!({"model": "opus"})), None);
+        assert_eq!(hook_removed(json!({"model": "default"})), None);
     }
 
     #[test]

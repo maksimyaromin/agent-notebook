@@ -13,8 +13,6 @@ updated: 2026-08-30
 
 ## The call that reshaped it
 
-The owner, 2026-08-30: *"мне не нравится что у нас есть вендор и что у нас есть стили. в проекте-CLI. в 2026 году"*, and then the shape it should take instead: *"мы должны на уровне CLI поддержать удобное получение данных в виде структуры граф на любом срезе.. а строить визуализацию не мы должны а кто-то, агент и инплейс построит"*.
-
 So the CLI serves the graph and draws nothing.
 
 ## Removed
@@ -36,14 +34,14 @@ So the CLI serves the graph and draws nothing.
 
 `ready` is the flag that removes the second call: whether a Task can be started now follows from rules the caller cannot see. It is three-valued — absent where the question does not arise, since answering "no" about a Decision would answer a question nobody asks of it.
 
-## Review — 16 findings from a separate Opus 5 agent, all real
+## Review — 16 findings from a separate agent, all real
 
 Four reproduced on live data before touching anything:
 
 - **12 duplicate edges.** Mention suppression consulted the mentioning record's envelope, but `blocked-by` is declared by the waiter, so a blocker whose prose named its waiter drew a second line on the same pair — and every degree counted it twice. One pair of records is now one edge, and the declared word wins.
 - **`--type` missing from the echoed slice.** `--type decision` read as a notebook of 14 records holding no tasks: exactly the false-sounding answer the unknown-kind refusal exists to prevent.
 - **`--type` with `--focus` answered an empty graph at exit 0.** The kind filter ran before the neighbourhood walk, so the centre was not in its own walk. Kinds now narrow the result, never the walk.
-- **`--help` still promised an HTML file** — the one thing the owner asked to remove, still in the shipped surface.
+- **`--help` still promised an HTML file** — the one thing the maintainer asked to remove, still in the shipped surface.
 
 Structural fix behind three more: kinds were strings beside an existing `RecordType`. Typing them moved the refusal onto the flag, deleted the validation loop, and removed a fourth hand-written copy of the list of kinds.
 
@@ -57,7 +55,7 @@ Not taken: counting records whose own `type` field is unreadable when kinds are 
 
 ## Proved by drawing it
 
-The whole notebook — 90 records, 179 edges, archive included — rendered as one page from a single `anb --json graph --archive --full --all`, with no library and nothing from this repository. Owner's verdict: almost ideal. Page and the reasoning behind it kept in `.tmp/atlas/`.
+The whole notebook — 90 records, 179 edges, archive included — rendered as one page from a single `anb --json graph --archive --full --all`, with no library and nothing from this repository. Maintainer's verdict: almost ideal.
 
 That is the argument closed: the CLI never drew it, and it did not need to.
 

@@ -49,7 +49,7 @@ Proven red with a mutation that hides the edge on a held task (`edge_exists` ans
 
 ## 5. Review
 
-The mandatory review ran on Opus 5 against the frozen diff, with every skill loaded. It traced each mutation through the production code by hand, confirmed the four HEAD-green claims and the two already-red directions of item 4, ran the gate, the doctests and rustdoc with warnings denied, and found nothing at must-fix. Ten findings, all taken:
+The mandatory review ran against the frozen diff, with every skill loaded. It traced each mutation through the production code by hand, confirmed the four HEAD-green claims and the two already-red directions of item 4, ran the gate, the doctests and rustdoc with warnings denied, and found nothing at must-fix. Ten findings, all taken:
 
 1. The `already`-follows-the-file assertion sat inside a property named for replays and bystanders, so the name no longer said what red meant. Moved into its own property over the same generator, and the file header keeps its two original promises.
 2. The assertion's message named an input, not the promise. Now `an edge verb answers for the edge the file carries`.

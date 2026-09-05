@@ -11,7 +11,7 @@ updated: 2026-09-05
 
 # A Task ends without work, stating why (2026-09-05)
 
-Report for task.close-drop-ends-a-task-without-work. Shipped inside the vocabulary audit's change, because the word the flag carries was the audit's to settle: `drop` and `withdraw` were both refused by the owner, and the audit's Decision (decision.the-cli-speaks-one-plain-word-per) chose `--reason`, the one word for "why" that `hold` already spoke.
+Report for task.close-drop-ends-a-task-without-work. Shipped inside the vocabulary audit's change, because the word the flag carries was the audit's to settle: `drop` and `withdraw` were both refused by the maintainer, and the audit's Decision (decision.the-cli-speaks-one-plain-word-per) chose `--reason`, the one word for "why" that `hold` already spoke.
 
 ## What shipped
 

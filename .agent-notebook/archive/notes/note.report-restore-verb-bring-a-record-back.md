@@ -25,7 +25,7 @@ The contract, clause by clause:
 - **Replay answers `already`** when the id lives and the archive holds nothing; the promise is residence, not validity.
 - **check names the move**: `archived-live-record` now carries `repair: anb restore <id>` — the one finding restore erases; other findings on archived files still name nothing (their erasers refuse to run until the record is back). The `error[archived]` refusal offers `try: anb view <id>` then `try: anb restore <id>` — view first, because restore on a correctly filed record manufactures an `unarchived-settled-record` warning.
 
-## Mandatory review (Opus 5, separate agent)
+## Mandatory review (separate agent)
 
 Verdict: 0 defects, 9 should-fixes, 10 nits. All 9 should-fixes and 8 of 10 nits are fixed; the notable ones:
 
@@ -42,6 +42,6 @@ Not applied, deliberately: a separate reply signal for "leftover dropped" vs "by
 
 19 core behaviors in `crates/anb-core/tests/notebook/restore.rs` plus 3 CLI tests and 5 updated ones (lock table, scope table, repair round-trip, recovery snapshot, check-repair naming). Every new test proved it can fail by deliberately wrong expectations before counting.
 
-## For the owner to confirm
+## For the maintainer to confirm
 
 The live Decision `decision.a-repair-is-progress-not-perfection` still says "a record in the archive … has no move at all, whatever is wrong inside it — and a row that named one anyway would send an agent in a circle." Restore falsifies the clause: the archived canonical path now has exactly one move, and check names it on the residence finding. Proposed: supersede with the same decision amended — repair-is-progress and read-off-the-line stand unchanged; the reachability clause becomes "every correcting verb resolves an id to its one live path; the archived path is reached only to be moved back or deleted, so the one repair ever named on an archived file is `restore`, on the residence finding it erases." Not written to the notebook — awaiting confirmation.

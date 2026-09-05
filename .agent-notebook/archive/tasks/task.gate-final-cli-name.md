@@ -13,5 +13,5 @@ updated: 2026-09-05
 closed: 2026-09-05
 ---
 
-Working name anb; owner decides the final bin name before first publish.
+Working name anb; maintainer decides the final bin name before first publish.
 - 2026-09-05 Maksim Yaromin: Decided 2026-09-05: anb stays, recorded as decision.the-cli-binary-is-named-anb. Nothing else was gated here.

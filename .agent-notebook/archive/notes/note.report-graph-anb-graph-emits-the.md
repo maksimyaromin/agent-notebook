@@ -18,7 +18,7 @@ updated: 2026-08-30
 - Data, in the reply family every other verb uses: `nodes[16]{id,state,archived,degree,epic,title}:` and `edges[27]{from,to,kind}:`, `ROW_BOUND`, `quoted_if_delimited`, `--all` to lift. `--json` gives one versioned document, `{"v":1,"slice":…,"nodes":…,"edges":…}`.
 - Picture, under `--out <path>`: one self-contained file, no network, SVG drawn from dagre's layout. One `<g data-id="task.x">` per Task and one `<polyline data-source data-target>` per edge, so a reader can point at a task and a review harness can anchor to it.
 
-## The defects the owner found, and what they were
+## The defects the maintainer found, and what they were
 
 **Names overprinted into smears.** Four things, because the root cause is layout, not drawing: a name's width is measured in the font it is actually drawn in and reserved in dagre's node box; whatever still collides gives way in order of how much the notebook leans on it; a name too small to read fades until the map is zoomed in; the hovered, picked and focused ones are always drawn. Proved in a browser: 0 collisions across ten cases, the worst being 42 nodes with the archive.
 
@@ -38,7 +38,7 @@ The theme apparatus (`Theme`, `ThemeError`, `--theme`, `--eject-theme`, `Reply::
 
 ## Left open
 
-- The task's own acceptance criteria still describe the shape before the owner's redirection; a comment on the task records what was delivered instead.
+- The task's own acceptance criteria still describe the shape before the maintainer's redirection; a comment on the task records what was delivered instead.
 - A focused neighbourhood's names bypass the declutter by design, so picking a dense hub can overprint inside that neighbourhood.
 - Headless and desktop Chrome give different font metrics, so the two show different name counts. The invariant holds in both.
 

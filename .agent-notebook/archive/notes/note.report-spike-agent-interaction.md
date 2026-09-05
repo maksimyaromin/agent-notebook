@@ -12,10 +12,8 @@ updated: 2026-08-29
 
 # s3 — Spike: agent interaction — report
 
-Closed 2026-08-25, owner-approved after a Lavish grill review (round 1 settled: all six frontier decisions as recommended, plan accepted whole).
+Closed 2026-08-25, approved after a design review (round 1 settled: all six frontier decisions as recommended, plan accepted whole).
 
-Primary deliverable: `.tmp/docs/spec-anb-interaction.md` (owner-approved interaction spec).
-
-Also delivered: ADR 0007 (accepted) `.tmp/docs/adr/0007-agent-interaction.md`; anb's own token measurement `.tmp/docs/research/15-s3-encoding-measurement.md` (TOON vs JSON vs plain on anb fixtures, o200k_base + cl100k cross-check); research sweeps `.tmp/docs/research/12..14-s3-*.md` (52 verified cards: context injection, hook mechanics of four agents, tool docs/skills); concept-spec updates (Agent integration and Output contract decided; agent-interaction theme closed); CONTEXT.md (+Hook, +Gate, +Snippet, +Skill).
+Primary deliverable: the interaction spec, approved.
 
 Settled decisions: shape-matched plain output (plain table for lists, key: value for records, designed composite for Status; `--json` compact everywhere; TOON rejected finally — literature plus own measurement showing +19.4% worse than compact JSON on non-uniform lists); structured errors `error[code]` + computed `try:` lines in one two-section catalog; gated Status injection (full dashboard only on signal, quiet line otherwise, `compact`-matcher re-injection, micro-Status in every mutation reply); minimal injection-safety posture (titles-only, framing line, documented residual, re-open clause before any remote surface); `anb setup` project-scoped by default with explicit `--global`, AGENTS.md snippet floor for all four agents, hooks for Claude Code + Codex in v1, no OpenCode plugin code, Pi extension deferred, marker-bounded idempotent install/remove, fail-soft; skill generated from the CLI's single source of truth with a byte-diff CI gate, worked examples + error catalog, ~600-word length as instrumented hypothesis.

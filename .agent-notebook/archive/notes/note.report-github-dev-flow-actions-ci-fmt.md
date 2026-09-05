@@ -15,16 +15,16 @@ Task: task.github-dev-flow-actions-ci-fmt-clippy-te. Done 2026-08-31.
 
 ## What shipped
 
-- `.github/workflows/ci.yml` — one job, one working step: `./scripts/check.sh` verbatim, so the commands live only in the script and CI cannot drift from the local gate. Triggers: push to main (post-merge verdict, primes the rust-cache entry PR branches restore from) and every pull request; the two never double-fire for one commit because push is scoped to main. `permissions: contents: read`; concurrency cancels superseded PR runs while every main push keeps its verdict; `timeout-minutes: 15`; actions pinned to commit SHAs (checkout v7.0.1, Swatinem/rust-cache v2.9.2). No toolchain action: `rust-toolchain.toml` is the single source of truth, and an explicit `rustup toolchain install` step materializes it before rust-cache keys on the rustc version. No nextest install: nextest is absent on the owner's machine, so CI proves the same `cargo test` path the local gate runs.
+- `.github/workflows/ci.yml` — one job, one working step: `./scripts/check.sh` verbatim, so the commands live only in the script and CI cannot drift from the local gate. Triggers: push to main (post-merge verdict, primes the rust-cache entry PR branches restore from) and every pull request; the two never double-fire for one commit because push is scoped to main. `permissions: contents: read`; concurrency cancels superseded PR runs while every main push keeps its verdict; `timeout-minutes: 15`; actions pinned to commit SHAs (checkout v7.0.1, Swatinem/rust-cache v2.9.2). No toolchain action: `rust-toolchain.toml` is the single source of truth, and an explicit `rustup toolchain install` step materializes it before rust-cache keys on the rustc version. No nextest install: nextest is absent on the maintainer's machine, so CI proves the same `cargo test` path the local gate runs.
 - `.github/dependabot.yml` — weekly `github-actions` updates, the companion to SHA-pinning: Dependabot rewrites both the SHA and the trailing version comment, so the pins do not fossilize.
 - `scripts/check.sh` — `--locked` on every cargo command that resolves dependencies (clippy, nextest/test, doc-tests, rustdoc), so a `Cargo.lock` drifted from `Cargo.toml` fails the gate instead of being silently rewritten mid-run. Found during review, fixed beside the change.
-- `AGENTS.md` — two lines: the PR-only convention for main (owner's call, 2026-08-31), and the Commands entry now says CI runs the same script.
+- `AGENTS.md` — two lines: the PR-only convention for main (maintainer's call, 2026-08-31), and the Commands entry now says CI runs the same script.
 
-## Branch protection (owner ruling, 2026-08-31)
+## Branch protection (maintainer ruling, 2026-08-31)
 
-GitHub refused the ruleset: private repo on the Free plan (HTTP 403, "Upgrade to GitHub Pro or make this repository public"). Owner chose to keep the repo private and unprotected for now — PRs by convention, server enforcement deferred. Filed as task.main-ruleset-when-plan-allows with the exact ruleset shape (require PR with 0 approvals, required check `check`, block force-push and deletion).
+GitHub refused the ruleset: private repo on the Free plan (HTTP 403, "Upgrade to GitHub Pro or make this repository public"). Maintainer chose to keep the repo private and unprotected for now — PRs by convention, server enforcement deferred. Filed as task.main-ruleset-when-plan-allows with the exact ruleset shape (require PR with 0 approvals, required check `check`, block force-push and deletion).
 
-## Review (Opus 5, mandatory stage 3)
+## Review (mandatory stage 3)
 
 Findings, all applied:
 
@@ -39,4 +39,4 @@ Reviewer verifications worth keeping: the pinned rust-cache SHA is the commit be
 
 ## State
 
-actionlint clean; full gate green after every change (fmt, clippy, 143 tests, doctests, rustdoc, all `--locked`). Working tree left uncommitted for owner review. First landing must go through a PR per the new convention — and the `pull_request` trigger fires for the PR that introduces the workflow itself.
+actionlint clean; full gate green after every change (fmt, clippy, 143 tests, doctests, rustdoc, all `--locked`). Working tree left uncommitted for maintainer review. First landing must go through a PR per the new convention — and the `pull_request` trigger fires for the PR that introduces the workflow itself.
