@@ -15,3 +15,4 @@ apps/docs/dist/
 apps/docs/.astro/
 packages/*/bin/anb
 packages/*/bin/anb.exe
+CLAUDE.local.md

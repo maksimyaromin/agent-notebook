@@ -19,7 +19,9 @@ A test specifies one observable behaviour in one named situation through the int
 
 ## Text
 
-Every text the tool prints, and every skill it renders, is read by a person as well as an agent. The reply shapes are the contract in [Replies](../reference/replies.md); the words are plain engineering English, one word per concept across every surface, and no dash as a connective in prose.
+Every text the tool prints, and every skill it renders, is read by a person as well as an agent. The reply shapes are the contract in [Replies](../reference/replies.md); the words are plain engineering English, one word per concept across every surface, sentence-case headings, and no dash as a connective in prose. The same rule holds for the book and for every comment in the code.
+
+A comment states a fact a stranger can check and the code cannot say for itself, usually a why. A comment that restates the code, records the history of a decision or defends it against a reviewer is deleted on sight; the notebook is where decisions and their history live.
 
 ## The notebook
 
@@ -27,4 +29,4 @@ This repository keeps its own backlog in `.agent-notebook/` at the root and chan
 
 ## The docs
 
-The book lives in `docs/` and is rendered by the Astro Starlight app in `apps/docs`, which reads the tree where it lies, so GitHub renders the same files. Two pages are written by the binary: `./scripts/docs-reference.sh` renders the commands and the refusals from `anb skill`, and the gate fails when a committed page differs. `pnpm docs:check` verifies that the sidebar reaches every page, that every relative link resolves, and that the built site references only files the build wrote; `pnpm docs:dev` serves it locally.
+The book lives in `docs/` and is rendered by the Astro Starlight app in `apps/docs`, which reads the tree where it lies, so GitHub renders the same files. Two pages are written by the binary: `./scripts/docs-reference.sh` renders the commands and the refusals from `anb skill`, and the gate fails when a committed page differs. `pnpm docs:check` verifies that the sidebar reaches every page and names no page that does not exist, that every relative link resolves, and that the built site references only files the build wrote; `pnpm docs:dev` serves it locally.
