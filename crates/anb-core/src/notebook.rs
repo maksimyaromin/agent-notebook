@@ -48,7 +48,7 @@ use crate::reply::{
     Archived, CitedProof, Closed, Commented, Counts, Created, Deleted, Edged, Edited, Focus, Graph,
     GraphSlice, Held, ListedRecord, Overview, ReadyTask, Restored, Transitioned, TypeSection, View,
 };
-use crate::request::{Draft, Edit, Proof};
+use crate::request::{Draft, Edit, Link, Proof};
 use crate::resolve::{
     Resolver, archive_of, archived_among, canonical_paths, is_archived, is_record_file, path_stem,
     record_path, resolvable_id,
@@ -596,6 +596,9 @@ impl<'a> Notebook<'a> {
         write::validate_draft(draft)?;
         if let Some(origin) = &draft.from {
             self.guard_ref_exists("from", origin)?;
+        }
+        for link in &draft.links {
+            self.guard_link_target(link)?;
         }
         let victim = self.guard_supersession(draft)?;
 
@@ -1452,6 +1455,9 @@ impl<'a> Notebook<'a> {
             self.guard_ref_exists("from", origin)?;
             self.guard_lineage_stays_open(id, origin)?;
         }
+        for link in &edit.add_links {
+            self.guard_link_target(link)?;
+        }
 
         let repairing = self.resolve_live_repairing(id, record_type)?;
         let dangling_mentions = match &edit.body {
@@ -1626,6 +1632,24 @@ impl<'a> Notebook<'a> {
             return false;
         };
         canonical_paths(id).any(|path| user.exists(&path).unwrap_or(false))
+    }
+
+    /// A link whose target is shaped like an id names a record, and a
+    /// record it names must exist: here, or in the user's notebook, which a
+    /// link reaches as `check` reads it. Any other target points outside
+    /// the notebook and is taken as given.
+    fn guard_link_target(&self, link: &Link) -> Result<(), NotebookError> {
+        let target = link.target.trim();
+        if grammar::id_error(target).is_some()
+            || self.holder_path(target)?.is_some()
+            || self.user_holds(target)
+        {
+            return Ok(());
+        }
+        Err(NotebookError::DanglingRef {
+            field: "link",
+            target: target.to_owned(),
+        })
     }
 
     fn guard_ref_exists(&self, field: &'static str, target: &str) -> Result<(), NotebookError> {

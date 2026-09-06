@@ -214,6 +214,8 @@ Arguments: `<ID>`
 | `--body-file <PATH>` | The whole body, replaced with a file's text; `-` reads standard input. Refused beside --body |
 | `--tag <TAG>` | Add a tag; repeatable |
 | `--untag <TAG>` | Remove a tag; repeatable |
+| `--link <LINK>` | Add a link, `<kind> <target>`; repeatable. A Decision that cites another as context declares it here, and the pair leaves `may-conflict` |
+| `--unlink <LINK>` | Remove a link, spelled as it stands; repeatable |
 | `--from <FROM>` | Origin: the record this record was born from |
 | `--priority <PRIORITY>` | 0 to 4, 0 the most urgent |
 | `--review-by <DATE>` | The explicit resurfacing date |

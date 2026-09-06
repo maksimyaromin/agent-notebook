@@ -6,6 +6,7 @@ title: Import surface: adopt an existing tracker's history
 by: Maksim Yaromin
 via: claude-code
 from: decision.envelope-dates-mean-notebook-time
+link: issue https://github.com/maksimyaromin/agent-notebook/issues/46
 priority: 4
 hold: waits for question.import-dates-vouched-or-stamped: the shape of the import surface is a product ruling
 created: 2026-08-29

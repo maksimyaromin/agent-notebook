@@ -955,6 +955,22 @@ mod knowledge_replies {
     }
 
     #[test]
+    fn add_with_a_link_naming_no_record_is_a_recovery_payload() {
+        let mut storage = MemoryStorage::new();
+        assert_snapshot!(
+            refused(&mut storage, &["add", "decision", "Fences never nest", "--kind", "rule", "--link", "within decision.ghost"]),
+            @r"
+        error[dangling-ref]: link: `decision.ghost` names no record
+        try: anb list
+        "
+        );
+        assert!(
+            storage.list("decisions").unwrap().is_empty(),
+            "nothing is written"
+        );
+    }
+
+    #[test]
     fn add_from_a_missing_origin_is_a_recovery_payload() {
         let mut storage = MemoryStorage::new();
         assert_snapshot!(
@@ -2664,12 +2680,121 @@ mod maintenance_replies {
     }
 
     #[test]
+    fn a_declared_link_takes_the_pair_out_of_may_conflict() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.first.md".to_owned(),
+                record_file(
+                    "decision.first",
+                    "decision",
+                    "active",
+                    "A demo record",
+                    &["kind: rule"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.second.md".to_owned(),
+                record_file(
+                    "decision.second",
+                    "decision",
+                    "active",
+                    "A demo record",
+                    &["kind: drift"],
+                    "Departs from decision.first for the import.\n",
+                ),
+            ),
+        ]);
+        assert!(
+            ok(&mut storage, &["status"]).contains("may-conflict"),
+            "an undeclared citation between live Decisions is Debt"
+        );
+        assert_snapshot!(
+            ok(&mut storage, &["edit", "decision.second", "--link", "departs-from decision.first"]),
+            @"ok: edit decision.second — link"
+        );
+        assert!(
+            !ok(&mut storage, &["status"]).contains("may-conflict"),
+            "the declared edge is the judgement; the pair is no longer Debt"
+        );
+    }
+
+    #[test]
+    fn a_link_declared_by_the_cited_record_takes_the_pair_out_too() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.first.md".to_owned(),
+                record_file(
+                    "decision.first",
+                    "decision",
+                    "active",
+                    "A demo record",
+                    &["kind: rule"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.second.md".to_owned(),
+                record_file(
+                    "decision.second",
+                    "decision",
+                    "active",
+                    "A demo record",
+                    &["kind: rule"],
+                    "Part of decision.first.\n",
+                ),
+            ),
+        ]);
+        ok(
+            &mut storage,
+            &["edit", "decision.first", "--link", "within decision.second"],
+        );
+        assert!(
+            !ok(&mut storage, &["status"]).contains("may-conflict"),
+            "either record may declare the edge"
+        );
+    }
+
+    #[test]
+    fn a_link_naming_no_record_is_refused_before_any_byte_moves() {
+        let text = record_file(
+            "decision.first",
+            "decision",
+            "active",
+            "A demo record",
+            &["kind: rule"],
+            "",
+        );
+        let mut storage = storage_with(&[("decisions/decision.first.md".to_owned(), text.clone())]);
+        assert_snapshot!(
+            refused(&mut storage, &["edit", "decision.first", "--link", "within decision.ghost"]),
+            @r"
+        error[dangling-ref]: link: `decision.ghost` names no record
+        try: anb list
+        "
+        );
+        assert_eq!(storage.read("decisions/decision.first.md").unwrap(), text);
+    }
+
+    #[test]
+    fn a_link_without_a_target_is_a_recovery_payload() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            refused(&mut storage, &["edit", "task.demo", "--link", "within"]),
+            @r#"
+        error[invalid-argument]: link: `within` is not `<kind> <target>`
+        try: anb edit task.demo --title "<title>"
+        "#
+        );
+    }
+
+    #[test]
     fn an_edit_requesting_nothing_is_a_recovery_payload() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         assert_snapshot!(
             refused(&mut storage, &["edit", "task.demo"]),
             @r#"
-        error[invalid-argument]: edit: nothing to change; pass --title, --body, --tag, --untag, --from, --priority, --review-by, or --clear
+        error[invalid-argument]: edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, or --clear
         try: anb edit task.demo --title "<title>"
         "#
         );

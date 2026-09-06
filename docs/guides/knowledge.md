@@ -36,7 +36,14 @@ may-conflict[1]: decision.fences-never-nest (Alex)
 
 The tool reports a possible conflict when Decisions share at least two tags or the new one cites an active Decision. It does not compare their meaning. Read the named record and decide whether the new ruling replaces it.
 
-Status keeps a `may-conflict` Debt signal for a citation between active Decisions without a supersession relationship. Shared tags alone trigger the write-time hint, not persistent Debt.
+Status keeps a `may-conflict` Debt signal for a citation between active Decisions that neither supersedes nor links the other: a body that names `decision.fences-never-nest` keeps the pair in Debt. A citation the method asks for, a `drift` naming the rule it departs from or a rule that is part of a wider one, is declared once as a link on either record, and the pair leaves the signal:
+
+```text
+$ anb edit decision.a-fence-body-is-opaque --link "within decision.fences-never-nest"
+ok: edit decision.a-fence-body-is-opaque — link
+```
+
+`add --link` declares it at creation; `edit --unlink` takes a link out, spelled as it stands. A link whose target is shaped like a record id must name a record. Shared tags alone trigger the write-time hint, not persistent Debt.
 
 ## Notes
 
