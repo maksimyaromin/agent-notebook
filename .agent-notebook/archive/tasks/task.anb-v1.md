@@ -1,11 +1,12 @@
 ---
 id: task.anb-v1
 type: task
-state: open
+state: closed
 title: anb v1
 by: Maksim Yaromin
 via: claude-code
 tags: epic
+link: note note.report-anb-v1
 blocked-by: task.spike-storage-format
 blocked-by: task.spike-record-model
 blocked-by: task.spike-agent-interaction
@@ -32,7 +33,8 @@ blocked-by: task.global-notebook
 blocked-by: task.task-graph-visualization-for-fun
 blocked-by: task.serialize-concurrent-mutations-on-a
 created: 2026-08-29
-updated: 2026-08-30
+updated: 2026-09-06
+closed: 2026-09-06
 ---
 
 The founding idea: ship anb v1 — a project's working memory as typed records with lifecycles, self-hosted, agent-operated through the CLI, released through the v1 Definition of Done gate. Every task of the plan is a child of this hub: the hub is blocked-by each of them and closes when the last one does. Children born from now on also carry from:<this hub>; the migrated ones predate the origin edge and only the future edit surface can add it retroactively.
