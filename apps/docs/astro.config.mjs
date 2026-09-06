@@ -46,7 +46,15 @@ export default defineConfig({
       title: 'agent-notebook',
       description:
         'A dependable CLI for agent working memory, with skills you can make your own.',
+      logo: { src: './src/assets/mark.svg', replacesTitle: false },
+      // Starlight emits one link for the file named here. The rest are the
+      // fallbacks it does not emit: a raster icon for the browsers that take
+      // one over an SVG, and the icon a phone uses on its home screen.
       favicon: '/favicon.svg',
+      head: [
+        { tag: 'link', attrs: { rel: 'icon', href: '/favicon-32.png', sizes: '32x32' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
+      ],
       social: [{ icon: 'github', label: 'GitHub', href: repository }],
       editLink: { baseUrl: `${repository}/edit/main/` },
       routeMiddleware: './src/route-data.js',
