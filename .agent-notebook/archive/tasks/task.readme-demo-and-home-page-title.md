@@ -1,13 +1,15 @@
 ---
 id: task.readme-demo-and-home-page-title
 type: task
-state: review
+state: closed
 title: The README opens with a demo and the home page carries its own title
 by: Maksim Yaromin
 tags: docs
+link: note note.report-readme-demo-and-home-page-title
 priority: 1
 created: 2026-09-06
 updated: 2026-09-06
+closed: 2026-09-06
 ---
 
 The README shows the tool only in prose and one Status excerpt; a recorded terminal session shows the whole cycle in one look. The home page of the book renders its browser title as the site name twice, because Starlight joins the page title and the site title and the page is named after the site. The demo is recorded from a tape checked in beside the other scripts, so it is regenerated when a reply it shows changes.
