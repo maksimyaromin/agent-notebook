@@ -1,5 +1,26 @@
 # Changelog
 
+## agent-notebook v2026.09.06.2
+
+The third release of the day, and the first shaped by an adopter: seven issues were filed after the tool was set up on an existing project and its history replayed through the live verbs, and six of them close here. The packages move to 0.3.0: `anb setup` now refuses to wire an agent nobody named, so a script that ran it bare must name one.
+
+### New
+
+- **Setup wires only the agents named.** `anb setup --agent claude-code`, `--agent codex`, or `--agent agents-md` for any tool that follows the agents.md convention, repeatable; without the flag setup refuses and names the three. `--remove` takes the same flag, a file two agents read goes only when every reader is named, and a host directory setup emptied goes with its files. (#54)
+- **A body from a file or a pipe.** `add` and `edit` take `--body-file <path>` beside `--body`, with `-` for standard input, and `close --note -` reads standard input by the same rule. (#52)
+- **A link declared after the fact.** `edit --link` and `edit --unlink` splice links like tags, and a link naming a record must name one that exists. A Decision that cites another as context declares the relationship once, and `may-conflict` then names only the pair nobody has judged. (#53)
+- **Debt as data.** Each row of `status --json` carries its signal's fields beside the printed line: the id and days of a clock, the pair of a `may-conflict`, the file and error count of an invalid record. (#50)
+
+### Improved
+
+- **A report's id is its Task's.** `close --note` mints `note.report-<task slug>`, guessable from the Task and never cut on a stopword; existing reports keep their ids. (#51)
+
+### Fixed
+
+- **The setup snippet is a paragraph of its own.** A guide ending with a list item no longer reads the snippet as part of that item, and removal leaves a guide ending on one newline as it was. (#49)
+
+Packages in this release: `@supolka/agent-notebook@0.3.0` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.06.1
 
 The second release of the day, and the first named by the same-day counter. Notes take three new kinds, the skills teach the author's own method from an idea to its proof, and the book and the README present the product in that voice. The packages move to 0.2.0: an older binary refuses the new Note kinds.
