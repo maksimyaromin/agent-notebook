@@ -130,7 +130,7 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     let lost = |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited);
     let host = Host {
         git_by: anb::git::user_name,
-        read_report: &read_report,
+        read_file: &read_file,
         lost_proofs: &lost,
         user_notebook: user.as_ref().map(|user| user as &dyn anb_core::Storage),
         project_dir: &cwd,
@@ -163,11 +163,17 @@ fn terminated(mut output: String) -> String {
     output
 }
 
-/// A report the caller named by path, read from wherever the work left it:
+/// A file the caller named by path, read from wherever the work left it:
 /// outside the notebook root as often as in it, so this is the shell's
-/// read, not Storage's.
-fn read_report(path: &str) -> Result<String, StorageError> {
-    std::fs::read_to_string(path).map_err(|error| match error.kind() {
+/// read, not Storage's. `-` reads standard input instead, so a body or a
+/// report can arrive from a pipe.
+fn read_file(path: &str) -> Result<String, StorageError> {
+    let read = if path == "-" {
+        io::read_to_string(io::stdin())
+    } else {
+        std::fs::read_to_string(path)
+    };
+    read.map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => StorageError::NotFound {
             path: path.to_owned(),
         },

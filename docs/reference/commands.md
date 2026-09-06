@@ -20,6 +20,7 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 | `--tag <TAG>` | A tag; repeatable |
 | `--link <LINK>` | `<kind> <target>`, e.g. `pr https://…`; repeatable |
 | `--body <BODY>` | The prose under the envelope; omitted, the record opens empty |
+| `--body-file <PATH>` | The prose under the envelope, read from a file; `-` reads standard input. Refused beside --body |
 | `--by <BY>` | The accountable identity; omitted, git identity fills it |
 | `--via <VIA>` | The acting agent tool |
 | `--priority <PRIORITY>` | A task's urgency, 0 to 4, 0 the most urgent |
@@ -46,7 +47,7 @@ Arguments: `<ID>`
 
 | Flag | Meaning |
 |---|---|
-| `--note <NOTE>` | Proof, the default route: the report file, ingested as a Note the notebook carries, so a reader reaches it through the notebook alone |
+| `--note <NOTE>` | Proof, the default route: the report file, ingested as a Note the notebook carries, so a reader reaches it through the notebook alone; `-` reads standard input |
 | `--pr <PR>` | Proof: the pull request that shipped the work |
 | `--sha <SHA>` | Proof: the commit that shipped the work |
 | `--report <REPORT>` | Proof: a file left where it lies, right for a living document, which a Note would freeze into a second source of truth |
@@ -178,6 +179,7 @@ Arguments: `<ID>`
 |---|---|
 | `--title <TITLE>` | The whole title, replaced |
 | `--body <BODY>` | The whole body, replaced; empty clears it |
+| `--body-file <PATH>` | The whole body, replaced with a file's text; `-` reads standard input. Refused beside --body |
 | `--tag <TAG>` | Add a tag; repeatable |
 | `--untag <TAG>` | Remove a tag; repeatable |
 | `--from <FROM>` | Origin: the record this record was born from |

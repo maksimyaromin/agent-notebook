@@ -172,18 +172,18 @@ fn skilled(dir: Option<&Path>, check: bool) -> Result<SkillReply, NotebookError>
 /// site.
 ///
 /// `git_by` is the accountable identity as git knows it, read only by the
-/// commands that write one; a command's own flag outranks it. `read_report`
-/// opens a file by a path the caller typed, which Storage cannot serve:
-/// Storage speaks only in paths under the notebook root, and a report is
-/// written wherever the work happened. `today` is the host's date — the
-/// Core holds no clock.
+/// commands that write one; a command's own flag outranks it. `read_file`
+/// opens a file by a path the caller typed, or standard input for `-`,
+/// which Storage cannot serve: Storage speaks only in paths under the
+/// notebook root, and a report or a body is written wherever the work
+/// happened. `today` is the host's date — the Core holds no clock.
 #[derive(Clone, Copy)]
 pub struct Host<'a> {
     pub git_by: fn() -> Option<String>,
     /// Borrowed rather than a plain `fn`, because a caller may need to
     /// close over where it reads from — the tests hand in a table of
-    /// reports, the shell reads the filesystem.
-    pub read_report: &'a dyn Fn(&str) -> Result<String, StorageError>,
+    /// files, the shell reads the filesystem.
+    pub read_file: &'a dyn Fn(&str) -> Result<String, StorageError>,
     /// Which of the proofs a notebook cites the world no longer holds. The
     /// Core holds neither git nor a filesystem, so the question is asked
     /// out here; a caller with nothing to ask answers with an empty list.
@@ -212,7 +212,7 @@ pub fn execute(
 ) -> Result<Reply, NotebookError> {
     let Host {
         git_by,
-        read_report,
+        read_file,
         lost_proofs,
         user_notebook,
         project_dir,
@@ -220,14 +220,18 @@ pub fn execute(
     } = host;
     let mut notebook = Notebook::new(storage).with_user(user_notebook);
     match command {
-        Command::Add(args) => created("add", &mut notebook, &draft(args, git_by), today),
+        Command::Add(mut args) => {
+            let body = body_text(args.body.take(), args.body_file.take(), read_file)?;
+            let draft = draft(args, body.unwrap_or_default(), git_by);
+            created("add", &mut notebook, &draft, today)
+        }
         Command::Retire { id } => Ok(moved("retire", notebook.retire(&id, today)?)),
         Command::Start { id } => Ok(moved("start", notebook.start(&id, today)?)),
         Command::Submit { id } => Ok(moved("submit", notebook.submit(&id, today)?)),
         Command::Close(args) => Ok(Reply::Closed(close_reply(
             &mut notebook,
             args,
-            read_report,
+            read_file,
             git_by,
             today,
         )?)),
@@ -274,7 +278,7 @@ pub fn execute(
         Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id, today)?)),
         Command::Restore { id } => Ok(Reply::Restored(notebook.restore(&id)?)),
         Command::Delete { id } => Ok(Reply::Deleted(notebook.delete(&id)?)),
-        Command::Edit(args) => edited(&mut notebook, args, today),
+        Command::Edit(args) => edited(&mut notebook, args, read_file, today),
         Command::Search { query, all } => Ok(Reply::Searched {
             rows: notebook.search(&query)?,
             query,
@@ -406,12 +410,14 @@ fn budgeted_status(
 fn edited(
     notebook: &mut Notebook<'_>,
     args: EditArgs,
+    read_file: &dyn Fn(&str) -> Result<String, StorageError>,
     today: &str,
 ) -> Result<Reply, NotebookError> {
     let EditArgs {
         id,
         title,
         body,
+        body_file,
         add_tags,
         remove_tags,
         from,
@@ -421,7 +427,7 @@ fn edited(
     } = args;
     let edit = Edit {
         title,
-        body,
+        body: body_text(body, body_file, read_file)?,
         add_tags,
         remove_tags,
         from,
@@ -432,7 +438,24 @@ fn edited(
     Ok(Reply::Edited(notebook.edit(&id, &edit, today)?))
 }
 
-fn draft(args: AddArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
+/// The body a command carries: the text on the command line, or the text
+/// of the file `--body-file` names, read by the host. Clap refuses the two
+/// flags together, so the text wins where both arrive.
+fn body_text(
+    inline: Option<String>,
+    file: Option<String>,
+    read_file: &dyn Fn(&str) -> Result<String, StorageError>,
+) -> Result<Option<String>, NotebookError> {
+    match (inline, file) {
+        (Some(text), _) => Ok(Some(text)),
+        (None, Some(path)) => read_file(&path)
+            .map(Some)
+            .map_err(|error| file_refusal("body-file", &error)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn draft(args: AddArgs, body: String, git_by: impl FnOnce() -> Option<String>) -> Draft {
     let mut draft = Draft::new(args.record_type, &args.title);
     draft.id = args.id;
     draft.by = args.by.or_else(git_by);
@@ -440,7 +463,7 @@ fn draft(args: AddArgs, git_by: impl FnOnce() -> Option<String>) -> Draft {
     draft.from = args.from;
     draft.tags = args.tags;
     draft.links = args.links.iter().map(|raw| parsed_link(raw)).collect();
-    draft.body = args.body.unwrap_or_default();
+    draft.body = body;
     draft.priority = args.priority;
     draft.kind = args.kind;
     draft.supersedes = args.supersedes;
@@ -506,7 +529,7 @@ fn chosen_closing(offered: [Option<Closing>; 7]) -> Result<Closing, NotebookErro
 fn close_reply(
     notebook: &mut Notebook<'_>,
     args: CloseArgs,
-    read_report: &dyn Fn(&str) -> Result<String, StorageError>,
+    read_file: &dyn Fn(&str) -> Result<String, StorageError>,
     git_by: impl FnOnce() -> Option<String>,
     today: &str,
 ) -> Result<Closed, NotebookError> {
@@ -531,7 +554,7 @@ fn close_reply(
         resolved_by.map(Closing::ResolvedBy),
     ])? {
         Closing::Ingest(path) => {
-            let report = read_report(&path).map_err(|error| report_refusal(&error))?;
+            let report = read_file(&path).map_err(|error| file_refusal("note", &error))?;
             notebook.close_with_report(&id, &report, git_by().as_deref(), today)
         }
         Closing::Stored(proof) => notebook.close(&id, &proof, today),
@@ -543,15 +566,15 @@ fn close_reply(
 /// The close flags as one phrase, so the two refusals name the same set.
 const CLOSE_FLAGS: &str = "--note <path>, --pr <url>, --sha <sha>, --report <path>, --no-proof, --reason \"<why>\", or --resolved-by <id>";
 
-/// A report the caller named and the shell could not read. The path came
-/// off the command line, so every way it can fail is a refused argument the
-/// caller retypes — never the storage failure this error type carries when
-/// it is the notebook itself that could not be read.
-fn report_refusal(error: &StorageError) -> NotebookError {
+/// A file the caller named under `flag` and the shell could not read. The
+/// path came off the command line, so every way it can fail is a refused
+/// argument the caller retypes — never the storage failure this error type
+/// carries when it is the notebook itself that could not be read.
+fn file_refusal(flag: &str, error: &StorageError) -> NotebookError {
     let reason = match error {
-        StorageError::NotFound { path } => format!("note: no file at `{path}`"),
-        StorageError::NotUtf8 { path } => format!("note: `{path}` is not UTF-8"),
-        StorageError::Io { path, detail } => format!("note: cannot read `{path}` — {detail}"),
+        StorageError::NotFound { path } => format!("{flag}: no file at `{path}`"),
+        StorageError::NotUtf8 { path } => format!("{flag}: `{path}` is not UTF-8"),
+        StorageError::Io { path, detail } => format!("{flag}: cannot read `{path}` — {detail}"),
     };
     NotebookError::InvalidArgument { reason }
 }

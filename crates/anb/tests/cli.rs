@@ -21,15 +21,16 @@ fn run(storage: &mut MemoryStorage, line: &[&str]) -> Result<String, String> {
 }
 
 /// [`run`] with files the shell may read by path — the report `--note`
-/// ingests lives outside the notebook, so no Storage serves it. A path the
-/// list does not name is a file that is not there.
+/// ingests and the body `--body-file` carries live outside the notebook,
+/// so no Storage serves them. A path the list does not name is a file that
+/// is not there.
 fn run_reading(
     storage: &mut MemoryStorage,
     line: &[&str],
-    reports: &[(&str, &str)],
+    files: &[(&str, &str)],
 ) -> Result<String, String> {
     run_with(storage, line, &|path: &str| {
-        reports
+        files
             .iter()
             .find(|(named, _)| *named == path)
             .map(|(_, text)| (*text).to_owned())
@@ -40,13 +41,13 @@ fn run_reading(
 }
 
 /// One command line against a host whose one reach outside the notebook —
-/// the report it reads — the case chooses.
+/// the file it reads — the case chooses.
 fn run_with(
     storage: &mut MemoryStorage,
     line: &[&str],
-    read_report: &dyn Fn(&str) -> Result<String, StorageError>,
+    read_file: &dyn Fn(&str) -> Result<String, StorageError>,
 ) -> Result<String, String> {
-    run_behind(storage, None, line, read_report)
+    run_behind(storage, None, line, read_file)
 }
 
 /// [`run_with`] against a project whose user's notebook, when one is given,
@@ -55,7 +56,7 @@ fn run_behind(
     storage: &mut MemoryStorage,
     user_notebook: Option<&dyn anb_core::Storage>,
     line: &[&str],
-    read_report: &dyn Fn(&str) -> Result<String, StorageError>,
+    read_file: &dyn Fn(&str) -> Result<String, StorageError>,
 ) -> Result<String, String> {
     let mut args = vec!["anb"];
     args.extend_from_slice(line);
@@ -64,7 +65,7 @@ fn run_behind(
     let wants_json = cli.json;
     let host = Host {
         git_by: || Some(GIT_IDENTITY.to_owned()),
-        read_report,
+        read_file,
         lost_proofs: &nothing_lost,
         user_notebook,
         project_dir: std::path::Path::new("."),
@@ -89,7 +90,7 @@ fn run_behind(
 fn undated_host() -> Host<'static> {
     Host {
         git_by: || None,
-        read_report: &missing_report,
+        read_file: &missing_report,
         lost_proofs: &nothing_lost,
         user_notebook: None,
         project_dir: std::path::Path::new("."),
@@ -856,6 +857,66 @@ mod knowledge_replies {
         );
         let written = storage.read("notes/note.record.md").unwrap();
         assert!(written.contains("\nkind: term\n"), "{written}");
+    }
+
+    #[test]
+    fn add_takes_the_body_from_a_file() {
+        let mut storage = MemoryStorage::new();
+        let model = "# The operation library\n\nAn operation is reviewed before it is published.\n";
+        run_reading(
+            &mut storage,
+            &[
+                "add",
+                "note",
+                "The operation library",
+                "--kind",
+                "model",
+                "--body-file",
+                "model.md",
+            ],
+            &[("model.md", model)],
+        )
+        .expect("the command must succeed");
+        let written = storage.read("notes/note.the-operation-library.md").unwrap();
+        assert!(
+            written.ends_with(model),
+            "the file's text is the body, as --body would have landed it: {written}"
+        );
+    }
+
+    #[test]
+    fn a_body_file_that_is_not_there_is_a_recovery_payload() {
+        let mut storage = MemoryStorage::new();
+        assert_snapshot!(
+            run(&mut storage, &["add", "note", "A fact", "--kind", "fact", "--body-file", "missing.md"])
+                .expect_err("the command must be refused"),
+            @r#"
+        error[invalid-argument]: body-file: no file at `missing.md`
+        try: anb add note "<title>"
+        "#
+        );
+        assert!(
+            storage.list("notes").unwrap().is_empty(),
+            "nothing is written"
+        );
+    }
+
+    #[test]
+    fn a_body_beside_a_body_file_is_refused_by_the_command_line() {
+        let parsed = Cli::try_parse_from([
+            "anb",
+            "add",
+            "note",
+            "A fact",
+            "--body",
+            "inline",
+            "--body-file",
+            "fact.md",
+        ]);
+        let Err(error) = parsed else {
+            panic!("the two flags exclude each other")
+        };
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 
     #[test]
@@ -1938,6 +1999,7 @@ fn shell_words(line: &str) -> impl Iterator<Item = String> {
 
 mod maintenance_replies {
     use super::*;
+    use anb_core::Storage as _;
 
     fn closed_task(id: &str) -> (String, String) {
         (
@@ -2133,7 +2195,7 @@ mod maintenance_replies {
             &mut storage,
             Host {
                 git_by: || None,
-                read_report: &missing_report,
+                read_file: &missing_report,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
                 project_dir: std::path::Path::new("."),
@@ -2163,7 +2225,7 @@ mod maintenance_replies {
             &mut storage,
             Host {
                 git_by: || None,
-                read_report: &missing_report,
+                read_file: &missing_report,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
                 project_dir: std::path::Path::new("."),
@@ -2547,6 +2609,57 @@ mod maintenance_replies {
         ok: edit task.demo — body
         dangling-mention[1]: task.ghost — backtick to quote, or create the record
         "
+        );
+    }
+
+    #[test]
+    fn an_edit_takes_the_whole_body_from_standard_input() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        assert_snapshot!(
+            run_reading(
+                &mut storage,
+                &["edit", "task.demo", "--body-file", "-"],
+                &[("-", "The body as piped.\n")],
+            )
+            .expect("the command must succeed"),
+            @"ok: edit task.demo — body"
+        );
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .ends_with("---\n\nThe body as piped.\n")
+        );
+    }
+
+    #[test]
+    fn an_empty_body_file_clears_the_body_as_an_empty_body_does() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md".to_owned(),
+            record_file(
+                "task.demo",
+                "task",
+                "open",
+                "A demo record",
+                &[],
+                "\nOld prose.\n",
+            ),
+        )]);
+        assert_snapshot!(
+            run_reading(
+                &mut storage,
+                &["edit", "task.demo", "--body-file", "empty.md"],
+                &[("empty.md", "")],
+            )
+            .expect("the command must succeed"),
+            @"ok: edit task.demo — body"
+        );
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .ends_with("---\n"),
+            "no body follows the envelope"
         );
     }
 

@@ -51,7 +51,7 @@ Notes hold maintained knowledge, including ideas that have not become work yet. 
 | `model` | Domain boundaries, concepts, relationships, ownership and invariants |
 | `spec` | Expected behavior, scope, exclusions and acceptance criteria |
 
-Correct a Note with `anb edit <id> --body "<text>"` as understanding changes. Retire it when it is no longer useful. An active idea or spec is not necessarily accepted: its agreement status belongs in its body. The CLI validates the kind and lifecycle, not the truth of its contents or the user's agreement.
+Correct a Note with `anb edit <id> --body "<text>"` as understanding changes, or with `--body-file <path>` when the body is a document rather than a sentence; `-` reads standard input. Retire it when it is no longer useful. An active idea or spec is not necessarily accepted: its agreement status belongs in its body. The CLI validates the kind and lifecycle, not the truth of its contents or the user's agreement.
 
 [Developing an idea](ideas.md) explains the route from a ticket or conversation to delivery. [Domain modeling](domain.md) explains when a glossary needs a model as well.
 

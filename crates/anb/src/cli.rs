@@ -194,6 +194,10 @@ pub struct AddArgs {
     /// The prose under the envelope; omitted, the record opens empty.
     #[arg(long)]
     pub body: Option<String>,
+    /// The prose under the envelope, read from a file; `-` reads standard
+    /// input. Refused beside --body.
+    #[arg(long = "body-file", value_name = "PATH", conflicts_with = "body")]
+    pub body_file: Option<String>,
     /// The accountable identity; omitted, git identity fills it.
     #[arg(long)]
     pub by: Option<String>,
@@ -220,6 +224,10 @@ pub struct EditArgs {
     /// The whole body, replaced; empty clears it.
     #[arg(long)]
     pub body: Option<String>,
+    /// The whole body, replaced with a file's text; `-` reads standard
+    /// input. Refused beside --body.
+    #[arg(long = "body-file", value_name = "PATH", conflicts_with = "body")]
+    pub body_file: Option<String>,
     /// Add a tag; repeatable.
     #[arg(long = "tag", value_name = "TAG")]
     pub add_tags: Vec<String>,
@@ -245,7 +253,8 @@ pub struct EditArgs {
 pub struct CloseArgs {
     pub id: String,
     /// Proof, the default route: the report file, ingested as a Note the
-    /// notebook carries, so a reader reaches it through the notebook alone.
+    /// notebook carries, so a reader reaches it through the notebook alone;
+    /// `-` reads standard input.
     #[arg(long)]
     pub note: Option<String>,
     /// Proof: the pull request that shipped the work.
