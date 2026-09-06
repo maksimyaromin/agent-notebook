@@ -195,6 +195,10 @@ pub fn runnable(verb: &str, id: Option<&str>) -> Option<Vec<String>> {
         ("edit", Some(id)) => vec![format!("anb edit {id} --title \"<title>\"")],
         ("add", _) => vec!["anb add task \"<title>\"".to_owned()],
         ("search", _) => vec!["anb search \"<text>\"".to_owned()],
+        ("setup", _) => crate::setup::agent_names()
+            .into_iter()
+            .map(|agent| format!("anb setup --agent {agent}"))
+            .collect(),
         _ => return None,
     };
     Some(shapes)

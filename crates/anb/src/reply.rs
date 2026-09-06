@@ -289,7 +289,9 @@ pub fn execute(
             all,
         }),
         Command::Graph(args) => graphed(&notebook, args),
-        Command::Setup { remove } => Ok(Reply::SetUp(setup::apply(project_dir, remove)?)),
+        Command::Setup { agents, remove } => {
+            Ok(Reply::SetUp(setup::apply(project_dir, remove, &agents)?))
+        }
         Command::Skill { dir, check } => Ok(Reply::Skill(skilled(dir.as_deref(), check)?)),
         Command::Status { budget, hook } => {
             status_reply(&notebook, budget, hook, lost_proofs, today)

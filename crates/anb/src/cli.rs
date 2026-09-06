@@ -148,12 +148,17 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Wire the agents to the notebook, in this directory: the one-line
-    /// snippet in `AGENTS.md` and `CLAUDE.md`, the `SessionStart` hook for
-    /// Claude Code and Codex, and the anb skills where each agent looks for
-    /// skills. Re-running patches in place.
+    /// Wire the named agents to the notebook, in this directory: the
+    /// one-line snippet in the instruction file each reads, the
+    /// `SessionStart` hook where its host runs one, and the anb skills
+    /// where it looks for skills. Re-running patches in place.
     Setup {
-        /// Take out what setup put in, and nothing else.
+        /// An agent to wire: `claude-code`, `codex`, or `agents-md` for any
+        /// tool that reads `AGENTS.md` and `.agents/skills`; repeatable.
+        #[arg(long = "agent", value_name = "NAME")]
+        agents: Vec<String>,
+        /// Take out what setup put in for the named agents, and nothing
+        /// else.
         #[arg(long)]
         remove: bool,
     },

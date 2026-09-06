@@ -168,6 +168,7 @@ fn setup_value(done: &SetUp) -> Value {
         ("ok", json!("setup")),
         ("removed", json!(done.removed)),
         ("files", json!(files)),
+        ("skipped", json!(done.skipped)),
         ("notice", json!(done.notice)),
     ]))
 }

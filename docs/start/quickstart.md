@@ -16,10 +16,10 @@ npm install -g @supolka/agent-notebook
 In the root of the repository where you want to work, run:
 
 ```sh
-anb setup
+anb setup --agent claude-code
 ```
 
-Setup adds notebook instructions to `AGENTS.md` and `CLAUDE.md`, installs the `anb` and `anb-atlas` skills, and configures session-start hooks for Claude Code and Codex. It reports each file it writes or leaves alone. [Wiring agents](../guides/agents.md) lists the files.
+Name each agent that works in the repository: `claude-code`, `codex`, or `agents-md` for any tool that reads `AGENTS.md` and `.agents/skills`; repeat the flag for several. Setup adds the notebook instructions to the file that agent reads, installs the `anb` and `anb-atlas` skills where it looks for them, and configures the session-start hook where its host runs one. It reports each file it writes or leaves alone. [Wiring agents](../guides/agents.md) lists the files.
 
 For Codex, trust the project and review the hook with `/hooks`. Start a new agent session in this repository so it can load the installed instructions and skills. With a compatible hook, Status arrives at session start. For another agent, ask it to read the installed `anb` skill and begin with `anb status`.
 
