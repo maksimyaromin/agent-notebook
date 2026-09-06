@@ -9,7 +9,7 @@ The [Release workflow](https://github.com/maksimyaromin/agent-notebook/blob/main
 
 The npm package `@supolka/agent-notebook` supplies a launcher that selects a native binary from an optional platform dependency. The packages cover macOS and Linux on x64 and arm64, and Windows on x64. npm downloads the packages during installation; no postinstall script fetches a binary.
 
-[GitHub releases](https://github.com/maksimyaromin/agent-notebook/releases) provide the binaries directly, one archive per platform, with `SHA256SUMS`. These do not require Node.js. The package and source versions agree, while a release tag names a date: for example, `v2026.09.06` ships package version `0.1.1`.
+[GitHub releases](https://github.com/maksimyaromin/agent-notebook/releases) provide the binaries directly, one archive per platform, with `SHA256SUMS`. These do not require Node.js. The package and source versions agree, while a release tag names a day. The day's first release is `vYYYY.MM.DD`; each further release that day appends `.N`, counting from 1. So `v2026.09.06` shipped package version `0.1.1`, and `v2026.09.06.1`, the second release of that day, ships `0.2.0`.
 
 ## Prepare the release
 
@@ -25,7 +25,13 @@ Write the release entry in `CHANGELOG.md` under a heading such as `## agent-note
 sh scripts/release/changelog-notes.sh v2026.09.06
 ```
 
-Tag the reviewed commit with the date tag and push that tag. The workflow builds each platform, packages the release assets, checks version agreement and runs the npm launcher against the Linux binary. It publishes platform packages before the launcher so a newly installed launcher can resolve its dependencies.
+Tag the merged commit with the day's tag and push it. The workflow refuses a tag of another shape, and the same check answers beforehand:
+
+```sh
+sh scripts/release/check-tag.sh v2026.09.06.1
+```
+
+The workflow builds each platform, packages the release assets, checks version agreement and runs the npm launcher against the Linux binary. It publishes platform packages before the launcher so a newly installed launcher can resolve its dependencies.
 
 The repository variable `RELEASE_DRY_RUN` must equal `false` for npm publication. A manual workflow run also has a dry-run input, enabled by default. That input controls npm publication; the GitHub release job runs for tag refs independently of it. Published npm versions cannot be reused, so a tag that should publish packages needs an unpublished package version.
 
@@ -34,7 +40,7 @@ The repository variable `RELEASE_DRY_RUN` must equal `false` for npm publication
 Check the build, GitHub release and npm publish jobs separately. Confirm that the release has all platform archives and checksums and that the launcher and platform packages are available at the intended version. From an empty directory, run the published launcher at that explicit version:
 
 ```sh
-npx -y @supolka/agent-notebook@0.1.1 --version
+npx -y @supolka/agent-notebook@0.2.0 --version
 ```
 
 The numbers above illustrate a published release; substitute the version being released.

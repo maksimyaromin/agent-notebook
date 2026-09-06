@@ -1,5 +1,24 @@
 # Changelog
 
+## agent-notebook v2026.09.06.1
+
+The second release of the day, and the first named by the same-day counter. Notes take three new kinds, the skills teach the author's own method from an idea to its proof, and the book and the README present the product in that voice. The packages move to 0.2.0: an older binary refuses the new Note kinds.
+
+### New
+
+- **Three kinds of Note for shaping work.** `idea` keeps a request with its source, its constraints and where the agreement stands; `model` holds a piece of the domain as the project understands it; `spec` states what a change is expected to do. They join `fact`, `term` and `guide`, and none of them turns knowledge into a Task. (#39)
+- **The author method in the skill.** The `anb` skill starts a change from an idea Note, lets Tasks emerge `--from` it, keeps one Task active, cites what a record rests on and closes with evidence. The atlas skill applies the same method before it acts on review comments and tells a record's type from its kind. (#39)
+- **The Ideas and Domain guides.** Two pages in the book on capturing a request and keeping a domain model, beside the guides on the session, Tasks and knowledge. (#39)
+- **The project's mark.** The lockup at the top of the README, the mark beside the site title, the favicons and a brand directory with every variant. (#34, #38)
+
+### Improved
+
+- **The book in the author's voice.** The README and the landing page present the product, the contribution guide addresses developers who know their craft, and the release guide follows the workflow as it runs, with recovery when publication only partly succeeds. (#39)
+- **A release tag is its day.** The first release of a day is `vYYYY.MM.DD`; each further release that day appends `.N`, counting from 1. The Release workflow refuses a tag of another shape before it creates a release or publishes a package. (#40)
+- **The documentation build warns about nothing.** A declared translations collection, a 404 page of the site's own, and a chunk limit set just above the diagram grammar. (#36)
+
+Packages in this release: `@supolka/agent-notebook@0.2.0` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.06
 
 The first release published entirely by the repository: a tag builds every platform, creates the GitHub release and publishes the packages through npm's trusted publishing, with no token anywhere. Nothing changes for a user of `anb`; the packages move to 0.1.1 so the chain has something to publish.

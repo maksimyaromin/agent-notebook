@@ -1,6 +1,6 @@
 {
   "name": "@supolka/agent-notebook",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "agent-notebook: a project's working memory as typed records in plain files, read and written by any coding agent through one CLI",
   "license": "MIT",
   "author": {
@@ -34,11 +34,11 @@
     "node": ">=20"
   },
   "optionalDependencies": {
-    "@supolka/agent-notebook-darwin-arm64": "0.1.1",
-    "@supolka/agent-notebook-darwin-x64": "0.1.1",
-    "@supolka/agent-notebook-linux-x64": "0.1.1",
-    "@supolka/agent-notebook-linux-arm64": "0.1.1",
-    "@supolka/agent-notebook-win32-x64": "0.1.1"
+    "@supolka/agent-notebook-darwin-arm64": "0.2.0",
+    "@supolka/agent-notebook-darwin-x64": "0.2.0",
+    "@supolka/agent-notebook-linux-x64": "0.2.0",
+    "@supolka/agent-notebook-linux-arm64": "0.2.0",
+    "@supolka/agent-notebook-win32-x64": "0.2.0"
   },
   "publishConfig": {
     "access": "public"

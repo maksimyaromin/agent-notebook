@@ -1,6 +1,6 @@
 #!/bin/sh
-# One version everywhere: the Cargo workspace, every npm package, the pins
-# the shim package puts on its platform packages, and the tag when given.
+# One version everywhere: the Cargo workspace, every npm package and the pins
+# the shim package puts on its platform packages.
 set -eu
 cd "$(dirname "$0")/../.."
 cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -19,12 +19,5 @@ for pin in $pins; do
     status=1
   fi
 done
-if [ -n "${1:-}" ]; then
-  tagged=${1#v}
-  if [ "$tagged" != "$cargo_version" ]; then
-    echo "the tag names $tagged and Cargo.toml $cargo_version"
-    status=1
-  fi
-fi
-[ $status -eq 0 ] && echo "ok: every manifest is at $cargo_version${1:+, as is the tag}"
+[ $status -eq 0 ] && echo "ok: every manifest is at $cargo_version"
 exit $status

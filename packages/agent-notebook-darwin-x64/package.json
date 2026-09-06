@@ -1,6 +1,6 @@
 {
   "name": "@supolka/agent-notebook-darwin-x64",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "The anb binary for macOS on Intel; installed by @supolka/agent-notebook, never on its own",
   "license": "MIT",
   "repository": {
