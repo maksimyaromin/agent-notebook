@@ -35,19 +35,19 @@ Each section also has a row limit independent of the budget: five rows, or five 
 
 Debt is computed when the notebook is read, from dates, states and relationships. It does not change records automatically. These are the signals it reports:
 
-| Class | Fires when | Clock (days, config key) |
-|---|---|---|
-| `task-stale` | an active Task has no log entry for this long | 7, `debt-task-stale` |
-| `question-age` | a Question has stayed open this long | 14, `debt-question-age`; 7, `debt-question-age-task-born`, when born from a Task |
-| `origin-closed` | a Question's origin Task closed and the Question is still open | at once |
-| `hold-stale` | a hold has stood this long | 14, `debt-hold-stale` |
-| `review-stale` | a Task has waited in review this long | 7, `debt-review-stale` |
-| `review-due` | a record's `review-by` date has passed | at once |
-| `dangling-mention` | a body or comment cites an id that exists nowhere | at once |
-| `may-conflict` | a live Decision cites another and neither supersedes | at once |
-| `shadow` | a project Decision cites one of the user's global Decisions | at once |
-| `lost-proof` | the CLI finds a missing commit or report file linked by a record in the working set | at once |
-| `invalid` | a file carries error findings; `check` has the lines | at once |
+| Class | Fires when | Clock (days, config key) | JSON fields |
+|---|---|---|---|
+| `task-stale` | an active Task has no log entry for this long | 7, `debt-task-stale` | `id`, `days` |
+| `question-age` | a Question has stayed open this long | 14, `debt-question-age`; 7, `debt-question-age-task-born`, when born from a Task | `id`, `days` |
+| `origin-closed` | a Question's origin Task closed and the Question is still open | at once | `id`, `origin` |
+| `hold-stale` | a hold has stood this long | 14, `debt-hold-stale` | `id`, `days` |
+| `review-stale` | a Task has waited in review this long | 7, `debt-review-stale` | `id`, `days` |
+| `review-due` | a record's `review-by` date has passed | at once | `id`, `date` |
+| `dangling-mention` | a body or comment cites an id that exists nowhere | at once | `id`, `target` |
+| `may-conflict` | a live Decision cites another and neither supersedes | at once | `pair`: two cited records |
+| `shadow` | a project Decision cites one of the user's global Decisions | at once | `project`, `global`: cited records |
+| `lost-proof` | the CLI finds a missing commit or report file linked by a record in the working set | at once | `id`, `proof` |
+| `invalid` | a file carries error findings; `check` has the lines | at once | `file`, `errors` |
 
 External proof checks use the filesystem for report paths and git for commit proofs. They inspect the working set and report missing evidence without changing records. Missing report Notes are broken notebook references, reported by `check`; they are not external proof checks. Pull request URLs are not checked, and an unavailable git query cannot establish that a commit is missing. Absence of `lost-proof` is not verification of the work.
 
@@ -57,4 +57,4 @@ External proof checks use the filesystem for report paths and git for commit pro
 
 ## JSON
 
-`anb --json status` carries the same sections as objects: `quiet`, `counts`, `active`, `review`, `held`, `rules`, `ready`, `epics`, `debt`, each list as `{count, rows}`.
+`anb --json status` carries the same sections as objects: `quiet`, `counts`, `active`, `review`, `held`, `rules`, `ready`, `epics`, `debt`, each list as `{count, rows}`. A Debt row carries `code`, the fields the table above names for its class, and `line`, the text the plain rendering prints. A cited record is `{id, by, via}`, with `by` and `via` absent when the record carries none; the `pair` of a `may-conflict` row lists the two in the order the line prints them.

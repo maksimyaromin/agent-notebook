@@ -578,6 +578,40 @@ fn active_task_value(task: &anb_core::ActiveTask) -> Value {
     ]))
 }
 
+/// The signal's own values ride beside the printed line, so a program
+/// reads them as data and never parses the sentence.
 fn debt_value(signal: &DebtSignal) -> Value {
-    json!({"code": signal.code(), "line": signal.line()})
+    let mut object = fields([("code", json!(signal.code()))]);
+    object.extend(debt_fields(signal));
+    object.insert("line".to_owned(), json!(signal.line()));
+    Value::Object(object)
+}
+
+fn debt_fields(signal: &DebtSignal) -> Map<String, Value> {
+    match signal {
+        DebtSignal::TaskStale { id, days }
+        | DebtSignal::QuestionAge { id, days }
+        | DebtSignal::HoldStale { id, days }
+        | DebtSignal::ReviewStale { id, days } => {
+            fields([("id", json!(id)), ("days", json!(days))])
+        }
+        DebtSignal::OriginClosed { id, origin } => {
+            fields([("id", json!(id)), ("origin", json!(origin))])
+        }
+        DebtSignal::ReviewDue { id, date } => fields([("id", json!(id)), ("date", json!(date))]),
+        DebtSignal::DanglingMention { id, target } => {
+            fields([("id", json!(id)), ("target", json!(target))])
+        }
+        DebtSignal::MayConflict { first, second } => {
+            fields([("pair", json!([cited_value(first), cited_value(second)]))])
+        }
+        DebtSignal::Shadow { project, user } => fields([
+            ("project", cited_value(project)),
+            ("global", cited_value(user)),
+        ]),
+        DebtSignal::Invalid { path, errors } => {
+            fields([("file", json!(path)), ("errors", json!(errors))])
+        }
+        DebtSignal::LostProof { id, proof } => fields([("id", json!(id)), ("proof", json!(proof))]),
+    }
 }

@@ -1551,6 +1551,97 @@ mod json_surface {
     }
 
     #[test]
+    fn a_json_debt_row_carries_the_signals_fields_beside_its_line() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.quiet.md".to_owned(),
+                "---\nid: task.quiet\ntype: task\nstate: active\ntitle: A demo record\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n".to_owned(),
+            ),
+            (
+                "notes/note.cites.md".to_owned(),
+                record_file(
+                    "note.cites",
+                    "note",
+                    "active",
+                    "A demo record",
+                    &[],
+                    "cites task.gone here.\n",
+                ),
+            ),
+            (
+                "decisions/decision.first.md".to_owned(),
+                record_file(
+                    "decision.first",
+                    "decision",
+                    "active",
+                    "A demo record",
+                    &["by: Ada"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.second.md".to_owned(),
+                record_file(
+                    "decision.second",
+                    "decision",
+                    "active",
+                    "A demo record",
+                    &["by: Bo", "via: codex"],
+                    "departs from decision.first.\n",
+                ),
+            ),
+            (
+                "tasks/task.bad.md".to_owned(),
+                "---\nid: task.bad\ntype: task\nstate: bogus\ntitle: Broken\ncreated: 2026-08-24\n---\n".to_owned(),
+            ),
+        ]);
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
+        let rows = value["debt"]["rows"].as_array().unwrap();
+        let row = |code: &str| {
+            rows.iter()
+                .find(|row| row["code"] == code)
+                .unwrap_or_else(|| panic!("no {code} row in {rows:?}"))
+        };
+
+        assert_eq!(row("task-stale")["id"], serde_json::json!("task.quiet"));
+        assert_eq!(
+            row("task-stale")["days"],
+            serde_json::json!(27),
+            "the days between the last touch and today"
+        );
+        assert_eq!(
+            row("dangling-mention")["id"],
+            serde_json::json!("note.cites")
+        );
+        assert_eq!(
+            row("dangling-mention")["target"],
+            serde_json::json!("task.gone")
+        );
+        assert_eq!(
+            row("may-conflict")["pair"],
+            serde_json::json!([
+                {"id": "decision.first", "by": "Ada"},
+                {"id": "decision.second", "by": "Bo", "via": "codex"}
+            ]),
+            "the pair as the line prints it, each side a cited record"
+        );
+        assert_eq!(
+            row("invalid")["file"],
+            serde_json::json!("tasks/task.bad.md")
+        );
+        assert_eq!(
+            row("invalid")["errors"],
+            serde_json::json!(1),
+            "one error finding: the state"
+        );
+        assert!(
+            row("invalid")["line"].is_string(),
+            "the printed line stays beside the fields"
+        );
+    }
+
+    #[test]
     fn a_decide_reply_carries_the_nudge() {
         let mut storage = storage_with(&[(
             "decisions/decision.first.md".to_owned(),
