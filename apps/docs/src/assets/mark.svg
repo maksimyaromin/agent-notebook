@@ -1,4 +1,5 @@
-<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Supolka agent-notebook">
+<!-- The window is the lockup's geometry at the site title's type size: the theme fixes this image at 40px and the title at 24px, so 13 units of the mark stand for the title's em, the line runs 1.9 units under the baseline, and the box ends 1.4 units past the drawing so the theme's gap adds up to the lockup's. -->
+<svg viewBox="0 2.9 27.3 21.7" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Supolka agent-notebook">
   <style>
     @media (prefers-color-scheme: dark) {
       .s { stroke: #8a91ad }
