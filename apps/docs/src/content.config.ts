@@ -1,4 +1,5 @@
-import { docsSchema } from '@astrojs/starlight/schema'
+import { i18nLoader } from '@astrojs/starlight/loaders'
+import { docsSchema, i18nSchema } from '@astrojs/starlight/schema'
 import { defineCollection } from 'astro:content'
 import { glob } from 'astro/loaders'
 
@@ -11,4 +12,7 @@ export const collections = {
     loader: glob({ base: '../../docs', pattern: '**/[^_]*.md' }),
     schema: docsSchema(),
   }),
+  // Starlight reads its translations collection on every build. Declared and
+  // empty, it reads as no translations; undeclared, Astro warns of a mistake.
+  i18n: defineCollection({ loader: i18nLoader(), schema: i18nSchema() }),
 }

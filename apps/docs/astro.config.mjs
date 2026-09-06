@@ -36,6 +36,10 @@ const pageUrl = (slug) => new URL(`/${slug}/`, site).href
 
 export default defineConfig({
   site,
+  // The largest chunk is the grammar tooling mermaid's diagram parsers share,
+  // about 660 kB minified, fetched only by a page that shows a diagram. The
+  // limit sits just above it so that growth past it still warns.
+  vite: { build: { chunkSizeWarningLimit: 700 } },
   integrations: [
     mermaid({ theme: 'neutral', autoTheme: true }),
     linkRewriting,
@@ -51,6 +55,8 @@ export default defineConfig({
       // fallbacks it does not emit: a raster icon for the browsers that take
       // one over an SVG, and the icon a phone uses on its home screen.
       favicon: '/favicon.svg',
+      // The 404 page is src/pages/404.astro, so the theme's own route is off.
+      disable404Route: true,
       head: [
         { tag: 'link', attrs: { rel: 'icon', href: '/favicon-32.png', sizes: '32x32' } },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },

@@ -1,0 +1,21 @@
+---
+// The page a wrong address reaches, built as 404.html at the site root, where
+// the host serves it for any address that names nothing.
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Page not found',
+    description: 'Nothing is at this address.',
+    template: 'splash',
+    editUrl: false,
+    lastUpdated: false,
+    pagefind: false,
+    hero: {
+      tagline:
+        'Nothing is at this address. Search finds any word in the book, and the front page says where to start.',
+      actions: [{ text: 'Front page', link: '/', icon: 'right-arrow' }],
+    },
+  }}
+/>
