@@ -47,7 +47,7 @@ ok: close task.parser-accepts-fenced-bodies — active→closed
 report: note.report-parser-accepts-fenced-bodies
 ```
 
-The reply lists newly unblocked Tasks and any Questions still open from this Task. Resolve those Questions or record why they remain open. Then run `anb archive <id>` to move the Task and its report Notes into the archive. The log and ids are preserved.
+The report's id is `note.report-` followed by the Task's own slug, so a reader can name it from the Task; a second report on the same Task, after a reopen, takes a collision suffix. The reply lists newly unblocked Tasks and any Questions still open from this Task. Resolve those Questions or record why they remain open. Then run `anb archive <id>` to move the Task and its report Notes into the archive. The log and ids are preserved.
 
 The tool records evidence; it does not evaluate its quality. Write the report for someone who did not see the work happen.
 

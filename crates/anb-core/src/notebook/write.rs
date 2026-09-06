@@ -228,47 +228,59 @@ pub(super) fn parsed_type(id: &str) -> Result<RecordType, NotebookError> {
     }
 }
 
-/// The draft's id: the caller's, validated and free, or one minted from
-/// the title — retried with a two-character suffix on collision, since
-/// ids are never reused.
+/// The draft's id: the caller's, validated and free, or one minted on the
+/// base `minted` names, retried with a two-character suffix on collision,
+/// since ids are never reused.
 pub(super) fn resolve_draft_id(
     draft: &Draft,
     claims: &BTreeMap<String, String>,
+    minted: impl FnOnce() -> Result<String, NotebookError>,
 ) -> Result<String, NotebookError> {
-    if let Some(id) = &draft.id {
-        if let Some(why) = grammar::id_error(id) {
-            return Err(NotebookError::InvalidArgument {
-                reason: format!("id: {why}"),
-            });
-        }
-        let id_type = parsed_type(id)?;
-        if id_type != draft.record_type {
-            return Err(NotebookError::InvalidArgument {
-                reason: format!(
-                    "id: `{id}` names a {}, the draft is a {}",
-                    id_type.word(),
-                    draft.record_type.word()
-                ),
-            });
-        }
-        if let Some(holder) = claims.get(id.as_str()) {
-            return Err(NotebookError::DuplicateId {
-                id: id.clone(),
-                holder: holder.clone(),
-            });
-        }
-        return Ok(id.clone());
+    let Some(id) = &draft.id else {
+        return free_id(&minted()?, claims);
+    };
+    if let Some(why) = grammar::id_error(id) {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!("id: {why}"),
+        });
     }
+    let id_type = parsed_type(id)?;
+    if id_type != draft.record_type {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!(
+                "id: `{id}` names a {}, the draft is a {}",
+                id_type.word(),
+                draft.record_type.word()
+            ),
+        });
+    }
+    if let Some(holder) = claims.get(id.as_str()) {
+        return Err(NotebookError::DuplicateId {
+            id: id.clone(),
+            holder: holder.clone(),
+        });
+    }
+    Ok(id.clone())
+}
 
+/// The id a draft mints from its title: the type word and the title's
+/// slug.
+///
+/// # Errors
+/// [`NotebookError::InvalidArgument`] when the title has no slug in it.
+pub(super) fn title_id(draft: &Draft) -> Result<String, NotebookError> {
     let slug = slugify(&draft.title);
     if slug.is_empty() {
         return Err(NotebookError::InvalidArgument {
             reason: "title: yields an empty id; pass an explicit id".to_owned(),
         });
     }
-    let base = format!("{}.{slug}", draft.record_type.word());
-    if !claims.contains_key(&base) {
-        return Ok(base);
+    Ok(format!("{}.{slug}", draft.record_type.word()))
+}
+
+fn free_id(base: &str, claims: &BTreeMap<String, String>) -> Result<String, NotebookError> {
+    if !claims.contains_key(base) {
+        return Ok(base.to_owned());
     }
     for attempt in 0..SUFFIX_COUNT {
         let candidate = format!("{base}-{}", base36_pair(attempt));
@@ -320,6 +332,17 @@ pub(super) fn id_claims(
 /// whose report it is and never mistakes it for the Task itself.
 pub(super) fn report_note_title(task_title: &str) -> String {
     format!("Report: {task_title}")
+}
+
+/// The id an ingested report mints: the Task's own slug under
+/// `note.report-`, so a reader guesses the report from the Task and no id
+/// ends on whatever word a title cut landed on. A slug too long to leave
+/// room for the collision suffix is cut at a word boundary.
+pub(super) fn report_note_id(task_id: &str) -> String {
+    const PREFIX: &str = "note.report-";
+    let slug = task_id.split_once('.').map_or(task_id, |(_, slug)| slug);
+    let room = grammar::ID_CAP - PREFIX.len() - SUFFIX_LEN;
+    format!("{PREFIX}{}", cut_at_word_boundary(slug, room))
 }
 
 /// Splice every requested correction into the file, answering the keys
@@ -474,21 +497,28 @@ fn slugify(title: &str) -> String {
             slug.push('-');
         }
     }
-    let slug = slug.trim_end_matches('-');
-    if slug.len() <= SLUG_CAP {
-        return slug.to_owned();
+    cut_at_word_boundary(slug.trim_end_matches('-'), SLUG_CAP).to_owned()
+}
+
+/// `slug` within `cap` bytes, cut at the last hyphen that fits; a first
+/// word longer than the cap offers no boundary and is cut short.
+fn cut_at_word_boundary(slug: &str, cap: usize) -> &str {
+    if slug.len() <= cap {
+        return slug;
     }
     // One past the cap, so a boundary sitting exactly on it still counts.
-    let within_cap = &slug[..=SLUG_CAP];
-    match within_cap.rfind('-') {
-        Some(boundary) => slug[..boundary].to_owned(),
-        None => slug[..SLUG_CAP].to_owned(),
+    match slug[..=cap].rfind('-') {
+        Some(boundary) => &slug[..boundary],
+        None => &slug[..cap],
     }
 }
 
 /// How many suffixed ids one slug can carry: every two-character base36
 /// pair.
 const SUFFIX_COUNT: usize = 36 * 36;
+
+/// What a collision suffix adds to an id: the hyphen and the pair.
+const SUFFIX_LEN: usize = 3;
 
 fn base36_pair(n: usize) -> String {
     const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";

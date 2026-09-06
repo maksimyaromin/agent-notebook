@@ -267,6 +267,44 @@ mod task_cycle {
     }
 
     #[test]
+    fn a_report_takes_its_id_from_the_task_id_not_its_title() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let closed = Notebook::new(&mut storage)
+            .close_with_report("task.demo", REPORT, None, TODAY)
+            .unwrap();
+        assert_eq!(
+            closed.report_note.as_deref(),
+            Some("note.report-demo"),
+            "the Task is titled `A demo record`; the report is named after its id"
+        );
+        assert!(
+            storage
+                .read("notes/note.report-demo.md")
+                .unwrap()
+                .contains("\ntitle: Report: A demo record\n"),
+            "the title keeps the prefix a listing shows"
+        );
+    }
+
+    #[test]
+    fn a_report_of_a_task_with_a_long_id_is_cut_at_a_word_boundary() {
+        // Fifty-six characters of slug: room under the id cap for the
+        // prefix and a collision suffix ends inside `iota`.
+        let id = "task.alpha-beta-gamma-delta-epsilon-zeta-eta-theta-iota-kappa";
+        let mut storage = storage_with(&[(
+            &format!("tasks/{id}.md"),
+            &record_file(id, "task", "active", &[], ""),
+        )]);
+        let closed = Notebook::new(&mut storage)
+            .close_with_report(id, REPORT, None, TODAY)
+            .unwrap();
+        assert_eq!(
+            closed.report_note.as_deref(),
+            Some("note.report-alpha-beta-gamma-delta-epsilon-zeta-eta-theta")
+        );
+    }
+
+    #[test]
     fn a_replayed_report_close_answers_already_and_mints_no_second_note() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let mut notebook = Notebook::new(&mut storage);
@@ -294,6 +332,7 @@ mod task_cycle {
             .create(
                 &{
                     let mut draft = Draft::new(RecordType::Note, "Report: A demo record");
+                    draft.id = Some("note.report-demo".to_owned());
                     draft.from = Some("task.demo".to_owned());
                     draft.body = REPORT.to_owned();
                     draft
@@ -418,9 +457,9 @@ mod task_cycle {
                 &record_file("task.other", "task", "closed", &[], ""),
             ),
             (
-                "notes/note.report-a-demo-record.md",
+                "notes/note.report-demo.md",
                 &record_file(
-                    "note.report-a-demo-record",
+                    "note.report-demo",
                     "note",
                     "active",
                     &["from: task.other"],
@@ -434,13 +473,13 @@ mod task_cycle {
 
         assert_ne!(
             closed.report_note.as_deref(),
-            Some("note.report-a-demo-record"),
+            Some("note.report-demo"),
             "a Note born from another Task is a different record, not this call's"
         );
         assert_eq!(
-            storage.read("notes/note.report-a-demo-record.md").unwrap(),
+            storage.read("notes/note.report-demo.md").unwrap(),
             record_file(
-                "note.report-a-demo-record",
+                "note.report-demo",
                 "note",
                 "active",
                 &["from: task.other"],

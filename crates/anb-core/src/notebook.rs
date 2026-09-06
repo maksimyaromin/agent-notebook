@@ -580,6 +580,18 @@ impl<'a> Notebook<'a> {
     /// by supersession, [`NotebookError::DuplicateId`] on a taken id, or a
     /// storage failure.
     pub fn create(&mut self, draft: &Draft, today: &str) -> Result<Created, NotebookError> {
+        self.create_minting(draft, today, || write::title_id(draft))
+    }
+
+    /// [`Notebook::create`] with the id minted on the base `minted` names
+    /// when the draft carries none: a Note born as a Task's report is named
+    /// after the Task, every other record after its title.
+    fn create_minting(
+        &mut self,
+        draft: &Draft,
+        today: &str,
+        minted: impl FnOnce() -> Result<String, NotebookError>,
+    ) -> Result<Created, NotebookError> {
         write::guard_today(today)?;
         write::validate_draft(draft)?;
         if let Some(origin) = &draft.from {
@@ -589,7 +601,8 @@ impl<'a> Notebook<'a> {
 
         let corpus = self.live_corpus()?;
         let records = &corpus.records;
-        let id = write::resolve_draft_id(draft, &write::id_claims(records, &corpus.archived))?;
+        let claims = write::id_claims(records, &corpus.archived);
+        let id = write::resolve_draft_id(draft, &claims, minted)?;
         let may_conflict = query::conflict_candidates(draft, records, &corpus.resolver());
         let path = record_path(&id, draft.record_type, false);
         self.storage
@@ -789,7 +802,7 @@ impl<'a> Notebook<'a> {
         draft.from = Some(origin.to_owned());
         draft.by = by.map(str::to_owned);
         report.clone_into(&mut draft.body);
-        let created = self.create(&draft, today)?;
+        let created = self.create_minting(&draft, today, || Ok(write::report_note_id(origin)))?;
         Ok(IngestedReport {
             id: created.id,
             dangling_mentions: created.dangling_mentions,
