@@ -234,6 +234,14 @@ pub struct EditArgs {
     /// Remove a tag; repeatable.
     #[arg(long = "untag", value_name = "TAG")]
     pub remove_tags: Vec<String>,
+    /// Add a link, `<kind> <target>`; repeatable. A Decision that cites
+    /// another as context declares it here, and the pair leaves
+    /// `may-conflict`.
+    #[arg(long = "link", value_name = "LINK")]
+    pub add_links: Vec<String>,
+    /// Remove a link, spelled as it stands; repeatable.
+    #[arg(long = "unlink", value_name = "LINK")]
+    pub remove_links: Vec<String>,
     /// Origin: the record this record was born from.
     #[arg(long)]
     pub from: Option<String>,

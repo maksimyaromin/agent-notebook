@@ -49,6 +49,21 @@ pub struct Link {
     pub target: String,
 }
 
+impl Link {
+    /// The envelope line the link is written as: the kind, one space, the
+    /// target with its ends trimmed.
+    pub(crate) fn line(&self) -> String {
+        format!("{} {}", self.kind, self.target.trim())
+    }
+
+    /// Whether a standing `link` line names this link, however it spaces
+    /// its two halves: a line written by hand is matched as the grammar
+    /// reads it, never byte for byte.
+    pub(crate) fn matches(&self, line: &str) -> bool {
+        crate::grammar::split_link(line) == Some((self.kind.as_str(), self.target.trim()))
+    }
+}
+
 /// The auditable evidence a close carries. `Waived` is the explicit
 /// override: the caller states there is no proof rather than omitting it.
 #[derive(Debug)]
@@ -81,6 +96,8 @@ pub struct Edit {
     pub body: Option<String>,
     pub add_tags: Vec<String>,
     pub remove_tags: Vec<String>,
+    pub add_links: Vec<Link>,
+    pub remove_links: Vec<Link>,
     pub from: Option<String>,
     pub priority: Option<u32>,
     pub review_by: Option<String>,
@@ -106,6 +123,8 @@ impl Edit {
             && self.body.is_none()
             && self.add_tags.is_empty()
             && self.remove_tags.is_empty()
+            && self.add_links.is_empty()
+            && self.remove_links.is_empty()
             && self.from.is_none()
             && self.priority.is_none()
             && self.review_by.is_none()

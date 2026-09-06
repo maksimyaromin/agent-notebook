@@ -6,7 +6,7 @@ use super::error::NotebookError;
 use crate::date;
 use crate::grammar::{self, RecordFile};
 use crate::record::{Record, RecordType};
-use crate::request::{CLEARABLE, Draft, Edit, FROM, PRIORITY, Proof, REVIEW_BY};
+use crate::request::{CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, Proof, REVIEW_BY};
 use crate::resolve::{path_stem, record_path, type_of};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -71,14 +71,18 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
         }
     }
     for link in &draft.links {
-        guard_single_line("link", &link.target)?;
-        if !grammar::is_link(&link.kind, &link.target) {
-            let given = format!("{} {}", link.kind, link.target);
-            return invalid(format!(
-                "link: `{}` is not `<kind> <target>`",
-                given.trim_end()
-            ));
-        }
+        guard_link(link)?;
+    }
+    Ok(())
+}
+
+fn guard_link(link: &Link) -> Result<(), NotebookError> {
+    guard_single_line("link", &link.target)?;
+    if !grammar::is_link(&link.kind, &link.target) {
+        let given = format!("{} {}", link.kind, link.target);
+        return Err(NotebookError::InvalidArgument {
+            reason: format!("link: `{}` is not `<kind> <target>`", given.trim_end()),
+        });
     }
     Ok(())
 }
@@ -98,7 +102,7 @@ pub(super) fn validate_edit(
 
     if edit.changes_nothing() {
         return invalid(
-            "edit: nothing to change; pass --title, --body, --tag, --untag, --from, --priority, --review-by, or --clear"
+            "edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, or --clear"
                 .to_owned(),
         );
     }
@@ -113,6 +117,9 @@ pub(super) fn validate_edit(
         if !grammar::is_token(tag) {
             return invalid(format!("tags: `{tag}` is not a `[a-z0-9-]+` tag"));
         }
+    }
+    for link in edit.add_links.iter().chain(&edit.remove_links) {
+        guard_link(link)?;
     }
     if let Some(priority) = edit.priority {
         if record_type != RecordType::Task {
@@ -366,6 +373,9 @@ pub(super) fn spliced(
     if retagged(file, edit) {
         changed.push("tags");
     }
+    if relinked(file, edit) {
+        changed.push("link");
+    }
     if let Some(body) = &edit.body {
         let body = edited_body(body);
         if body != file.body() {
@@ -429,6 +439,31 @@ fn retagged(file: &mut RecordFile, edit: &Edit) -> bool {
     }
 }
 
+/// Take out every `link` line `--unlink` names and add every one `--link`
+/// names that is not there; answers whether a line moved. A link already
+/// present, or one already absent, changes nothing, as a tag does.
+fn relinked(file: &mut RecordFile, edit: &Edit) -> bool {
+    let mut moved = false;
+    for link in &edit.remove_links {
+        let standing: Vec<String> = file
+            .field_values("link")
+            .filter(|line| link.matches(line))
+            .map(str::to_owned)
+            .collect();
+        for line in standing {
+            moved |= file.remove_field_value("link", &line);
+        }
+    }
+    for link in &edit.add_links {
+        if file.field_values("link").any(|line| link.matches(line)) {
+            continue;
+        }
+        file.append_field("link", &link.line());
+        moved = true;
+    }
+    moved
+}
+
 /// The canonical rendered body: a blank line after the fence, the content,
 /// a final newline — and empty content is no body at all. `create` and
 /// `edit` both write through it, so a fresh record and an edited one read
@@ -466,7 +501,7 @@ pub(super) fn render_draft(draft: &Draft, id: &str, today: &str) -> String {
         file.set_field("tags", &draft.tags.join(", "));
     }
     for link in &draft.links {
-        file.append_field("link", &format!("{} {}", link.kind, link.target.trim()));
+        file.append_field("link", &link.line());
     }
     if let Some(priority) = draft.priority {
         file.set_field("priority", &priority.to_string());

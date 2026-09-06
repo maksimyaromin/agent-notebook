@@ -137,6 +137,73 @@ mod edit_verb {
     }
 
     #[test]
+    fn links_splice_into_the_standing_lines() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.demo.md",
+            &record_file(
+                "decision.demo",
+                "decision",
+                "active",
+                &["kind: rule", "link: pr https://example.com/pull/7"],
+                "",
+            ),
+        )]);
+        let link = |kind: &str, target: &str| Link {
+            kind: kind.to_owned(),
+            target: target.to_owned(),
+        };
+        let edited = Notebook::new(&mut storage)
+            .edit(
+                "decision.demo",
+                &Edit {
+                    add_links: vec![link("doc", "https://example.com/spec")],
+                    remove_links: vec![link("pr", "https://example.com/pull/7")],
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(edited.changed, vec!["link"]);
+        let written = storage.read("decisions/decision.demo.md").unwrap();
+        assert!(
+            written.contains("\nlink: doc https://example.com/spec\n"),
+            "{written}"
+        );
+        assert!(!written.contains("pull/7"), "{written}");
+    }
+
+    #[test]
+    fn a_link_already_present_or_already_absent_changes_no_byte() {
+        // Two spaces between the halves: a hand-written line is matched as
+        // the grammar reads it, never byte for byte.
+        let text = record_file(
+            "decision.demo",
+            "decision",
+            "active",
+            &["kind: rule", "link: doc  https://example.com/spec"],
+            "",
+        );
+        let mut storage = storage_with(&[("decisions/decision.demo.md", &text)]);
+        let link = |kind: &str, target: &str| Link {
+            kind: kind.to_owned(),
+            target: target.to_owned(),
+        };
+        let edited = Notebook::new(&mut storage)
+            .edit(
+                "decision.demo",
+                &Edit {
+                    add_links: vec![link("doc", "https://example.com/spec")],
+                    remove_links: vec![link("pr", "https://example.com/pull/9")],
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(edited.changed, Vec::<&str>::new());
+        assert_eq!(storage.read("decisions/decision.demo.md").unwrap(), text);
+    }
+
+    #[test]
     fn removing_the_last_tag_drops_the_field() {
         let mut storage =
             storage_with(&[("tasks/task.demo.md", &task_file("open", &["tags: idea"]))]);

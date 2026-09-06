@@ -40,7 +40,7 @@ Commands update the fields they own. The grammar preserves the body as text; sep
 | `via` | text | any | `add --via`: the creating agent tool; `comment --via` labels a log entry without changing this field |
 | `from` | an id | any | `add --from`, `edit --from`: the origin |
 | `tags` | `[a-z0-9-]+`, comma-separated | any | `add --tag`, `edit --tag`, `edit --untag` |
-| `link` | `<kind> <target>`, repeatable | any | `add --link`, `close --note`, `--pr`, `--sha`, `--report` |
+| `link` | `<kind> <target>`, repeatable | any | `add --link`, `edit --link`, `edit --unlink`, `close --note`, `--pr`, `--sha`, `--report` |
 | `supersedes`, `superseded-by` | an id | Decision, Note | `add --supersedes`, both sides at once |
 | `blocked-by` | an id, repeatable | Task | `block`, `unblock` |
 | `resolved-by` | an id | Question | `close --resolved-by` |
