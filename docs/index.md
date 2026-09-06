@@ -1,9 +1,9 @@
 ---
 title: agent-notebook
-description: 'A dependable CLI for agent working memory, with skills you can make your own.'
+description: 'Working memory for coding agents, with a deterministic CLI and customizable workflow skills.'
 template: splash
 hero:
-  tagline: Build on what your agents learn. Keep the memory, choose the method.
+  tagline: Working memory for projects built with coding agents.
   actions:
     - text: Get started
       link: start/quickstart/
@@ -13,9 +13,11 @@ hero:
       variant: minimal
 ---
 
-The effort you put into working with an agent should outlast the conversation. Its findings should be usable by the next session, and its decisions should remain clear when the work changes direction. You should be able to choose a different agent or a different process and keep that accumulated knowledge.
+A coding session leaves more than code behind. There are decisions to explain, findings worth keeping and unfinished work to return to. agent-notebook gives agents a way to record these as they work and find them again in a later session.
 
-agent-notebook provides a deterministic CLI for that memory and skills for working with it. The CLI checks changes and returns concise, structured results. The skills describe the method, and you can rewrite them. A shared notebook committed with the project, private notes outside git, or a workflow of your own all use the same record rules.
+The CLI handles record changes and checks that their states and relationships are valid. The supplied skills describe the working method: how to resume a Task, record what was learned and close the work with a report. By default, records live in `.agent-notebook/` at the repository root and the agent commits them with the code.
+
+The skills can be changed independently of the CLI. For example, you can keep memory somewhere else, require review before closing a Task, or give each agent its own work. The [customization guide](guides/customization.md) shows how to set this up.
 
 At the start of a session, the agent reads a summary:
 
@@ -30,5 +32,7 @@ budget: ~82/1500 tokens
 ```
 
 The notebook stores Tasks, Decisions, Notes and Questions in plain Markdown files. Status summarizes what needs attention; commands let an agent follow the detail and update it without editing files by hand. Sharing through git, personal knowledge across projects and interactive maps are available when your workflow needs them.
+
+agent-notebook uses the same tool and skills for its own development. Its notebook is public with the source; the [development guide](contributing/development.md) explains where to find the work and the decisions behind it.
 
 [Get started](start/quickstart.md) with a complete session, read [the design](start/what-it-is.md), or ask your agent to [draw the work as a map](guides/atlas.md). The [command reference](reference/commands.md) is generated from the binary.

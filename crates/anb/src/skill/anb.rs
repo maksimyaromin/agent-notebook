@@ -1,14 +1,6 @@
-//! The `anb` skill: what an agent that has never seen this repository needs
-//! to work the notebook, generated from the binary itself so it cannot drift.
-//!
-//! `SKILL.md` carries the method, the session, the Task loop, the shape of
-//! work, knowledge, the user's notebook, the reply contract, in the words an
-//! agent reads once and keeps. Three references under `references/` carry the
-//! depth, one file per need so a session loads only the one it has: every
-//! command with its flags from the same definitions `--help` prints, a worked
-//! session with every reply rendered by running the command, and the refusal
-//! catalog rendered the same way. A committed copy is diffed against this
-//! rendering in CI.
+//! The `anb` method and heavy CLI references share one rendering so setup
+//! and the committed skill teach the same commands. Worked replies execute
+//! against a scratch notebook; CI checks the committed copy for drift.
 
 use crate::cli::{Cli, Command};
 use crate::recovery::subject;
@@ -32,7 +24,7 @@ pub const REFUSALS_FILE: &str = "references/refusals.md";
 const TODAY: &str = "2026-01-15";
 const AUTHOR: &str = "Ada";
 
-/// The skill, rendered: the method and its three references.
+/// The skill and the references installed with it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Skill {
     pub skill: String,
@@ -69,7 +61,7 @@ pub fn render() -> Skill {
         ),
         refusals: reference(
             "anb refusals",
-            "Every refusal code with its cause and the try: line that repairs it, and the findings anb check raises. Open when a refusal's try: line is not enough.",
+            "Every refusal code with its cause and recovery instruction, and the findings anb check raises. Open when a refusal's suggested correction is not enough.",
             |out| {
                 refusals_section(out);
                 findings_section(out);
@@ -85,7 +77,7 @@ pub fn render() -> Skill {
 fn skill_md() -> String {
     let mut out = String::new();
     out.push_str("---\nname: anb\n");
-    out.push_str("description: Use when working in a repository that has an .agent-notebook directory: when asked to continue a task or an epic, to pick the next piece of work, to record a decision, a doubt or a finding, to close work with its proof, or to say where the project stands. Also when a session starts and a status line beginning with active: was printed.\n");
+    out.push_str("description: Use when working in a repository with .agent-notebook, capturing or shaping an idea, modeling a domain, planning or continuing Tasks and epics, recording project knowledge, reviewing status, or when a session hook reports active work.\n");
     out.push_str("metadata:\n  managed-by: anb\n---\n\n");
     out.push_str(SKILL_BODY);
     out
@@ -95,96 +87,104 @@ const SKILL_BODY: &str = r#"# anb
 
 ## Overview
 
-`anb` keeps a project's working memory as typed records in `.agent-notebook/`: Tasks (open → active → review → closed), Decisions (active → superseded | retired), Notes (active → retired), Questions (open → closed). Every record has an id you type, such as `task.parser-fences` or `decision.no-mise-toml`, and a markdown file a human can read. Change the notebook only through `anb`, never by editing the files. The notebook is the developer's memory of the project, and keeping it clean is your job.
-
-Every reply is short plain text an agent parses at a glance: `ok: <verb> <id> — <what changed>`, tables as `name[N]{fields}:` with comma rows, and refusals as `error[<code>]: <message>` followed by `try:` lines. A `try:` line is a command that runs as printed, so run one instead of guessing. Listings are bounded; `--all` lifts the bound, and `--json` gives the same data as compact JSON.
+Keep the problem, the reasoning and the work connected so another session can continue without reconstructing the conversation. Use the CLI for every notebook change; it maintains record state and relationships together.
 
 ## When to use
 
-- The session starts in a repository with `.agent-notebook/`, or a hook printed a line beginning with `active:`.
-- Someone asks to continue, resume or pick up a task or an epic, or to take the next piece of work.
-- You are about to record a decision, a doubt, a term, a fact or a finding. The notebook is where it goes, not a chat message or a stray file.
-- Work is done and needs closing with its proof, or the developer asks where the project stands.
+Use this method when capturing a request, shaping an idea, maintaining domain knowledge, planning delivery or continuing project work. For a status question, read and answer; a read does not need a new Task. Follow the user's chosen notebook location, workflow and sharing policy.
 
-A repository without a notebook is outside this skill until `anb setup` wires one and `anb add` creates the first record. Editing record files is outside it always: every change is a verb.
+## Core pattern
+
+Start a new change with an `idea` Note, or resume the existing idea. Keep the source, intended improvement, constraints, agreement status and next uncertainty in its body. Link the source with `--link "doc <path-or-url>"`; record missing evidence explicitly. Capturing a request does not authorize implementation or changes to its source.
+
+Keep the idea when Tasks emerge: one proposal can lead to several deliveries. Create records `--from` what produced them, cite supporting records by bare id, and use `block` for execution prerequisites. An origin answers why a record exists; a mention supplies context; a dependency controls readiness.
+
+For an agreed small change, the idea and one Task are enough:
+
+```sh
+anb add note "Name the CSV download" --id note.csv-download --kind idea --via codex --body "Agreed: rename Export to Download CSV so the label states the format. Preserve behavior and file contents. Implementation is queued for later."
+anb add task "Rename the CSV download button" --id task.csv-download --from note.csv-download --via codex --body "Implement note.csv-download. Verify the label and that the same action produces unchanged CSV content."
+anb check
+```
+
+These explicit ids make the example runnable. In ordinary work, use the ids returned by the CLI, including collision suffixes. Add `--via` to every agent `add` and `comment`, using your actual tool name, such as `codex` or `claude-code`. Leave `by` to the accountable person; `via` identifies the tool, and on comments labels the log entry. Other verbs do not accept it.
 
 ## Quick reference
 
-| Situation | Command |
-|---|---|
-| Where did the last session stop? | `anb status` |
-| What can start now? | `anb ready`, or inside one epic `anb ready --for <hub>` |
-| Take a Task into work | `anb start <id>` |
-| Log progress | `anb comment <id> "<one line>"` |
-| A doubt while working | `anb add question "<title>" --from <task>` |
-| A ruling | `anb add decision "<title>" --kind rule` (or `shape`, `drift`) |
-| A fact, a term, a guide | `anb add note "<title>" --kind fact` (or `term`, `guide`) |
-| Hand work to a human | `anb submit <id>` |
-| Close with proof, then file | `anb close <id> --note <report.md>`, then `anb archive <id>` |
-| A Question settled | `anb close <question> --resolved-by <id>`, or `--reason "<why>"` |
-| Pause, resume | `anb hold <id> --reason "<why>"`, `anb unhold <id>` |
-| Find a record | `anb search <words>`, then `anb show <id>` |
-| Verify the notebook | `anb check` |
+Choose by what a later reader needs, with an explicit `--kind` for Notes and Decisions.
 
-Three references sit under `references/`, one per need, so open only the one you have. Before a verb you have not used, open [commands](references/commands.md): every verb with its flags and what each means. To see what a reply looks like before you parse one, open the [worked session](references/session.md): a notebook from empty to archived work, every reply as printed. When a refusal's `try:` line is not enough, open [refusals](references/refusals.md): every error code with its cause and repair, and the findings `anb check` raises.
+| Need | Record | Why keep it separately |
+|---|---|---|
+| Deliver or investigate a checkable result | Task | Progress and completion belong to the work |
+| Settle an uncertainty that changes the work | Question | An unanswered choice must remain visible |
+| Preserve an agreed requirement | Decision `rule` | Later work must respect its scope and reason |
+| Explain a chosen design | Decision `shape` | Alternatives and the deciding constraint prevent repeated debate |
+| Allow an agreed exception | Decision `drift` | The affected rule and revisit condition bound the departure |
+| Reuse an observation | Note `fact` | Evidence and limits distinguish a finding from a guess |
+| Define a word in context | Note `term` | Ambiguous vocabulary changes how requirements are read |
+| Repeat a procedure | Note `guide` | Conditions and verification make it reusable |
+| Develop a possibility | Note `idea` | Motivation outlives any one delivery |
+| Explain a domain | Note `model` | Ownership, relationships and invariants need more than definitions |
+| Specify expected behavior | Note `spec` | Scope, exclusions and acceptance criteria guide delivery |
 
-## The session
+## Working method
 
-1. Run `anb status`. The `active` line is where the last session stopped, with its last log entry. If a hook already printed it, do not print it again.
-2. Resume the active Task. If none is active, take the top of `anb ready` and run `anb start <id>`.
-3. Asked to continue an epic: find the hub with `anb search <words>`, which looks through ids, titles and tags. Then take the active Task inside it, or else the top of `anb ready --for <hub>`, and start it.
+### Orient
 
-## The Task loop
+Read `anb status` unless the hook supplied it. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Read its cited knowledge and relevant code. Search before creating records: search matches ids, titles and tags, including the archive, but not bodies. Use `show --all` for a truncated body and scoped lists for larger work; loading the whole notebook obscures the immediate decision.
 
-- `anb start <id>` takes a Task into work, and takes it back from review.
-- `anb comment <id> "<one line>"` as you go: where you stopped, what you decided, what you found. The next session resumes from the log rather than from scratch.
-- Every friction met on the way becomes a record instead of a workaround: a doubt is `anb add question "<title>" --from <task>`, a ruling is `anb add decision`, a fact is `anb add note`.
-- `anb submit <id>` hands the work to a human when one accepts it; the human's `anb start <id>` takes it back.
-- `anb close <id> --note <report.md>` closes with the report ingested as a Note. That is the default proof because it travels with the notebook. The others are its equals: `--pr <url>`, `--sha <sha>`, `--report <path>` for a living document left where it lies, and `--no-proof` when the work is done and there is nothing to show. Work that will never happen ends with `anb close <id> --reason "<why>"`, which is legal from open.
-- Run `anb archive <id>` right after the close. A closed record left live is a leftover somebody else has to find.
+### Shape the idea
 
-Hygiene is your job, not the developer's. Close Questions the moment they are settled: `anb close <question> --resolved-by <decision-or-task>` when the answer became a record, `--reason "<why>"` when it did not. Pause with `anb hold <id> --reason "<why>"` and resume with `unhold`; a hold without a reason is where work rots. Leave nothing for the developer to tidy.
+Let the next uncertainty choose the investigation. Compare alternatives against the same outcome and constraints. Save reusable evidence as facts, unresolved choices as Questions, and settled choices as Decisions, each with its actual origin. Keep local progress in the Task log. Bring the user your findings, recommendation and the remaining question the evidence cannot answer.
 
-## The shape of work
+For sustained research, start an investigation Task from the idea, with evidence or a discussable design as its result. For brief intake, leave the next step in the idea; Status can be quiet without an active Task. An idea or spec must state whether its direction is proposed or agreed and what establishes that agreement: a Note's `active` state means maintained, not approved or implemented.
 
-Work is almost never a flat sheet. An idea gets a hub Task tagged `epic`, and every Task born inside it is created `--from <hub>`. The hub is blocked by each child (`anb block <hub> <child>`), so it is not ready until the last child closes; then close and archive the hub like any Task. `anb ready --for <hub>` and `anb list --for <hub>` see one epic's work, and `anb status` shows every epic's progress and its next Task. Create children this way by default: origin is written at `add` time and cannot be added later.
+Create a spec when expected behavior needs its own maintained document. Preserve canonical sources when importing existing material: record the useful conclusion and link to the original, keeping private evidence under the chosen sharing policy. Judge how much structure the work needs; a fixed set of documents adds maintenance without answering a question.
 
-## Knowledge
+### Model the domain
 
-- Decisions carry a kind: `rule` for how we work, `shape` for a design ruling, `drift` for a deviation that stands until superseded. Replace one with `anb add decision "<title>" --supersedes <old>`; end one without a successor with `anb retire <id>`. The reply names a live Decision yours may conflict with. Read it before going on.
-- Notes are curated knowledge corrected in place with `anb edit`; their kinds are `fact`, `term` and `guide`.
-- In prose, a bare id is a reference and a backticked one is a quotation. Cite records by id in bodies and comments. A citation of an id that exists nowhere comes back as `dangling-mention`: a forward reference is legal, a typo is not.
+Start from concrete scenarios and check them against the code. Explain who owns state, which changes must agree, what may happen and what information crosses contexts. Distinguish existing behavior from a proposed model. A directory or class name alone does not establish an aggregate or bounded context.
 
-## The user's own notebook
+| A term defines | A model explains | Why the distinction matters |
+|---|---|---|
+| A candidate operation | Who approves it, what approval changes and what happens after rejection | Definitions alone cannot establish allowed behavior |
+| A package within one context | How each context uses it and translates information for another | The same word need not describe the same concept |
 
-`--global` names the user's notebook in the home directory, for knowledge that outlives one repository. Decisions and Notes live there; Tasks and Questions are refused, because work stays in the project. A practice is a global Note tagged `skill`, addressed by name with `anb search <name> --global` and then `anb show <id> --global`, so "use my skill X" resolves through anb rather than through a pasted path. A project rule that stands against one of the user's cites the user's id in its body, and Status then names the pair.
+Keep local definitions in the model; extract terms when they need independent lookup or reuse. Split models where language or responsibility differs. A context map cites those models and explains integration direction and meaning. Tag models `domain-model` and related records by context so search finds them. Cite governing Decisions from models and models from specs and Tasks; keep each ruling in one place.
 
-## Before you stop
+### Plan and execute
 
-`anb check` must be green. It verifies every file and names the move that repairs each finding. Commit the notebook with the code it describes.
+Make each Task a reviewable result with constraints, behavior to preserve and completion evidence. For an epic, create a hub `--from` the idea, tag it `epic`, create children `--from` the hub, and `block <hub> <child>` for each deliverable. Add child dependencies only where one result is required by another. Read `ready --for <hub>` to choose work. A ready hub still needs verification of the overall outcome.
+
+Keep one Task in flight by default. Start it before work; when switching subjects, log the handoff and hold unfinished work with a reason. Comment with the result, evidence and next step, using `--via`. Update models and specs when their meaning changes. Supersede a Decision when its ruling changes; edit it when clarifying the same ruling. Read `may-conflict` records before judging whether a conflict exists.
+
+Close answered Questions with `--resolved-by <decision-or-task>`, or `--reason` citing a Note when knowledge answers them, then archive. A genuine review date can be set on a drift Decision with `edit --review-by`; leave it unset when none is known.
+
+### Verify and leave a continuation
+
+Verify the promised result before closing. If review is required, `submit` and wait for acceptance. Otherwise close with `--note <report.md>` by default: state the result, evidence and limits. Archive the Task immediately; its report travels with it. Keep reusable knowledge live. Cancel work with `--reason`; hold work that awaits something, naming what will unblock it.
+
+Run `anb check`, address findings and recheck. When no CLI repair exists, report the obstruction. Leave unfinished work's result and next action in its log, or in the idea for brief shaping. Commit the notebook with the code by default, within the user's sharing policy and commit authorization.
 
 ## Common mistakes
 
-Each of these is easy because of how the tool behaves, and each has a cost the next session pays.
-
-| Mistake | What it costs | Instead |
+| Temptation | Use instead | Reason |
 |---|---|---|
-| A child Task added without `--from`, and no `block` edge from the hub | The epic never sees it: `ready --for <hub>` and `list --for <hub>` follow the hub's scope, and the hub's `closed/total` does not count it | `anb add task "<title>" --from <hub>` at creation; later `anb edit <id> --from <hub>`, and `anb block <hub> <id>` when the hub waits on it |
-| A backticked id where a reference was meant, or a bare id as an example | A backticked id is a quotation the mention scan skips, so a typo in it is never caught and `show` lists no relation; a bare example id becomes a `dangling-mention` Debt line that stays until the record exists | Bare ids for references, backticks for quotations |
-| A Question answered in a comment on the Task | The Question stays open; when the Task closes, Status raises `origin-closed`, and the answer sits in a log nobody rereads | `anb close <question> --resolved-by <id>` when the answer became a record, `--reason "<why>"` when it did not |
-| A ruling changed with `anb edit --body` | The Decision's text says one thing and its history another; nobody is told the rule changed, and `may-conflict` cannot warn about a body that was rewritten in place | `anb edit` for a correction of the same ruling; a different ruling is `anb add decision "<title>" --supersedes <old>` |
-| A collapsed Status section read as empty | Under budget, a section keeps its count and drops its rows (`ready: 7` with the command that lists them); the queue is not empty, the budget was | `anb status --budget 0` shows every row; `anb ready` is the queue itself |
-| A held Task read as gone | A hold removes the Task from `active:` and from `ready`; it waits in `held[N]` with its reason. A session that reads only the first lines starts a second Task on the same work | Read `held` before starting anything; `anb unhold <id>` when the reason has lifted |
-| `--no-proof` because the proof is somewhere else | The record says forever that there was nothing to show, while a pull request, a commit or a report existed | `--pr <url>`, `--sha <sha>`, `--note <report.md>`; `--no-proof` only when there is nothing |
-| A record recreated because it was not in `list` | `list` and `ready` show the working set; the settled record lives in the archive with its id, so the new one is minted as `<id>-00` beside it and the notebook holds the same thing twice (`duplicate-id` fires only when `--id` names the taken id) | `anb search <words>` reaches the archive; `anb restore <id>` brings a record back |
+| Put the whole proposal in a Task to save time | Keep the idea and create work from it | Archiving one delivery must not hide the proposal |
+| Record a plausible answer as a Decision | Keep a Question until the choice is settled | Future agents treat Decisions as governing knowledge |
+| Use a guide as a one-off handoff | Put the next step in the Task log or idea | Guides describe repeatable procedures |
+| Turn related subjects into blockers | Cite bare ids for context; block real prerequisites | Artificial dependencies hide work that can start |
+| Quote an id intended as a relationship | Cite it outside backticks | Quoted examples do not create mentions |
+| Retry a refused command unchanged | Read its `try:` instruction and fill its placeholders | Refusals explain the required correction |
+| Repeat `add` after an uncertain result | Inspect the notebook first | Creation without an explicit id can produce duplicates |
+
+## References
+
+Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads. Use the installed `anb-atlas` skill for a visual review.
+
+For a named personal practice, search and show with `--global`; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.
 "#;
 
-// ---------------------------------------------------------------------------
-// The references — the depth, one file per need
-// ---------------------------------------------------------------------------
-
-/// A reference file: frontmatter carrying the generated mark, a title, and
-/// the body `section` renders.
 fn reference(name: &str, description: &str, section: impl FnOnce(&mut String)) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "---\nname: {name}\ndescription: {description}");

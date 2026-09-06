@@ -3,7 +3,7 @@ title: Quickstart
 description: 'Install anb and use the supplied workflow, from the first Task to the next session.'
 ---
 
-This guide uses the defaults: a notebook in your repository, the supplied skills, and memory committed with the code. You need Node.js 20 or later and a coding agent with shell access.
+This guide uses the defaults: a notebook in your repository, the supplied skills, and memory committed with the code. The npm installation below needs Node.js 20 or later. Your coding agent needs shell access to run `anb`.
 
 ## Install and set up
 
@@ -38,7 +38,8 @@ The supplied skill defines this working cycle:
 | During the work | What the agent does |
 |---|---|
 | Starting | Resumes the active Task, or selects ready work when none is active. It keeps one Task in flight. |
-| Breaking down an idea | Creates a hub Task for the epic, creates child Tasks from it, and records the dependencies. |
+| Understanding a new request | Captures an idea with its source, clarifies the intended outcome, and records questions and evidence. Creates a spec or domain model when the work needs one. |
+| Planning delivery | Creates a hub Task from the idea, child Tasks from the hub, and dependencies where one result needs another. |
 | Making progress | Logs what it established and what comes next. |
 | Learning | Records rulings as Decisions, reusable knowledge as Notes, and uncertainties as Questions with their origin. |
 | Resolving or pausing | Closes answered Questions. Holds a paused Task with a reason. |
@@ -72,6 +73,8 @@ npx -y @supolka/agent-notebook --help
 ```
 
 For subsequent commands, replace `anb` with `npx -y @supolka/agent-notebook`. To use the session hooks as installed by setup, install `anb` on your PATH.
+
+[GitHub releases](https://github.com/maksimyaromin/agent-notebook/releases) also provide native binaries for macOS and Linux on x64 and arm64, and Windows on x64, with a `SHA256SUMS` file. Extract the archive for your platform, verify its checksum, and put `anb` on your PATH. This installation does not require Node.js.
 
 With a Rust toolchain, you can install from source instead:
 

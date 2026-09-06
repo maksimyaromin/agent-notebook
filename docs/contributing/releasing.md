@@ -1,39 +1,57 @@
 ---
 title: Releasing
-description: 'Build and publish the native binaries and npm launcher with matching versions.'
+description: 'Release artifacts, package versions and recovery when publication only partly succeeds.'
 ---
 
-The npm package `@supolka/agent-notebook` supplies the `anb` launcher. It selects a native binary from an optional platform dependency. The packages cover macOS and Linux on x64 and arm64, and Windows on x64. npm downloads the packages during installation; no postinstall script fetches a binary.
+The [Release workflow](https://github.com/maksimyaromin/agent-notebook/blob/main/.github/workflows/release.yml) builds native binaries, attaches archives and checksums to a GitHub release, and publishes npm packages through Trusted Publishing. GitHub releases and npm publication are separate jobs after the build. Success on one does not establish success on the other.
 
-## Keep versions together
+## What ships
 
-The Cargo workspace, every npm package and the launcher's platform dependency pins use the same version. Check them before releasing:
+The npm package `@supolka/agent-notebook` supplies a launcher that selects a native binary from an optional platform dependency. The packages cover macOS and Linux on x64 and arm64, and Windows on x64. npm downloads the packages during installation; no postinstall script fetches a binary.
+
+[GitHub releases](https://github.com/maksimyaromin/agent-notebook/releases) provide the binaries directly, one archive per platform, with `SHA256SUMS`. These do not require Node.js. The package and source versions agree, while a release tag names a date: for example, `v2026.09.06` ships package version `0.1.1`.
+
+## Prepare the release
+
+Update the Cargo workspace version, every npm package version and the launcher's `optionalDependencies` pins together. Then check their agreement:
 
 ```sh
 sh scripts/release/check-versions.sh
 ```
 
-The Release workflow runs this check before publishing.
+Write the release entry in `CHANGELOG.md` under a heading such as `## agent-notebook v2026.09.06`. Start with what the release changes for a user, use the applicable `New`, `Improved` and `Fixed` sections with pull request references, and name the package version. The workflow extracts this entry as the release notes and refuses a tag without one. Inspect the extraction before tagging:
 
-## Publish a release
+```sh
+sh scripts/release/changelog-notes.sh v2026.09.06
+```
 
-A release is named by its date, `v2026.09.05`, and the packages carry their own version. Bump the package version only when the packages change; a release that ships the same packages again is refused by the registry, and the workflow runs to that point without harm.
+Tag the reviewed commit with the date tag and push that tag. The workflow builds each platform, packages the release assets, checks version agreement and runs the npm launcher against the Linux binary. It publishes platform packages before the launcher so a newly installed launcher can resolve its dependencies.
 
-1. When the packages change, update `Cargo.toml` and every `packages/*/package.json`, including the launcher's `optionalDependencies`, and run the version check.
-2. Write the release's entry in `CHANGELOG.md` under a heading that ends with the tag, `## agent-notebook v2026.09.05`: a paragraph on what the release means for a user, then `New`, `Improved` and `Fixed` with the pull requests in parentheses, and the package version the release ships. The workflow refuses a tag without an entry; `sh scripts/release/changelog-notes.sh v<date>` prints the entry it will use.
-3. Merge through a pull request, then push `v<date>` on the merged commit.
-4. Inspect the Release workflow. It builds the platform binaries, creates the GitHub release named after the tag with one archive per platform, a `SHA256SUMS` file and the changelog entry as its notes, checks that the manifests agree and smoke-tests the launcher with the Linux binary. It publishes the platform packages before the launcher.
+The repository variable `RELEASE_DRY_RUN` must equal `false` for npm publication. A manual workflow run also has a dry-run input, enabled by default. That input controls npm publication; the GitHub release job runs for tag refs independently of it. Published npm versions cannot be reused, so a tag that should publish packages needs an unpublished package version.
 
-The repository variable `RELEASE_DRY_RUN` controls publication. Unless its value is `false`, the workflow runs without publishing to npm.
+## Check the outcome
 
-## Bootstrap a package
+Check the build, GitHub release and npm publish jobs separately. Confirm that the release has all platform archives and checksums and that the launcher and platform packages are available at the intended version. From an empty directory, run the published launcher at that explicit version:
 
-The release process uses a local publish to create packages before configuring Trusted Publishing:
+```sh
+npx -y @supolka/agent-notebook@0.1.1 --version
+```
 
-1. Push the tag and wait for the workflow's build artifacts. Record the run id.
-2. Run `sh scripts/release/fetch-binaries.sh <run-id>` to download binaries into the platform packages.
-3. Run `sh scripts/release/publish.sh` to inspect a dry run, then `sh scripts/release/publish.sh --publish` to publish.
+The numbers above illustrate a published release; substitute the version being released.
 
-The publish script documents its authentication inputs and checks the expected npm account. It publishes platform packages first so the launcher can resolve its dependencies.
+A rerun keeps an existing GitHub release and replaces its assets. npm publication has no equivalent resume behavior: the loop starts from the first platform package and stops on failure, including an already-published version. If publication stopped halfway, inspect which packages reached the registry before choosing a recovery. The workflow cannot roll them back, and rerunning the whole job is not a way to skip them.
 
-After the initial publish, configure each package's Trusted Publisher for this repository and `release.yml`, then set `RELEASE_DRY_RUN` to `false`. The workflow uses OIDC for publication and enables provenance when the repository is public.
+## Bootstrap a new package
+
+The existing packages use Trusted Publishing. Adding a package requires an initial publish before configuring its Trusted Publisher:
+
+1. Build through the workflow and record the run id.
+2. Use `sh scripts/release/fetch-binaries.sh <run-id>` to place those binaries in their package directories.
+3. Read `scripts/release/publish.sh` for its authentication inputs and account check. Run it without flags to inspect the dry run; `--publish` performs publication.
+4. Configure the new package's Trusted Publisher for this repository and `release.yml`, with the `npm` environment used by the workflow.
+
+The local publish script walks all package directories too. Before using it when some versions already exist, account for the same partial-publication constraint. Normal releases use the workflow's OIDC identity; they do not require a stored npm publish token.
+
+## Publish the book
+
+Documentation deploys independently of binary releases. `pages.yml` builds changes to the book and site on main and uploads `apps/docs/dist` to Cloudflare Pages at [agent-notebook.supolka.dev](https://agent-notebook.supolka.dev). Pull requests run the documentation checks without deploying. The workflow supports a manual redeploy and reports when missing deployment credentials cause it to build without uploading.

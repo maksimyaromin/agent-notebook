@@ -3,7 +3,7 @@ title: Decisions, Notes and Questions
 description: 'Record what the project knows, distinguish current rules from old ones, and resolve open questions.'
 ---
 
-Choose the record by how the information changes. A ruling needs an explicit replacement, a fact needs correction, and a question needs an answer. Keeping them separate lets the notebook show what still applies.
+Choose the record by how the information changes. A ruling needs an explicit replacement, a fact needs correction, and a question needs an answer. Keeping them separate lets the notebook show what still applies. Keep a local observation in the Task log when it only helps finish that Task. Give it a Note when another piece of work should be able to find and use it. A Decision needs the constraint behind the choice, so a later reader can judge whether it still holds.
 
 ## Decisions
 
@@ -14,7 +14,13 @@ $ anb add decision "Fences never nest" --kind rule --tag parser --tag grammar --
 ok: add decision.fences-never-nest — decisions/decision.fences-never-nest.md
 ```
 
-Use `rule` for working rules, `shape` for design decisions, and `drift` for an accepted deviation. Status includes active `rule` Decisions by id and title, subject to its display limits. Open the record to read the reason.
+| Kind | Use it for | Include |
+|---|---|---|
+| `rule` | An agreed behavioral or working rule | Scope, requirement and reason |
+| `shape` | A design choice between alternatives | Chosen approach, alternatives and the constraint that decided it |
+| `drift` | An accepted exception | The rule it departs from, its consequences and the condition for revisiting it |
+
+A proposed choice belongs in an idea or Question until it is agreed. A `drift` can use `review-by` when a review date is known; neither the kind nor the date automatically retires it. Status includes active `rule` Decisions by id and title, subject to its display limits. Open the record to read the reason.
 
 When the ruling changes, use `anb add decision "<title>" --supersedes <old>`. The command links the records and marks the predecessor `superseded`. Use `anb retire <id>` when a Decision no longer applies and has no replacement. Editing a Decision is for corrections to the same ruling, not for replacing it with another.
 
@@ -34,7 +40,20 @@ Status keeps a `may-conflict` Debt signal for a citation between active Decision
 
 ## Notes
 
-Use a Note for knowledge you want to maintain: `fact` for an observation, `term` for a domain definition, `guide` for a practice. Correct it with `anb edit <id> --body "<text>"` as your understanding changes. Retire it when it is no longer useful.
+Notes hold maintained knowledge, including ideas that have not become work yet. Choose the kind by what the document is for:
+
+| Kind | Contents |
+|---|---|
+| `fact` | An observation or research result, with its evidence and limits |
+| `term` | A definition, its domain context and words easily confused with it |
+| `guide` | A repeatable procedure, including when to use it and how to check the outcome |
+| `idea` | A problem to explore, intended outcome, constraints, alternatives and open questions |
+| `model` | Domain boundaries, concepts, relationships, ownership and invariants |
+| `spec` | Expected behavior, scope, exclusions and acceptance criteria |
+
+Correct a Note with `anb edit <id> --body "<text>"` as understanding changes. Retire it when it is no longer useful. An active idea or spec is not necessarily accepted: its agreement status belongs in its body. The CLI validates the kind and lifecycle, not the truth of its contents or the user's agreement.
+
+[Developing an idea](ideas.md) explains the route from a ticket or conversation to delivery. [Domain modeling](domain.md) explains when a glossary needs a model as well.
 
 A report imported with `anb close --note` is also a Note, linked to the Task it documents. This keeps the evidence accessible through the same commands as the work.
 
@@ -50,6 +69,10 @@ ok: add question.do-fences-nest — questions/question.do-fences-nest.md
 Use `anb close <question> --resolved-by <decision-or-task>` when a record answers it. Use `anb close <question> --reason "<why>"` when it closes without such a record. A Question cannot close without one of these outcomes.
 
 Open Questions become Debt after their age threshold. If the origin Task closes first, the Question surfaces immediately. The reminder asks you to resolve the uncertainty; it does not assume that finishing the Task answered it.
+
+## Record who is acting
+
+The supplied skill asks agents to pass `--via` on `add` and `comment`, using a consistent tool name such as `codex` or `claude-code`. On creation, `by` names the accountable person, normally from git identity, while `via` names the tool. On a comment, `--via` labels that log entry and leaves the record's creation fields unchanged. Other commands do not accept `--via`.
 
 ## Citations
 

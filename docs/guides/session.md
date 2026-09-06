@@ -34,7 +34,7 @@ File an uncertainty as a [Question](knowledge.md#questions) with `--from <task>`
 
 ## Read beyond the summary
 
-Status also reports work awaiting review, standing rules, epic progress and Debt. Debt names matters that need attention, such as an old Question or a reference to a missing record. It does not change their state.
+Status also reports work awaiting review, standing rules, epic progress and Debt. Debt names matters that need attention, such as an old Question or a reference to a missing record. It does not change their state. Check whether the work is still relevant before acting: resolve the Question, update the Task, or record why it must stay paused. A date is a reason to look again, not evidence that the work is obsolete.
 
 A compact section still has a count. `ready: 7` means there are seven Tasks, even if the budget omitted their rows. `anb status --budget 0` removes budget-driven cuts; individual sections still limit their rows. Use the relevant listing with `--all` for the complete set. [Status and Debt](../reference/status.md) specifies the sections, limits and clocks.
 

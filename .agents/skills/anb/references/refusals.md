@@ -1,6 +1,6 @@
 ---
 name: anb refusals
-description: Every refusal code with its cause and the try: line that repairs it, and the findings anb check raises. Open when a refusal's try: line is not enough.
+description: Every refusal code with its cause and recovery instruction, and the findings anb check raises. Open when a refusal's suggested correction is not enough.
 metadata:
   managed-by: anb
 ---

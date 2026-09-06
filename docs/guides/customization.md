@@ -1,5 +1,5 @@
 ---
-title: Make the workflow yours
+title: Customizing the workflow
 description: 'Practical recipes for private notebooks, different storage locations and your own agent workflow.'
 ---
 

@@ -13,7 +13,7 @@ metadata:
 
 A node carries `id`, `type`, `state`, `ready`, `archived`, `degree`, `created` and `title`; `priority` appears only on a Task that has one. A hub also carries `epic` with `id`, `closed`, `total` and `next`, the record to work on next inside it. Under `--full` it carries `fields`, the envelope as ordered name and value pairs, and `body` as `lines` and `head`; with `--all` the head is the whole body, and without it the body is cut like every listing and a `tail` follows the gap. `ready` is three-valued: `true` or `false` for a live Task, and absent where the question does not arise (a Decision never queues, and filed work is done). It travels with the record because it follows from rules the page cannot see, such as which holds stand.
 
-An edge carries `from`, `to` and `kind`. `waits` runs out of the record that must settle first into the one waiting on it; `born` runs out of the origin into the record born from it; both point the way work flows. `mentions` runs the way it was written, out of the record that names another. A pair of records is one edge however many times the notebook states it.
+An edge carries `from`, `to` and `kind`. `waits` runs out of the record that must settle first into the one waiting on it; `born` runs out of the origin into the record born from it; both point the way work flows. `mentions` runs the way it was written, out of the record that names another. Each ordered pair has at most one edge: `waits` takes precedence over `born`, and both take precedence over `mentions`. The reverse direction is a different pair and can also appear. Use the supplied edges for the map; inspect the envelope and body when the reader needs every relationship.
 
 ## The encoding
 
@@ -21,11 +21,13 @@ Four facts have to read at a glance, so each gets its own visual channel and non
 
 | Fact | Channel | Why |
 |---|---|---|
-| Kind of record | Hue, one per kind, the same on every page for one reader | The first thing a reader sorts by |
+| Record type: Task, Decision, Note or Question | Hue, one per type, the same on every page for one reader | The first thing a reader sorts by |
 | How settled it is | Fill: live filled, settled outlined | The eye reads solid as alive |
 | Filed away | Reduced opacity | An archived record still explains its edges and should recede |
 | How much the notebook leans on a record | Radius from degree | A hub should look like one |
 | Kind of relation | Stroke: solid waits, dashed born, dotted mentions | Three kinds on one channel, learned once |
+
+Read a Note or Decision's `kind` from the envelope in `fields.rows`; it is not the node's `type`. Show it in the record panel so an idea, model or spec stays identifiable without introducing another type colour. A Note's active fill means maintained, not approved or implemented; its body states agreement status.
 
 The rail is the legend and the filter: every key turns its own class off, so the reader learns the encoding by using it.
 

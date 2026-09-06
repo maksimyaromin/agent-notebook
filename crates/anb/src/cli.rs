@@ -203,7 +203,7 @@ pub struct AddArgs {
     /// A task's urgency, 0 to 4, 0 the most urgent.
     #[arg(long)]
     pub priority: Option<u32>,
-    /// A decision's rule, shape, or drift; a note's fact, term, or guide.
+    /// A decision's rule, shape, or drift; a note's fact, term, guide, idea, model, or spec.
     #[arg(long)]
     pub kind: Option<String>,
     /// The Decision or Note this one replaces; it flips in the same move.

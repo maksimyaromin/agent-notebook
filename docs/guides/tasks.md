@@ -70,7 +70,7 @@ A dependency stops blocking when its Task closes. The edge remains as a record o
 
 ## Hubs and epics
 
-The supplied workflow breaks larger work into a hub Task and child Tasks. Create each child `--from` the hub, then make the hub depend on it. The origin records why the child exists; the dependency records what must finish before the hub can close:
+The supplied workflow develops a new request as an [idea](ideas.md) before treating it as delivery work. When larger work is ready to be decomposed, create a hub Task from the idea and child Tasks from the hub. Create each child `--from` the hub, then make the hub depend on it. The origin records why the child exists; the dependency records what must finish before the hub can close:
 
 ```
 $ anb add task "Ship the parser" --tag epic
@@ -83,12 +83,14 @@ $ anb block task.ship-the-parser task.negative-corpus-wired-into-ci
 ok: block task.ship-the-parser — waits on task.negative-corpus-wired-into-ci
 ```
 
+A child Task should produce one independently reviewable result. Add dependencies between children when one needs another's result; a shared topic alone does not create that dependency. Cite the spec and relevant model or Decisions in Task bodies so another session can read their context.
+
 You can use your own grouping convention; the automatic epic summary recognizes a hub by that pair of relationships: it depends on a Task whose origin points back to it. The `epic` tag helps you find the hub; it does not establish membership. If you missed an origin when creating a child, set it with `anb edit <id> --from <hub>`.
 
 Status reports how many of the hub's direct dependencies are closed and the next ready Task in its scope. `anb ready --for <hub>` and `anb list --for <hub>` follow that scope, including nested work. Once all dependencies close, the hub becomes ready for acceptance. Close and archive it when the overall result is complete.
 
 ## Correcting a record
 
-Use `anb edit <id>` to correct a title, body, tags, origin, priority or `review-by` date. `--clear` removes an optional field supported by that flag. Lifecycle commands change state. If the record has an error finding, follow the repair command before editing it.
+Use `anb edit <id>` to correct a title, body, tags, origin, priority or `review-by` date. `--clear` removes an optional field supported by that flag. Lifecycle commands change state. If the record has error findings, use the repair commands reported by `anb check`. A repair may leave other errors: it must remove some of the record's errors without introducing new ones. Run `check` again to see what remains. A `-` in the repair column means the CLI has no repair for that finding.
 
 To resume archived work, run `anb restore <id>` first, then `anb reopen <id>`. Restore changes where the file lives; reopen changes its state.
