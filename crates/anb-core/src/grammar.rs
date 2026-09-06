@@ -837,14 +837,17 @@ pub(crate) fn date_error(value: &str) -> Option<String> {
     (!valid).then(|| format!("`{value}` is not `YYYY-MM-DD` or an RFC 3339 timestamp"))
 }
 
-/// The id grammar: `<type>.<slug>`, ASCII, at most 64 bytes. The first dot
-/// splits: slugs contain no dots.
+/// How long an id may be, in bytes.
+pub(crate) const ID_CAP: usize = 64;
+
+/// The id grammar: `<type>.<slug>`, ASCII, at most [`ID_CAP`] bytes. The
+/// first dot splits: slugs contain no dots.
 pub(crate) fn id_error(value: &str) -> Option<String> {
     if !value.is_ascii() {
         return Some(format!("`{value}` contains non-ASCII characters"));
     }
-    if value.len() > 64 {
-        return Some(format!("`{value}` is longer than 64 bytes"));
+    if value.len() > ID_CAP {
+        return Some(format!("`{value}` is longer than {ID_CAP} bytes"));
     }
     let Some((type_word, slug)) = value.split_once('.') else {
         return Some(format!("`{value}` is not `<type>.<slug>`"));

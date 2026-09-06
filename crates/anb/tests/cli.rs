@@ -359,14 +359,14 @@ mod task_cycle_replies {
             .expect("the command must succeed"),
             @r"
         ok: close task.demo — active→closed
-        report: note.report-a-demo-record
+        report: note.report-demo
         "
         );
         // The Core owns the Note's shape; the shell's own contribution is
         // the identity it resolved from git.
         assert!(
             storage
-                .read("notes/note.report-a-demo-record.md")
+                .read("notes/note.report-demo.md")
                 .unwrap()
                 .contains("\nby: Maks\n"),
             "the report is signed by whoever closed the task"
@@ -1752,7 +1752,7 @@ mod json_surface {
                 &[("r.md", "# What shipped\n")],
             )
             .expect("the command must succeed"),
-            r#"{"ok":"close","id":"task.demo","from":"active","to":"closed","already":false,"report":"note.report-a-demo-record","unblocked":{"count":0,"rows":[]},"open-questions":{"count":0,"rows":[]}}"#
+            r#"{"ok":"close","id":"task.demo","from":"active","to":"closed","already":false,"report":"note.report-demo","unblocked":{"count":0,"rows":[]},"open-questions":{"count":0,"rows":[]}}"#
         );
     }
 }
