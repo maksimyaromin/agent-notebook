@@ -46,8 +46,10 @@ Debt is computed when the notebook is read, from dates, states and relationships
 | `dangling-mention` | a body or comment cites an id that exists nowhere | at once |
 | `may-conflict` | a live Decision cites another and neither supersedes | at once |
 | `shadow` | a project Decision cites one of the user's global Decisions | at once |
-| `lost-proof` | a closed Task's proof points at a record that is gone | at once |
+| `lost-proof` | the CLI finds a missing commit or report file linked by a record in the working set | at once |
 | `invalid` | a file carries error findings; `check` has the lines | at once |
+
+External proof checks use the filesystem for report paths and git for commit proofs. They inspect the working set and report missing evidence without changing records. Missing report Notes are broken notebook references, reported by `check`; they are not external proof checks. Pull request URLs are not checked, and an unavailable git query cannot establish that a commit is missing. Absence of `lost-proof` is not verification of the work.
 
 ## The hook payload
 

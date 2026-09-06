@@ -55,7 +55,7 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 | `--by <BY>` | The accountable identity; omitted, git identity fills it |
 | `--via <VIA>` | The acting agent tool |
 | `--priority <PRIORITY>` | A task's urgency, 0 to 4, 0 the most urgent |
-| `--kind <KIND>` | A decision's rule, shape, or drift; a note's fact, term, or guide |
+| `--kind <KIND>` | A decision's rule, shape, or drift; a note's fact, term, guide, idea, model, or spec |
 | `--supersedes <SUPERSEDES>` | The Decision or Note this one replaces; it flips in the same move |
 
 ### anb start

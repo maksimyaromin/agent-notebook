@@ -15,6 +15,8 @@ export const sidebar = [
   {
     label: 'Guides',
     items: [
+      { slug: 'guides/ideas' },
+      { slug: 'guides/domain' },
       { slug: 'guides/session' },
       { slug: 'guides/tasks' },
       { slug: 'guides/knowledge' },

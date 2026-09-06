@@ -864,7 +864,7 @@ mod knowledge_replies {
         assert_snapshot!(
             refused(&mut storage, &["add", "note", "A fact", "--kind", "law"]),
             @r#"
-        error[invalid-argument]: kind: `law` is not one of fact, term, guide for a note
+        error[invalid-argument]: kind: `law` is not one of fact, term, guide, idea, model, spec for a note
         try: anb add note "<title>"
         "#
         );

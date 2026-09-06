@@ -13,7 +13,7 @@ You can open a record beside the map to read its body and relationships. Filters
 
 ## Review on the map
 
-Leave comments on individual records or on the view as a whole, then return the batch to the agent. It translates the comments into notebook commands and reports the result of each. For example, a comment asking to pause a Task needs a reason before it can become `anb hold`.
+Leave comments on individual records or on the view as a whole, then return the batch to the agent. It rereads the affected records in the original notebook, translates the comments into commands under the main working method, and reports the result of each. A comment on the whole view applies to its captured records, not records added after the map was drawn. For example, a comment asking to pause a Task needs a reason before it can become `anb hold`.
 
 The page never writes record files. It is a snapshot you can keep or share; changes go through `anb`, with the same checks as any other command. Ask for a new map after changes if you need the updated state.
 
@@ -23,13 +23,13 @@ The page never writes record files. It is a snapshot you can keep or share; chan
 
 | View | Command |
 |---|---|
-| Whole notebook, including the archive | `anb graph --json --archive --full` |
-| One epic | `anb graph --json --for <hub> --full` |
-| Ready work | `anb graph --json --ready --full` |
-| Neighbors of one record | `anb graph --json --focus <id> --depth 2 --full` |
-| Tasks | `anb graph --json --type task --full` |
+| Whole notebook, including the archive | `anb graph --json --archive --full --all` |
+| One epic | `anb graph --json --for <hub> --full --all` |
+| Ready work | `anb graph --json --ready --full --all` |
+| Neighbors of one record | `anb graph --json --focus <id> --depth 2 --full --all` |
+| Tasks | `anb graph --json --type task --full --all` |
 
-Graph JSON is never truncated. `--all` is only needed to remove bounds from the plain text rendering. `--full` includes record envelopes and bodies; omit it when ids, titles and state are enough.
+Graph JSON includes every node and edge in the selected slice. `--full` adds record envelopes and bodies; `--all` removes their text and field limits. Omit `--full` when ids, titles and state are enough.
 
 The document contains `v` for the format version, `slice` for the query, `nodes` and `edges`. Nodes include identity, type, state, readiness, archive status, degree, creation date and title. Tasks may include priority, and hubs include epic progress.
 

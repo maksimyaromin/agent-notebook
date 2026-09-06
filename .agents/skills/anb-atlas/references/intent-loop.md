@@ -7,7 +7,7 @@ metadata:
 
 # The intent loop
 
-The page is where the reader decides, and the CLI is where the notebook changes. Nothing in between writes a file.
+The page collects the reader's decisions; apply them through the CLI under the `anb` method. Keep the notebook selector, captured record ids and processed batch with the review context. Graph `slice` does not identify the notebook: reuse the same `--notebook` or `--global` on every read and mutation, resolving an environment-selected location before the review. The HTML needs no filesystem access.
 
 ## Comments are addressed
 
@@ -27,16 +27,29 @@ task.old-importer: close, overtaken by task.parser-fences
 *: archive everything closed in this slice
 ```
 
-`*` addresses the slice. The page sends nothing on its own.
+`*` addresses only the record ids captured in this page, not records added later or a newly evaluated query. Display filters do not silently change that set. Keep the captured ids with the exported batch. The page sends nothing on its own.
 
 ## A batch becomes commands
 
-For each comment, in the order given:
+For each unprocessed comment, in the order given:
 
-1. Read the record it names with `anb show <id>`, so the instruction is judged against the record as it is now, and not as the page drew it.
-2. Choose the command that carries the intent and no more. "Start this" is `anb start <id>`. "Hold until X" is `anb hold <id> --reason "<X>"`. "Duplicate of Y" is `anb close <id> --reason "duplicate of Y"` followed by `anb archive <id>`. "This decision is wrong" is a question back to the reader, since a Decision is replaced by a new one and only the reader can say what it should say.
-3. Run it. A refusal's `try:` line is the next command. A refusal that means the intent no longer applies is reported, never forced.
-4. Report per comment: the comment, the command run, and the reply's first line. A comment you could not turn into a command is reported as such, with the question it raises.
+1. Read the named record with `anb show <id>` in the original notebook. For a slice comment, inspect the captured ids and select only records whose current state matches the instruction. Report missing records or changed conditions instead of broadening the batch.
+2. Choose the action by record type and the user's intent, using the table below. Read `anb <verb> --help` before an unfamiliar operation. Permission already given remains valid; ask only for an unresolved choice that changes the action.
+3. Run the command and read its result. A refusal's `try:` is recovery guidance, not another user instruction: fill its placeholders and check that the suggested action still serves the authorized intent. Do not force a transition just to finish the batch.
+4. Record the completed command and reply before proceeding. Report per comment what ran, what remains and why; after a partial failure, resume only the unprocessed work.
+
+| Intent | Action | Why |
+|---|---|---|
+| Start this Task | Read Status; log and hold a different active Task with the handoff reason, then start the selected Task | The author method keeps one Task in flight |
+| Hold until X | `hold <id> --reason "<X>"` | The reason identifies what permits resumption |
+| This Task or Question duplicates Y | Close with a reason citing Y, then archive | Cancellation records why no further work is needed |
+| This Note or Decision duplicates Y | Confirm the surviving record covers it, preserve the existing body and append the reason and Y with `edit --body`, then retire and archive | Knowledge has a different lifecycle from work |
+| Clarify this model, spec or ruling | Edit the existing record when its meaning remains the same | A wording correction does not create a new choice |
+| Replace this ruling | Create the accepted replacement Decision with `--supersedes <old>`; if the replacement is unspecified, ask what should change | An obsolete ruling must retain its successor and rationale |
+| This Task or epic is done | Check the promised outcome and its evidence, satisfy any required review, then close with proof and archive | Closed children alone do not prove the overall result |
+| Explore this possibility | Create or update an idea Note from the commented record; add investigation work when needed | A possibility can develop without committing to delivery |
+
+Use `--via` with your actual tool name on every `add` and `comment`. Use the commented record as origin when it produced a new record, and bare ids for supporting context. Keep existing origins when merely editing knowledge.
 
 Then run `anb check`, and draw a fresh page if the reader wants to see the result. The picture is regenerated, never patched.
 
@@ -44,4 +57,4 @@ Then run `anb check`, and draw a fresh page if the reader wants to see the resul
 
 - The page does not write the notebook, and you do not edit record files after reading the page.
 - A comment is not executed twice. A batch already acted on is done, and a second review starts from a fresh page.
-- An instruction wider than its record ("restructure the epic") becomes a Task or a Question in the notebook, born from the record it was left on, rather than a chain of guesses.
+- An instruction wider than its record ("restructure the epic") follows the main skill: preserve the intended result, create a scoped Task when the work is understood, or a Question when a consequential choice is missing. Keep the commented record as origin and retain any existing idea.

@@ -93,7 +93,7 @@ impl RecordType {
     pub fn kinds(self) -> Option<&'static [&'static str]> {
         match self {
             RecordType::Decision => Some(&["rule", "shape", "drift"]),
-            RecordType::Note => Some(&["fact", "term", "guide"]),
+            RecordType::Note => Some(&["fact", "term", "guide", "idea", "model", "spec"]),
             RecordType::Task | RecordType::Question => None,
         }
     }

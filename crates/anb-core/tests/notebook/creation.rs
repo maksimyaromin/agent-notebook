@@ -799,3 +799,19 @@ mod mention_nudge {
         );
     }
 }
+
+#[test]
+fn development_notes_keep_their_kind_and_body_as_active_knowledge() {
+    for kind in ["fact", "term", "guide", "idea", "model", "spec"] {
+        let mut storage = MemoryStorage::new();
+        let mut draft = Draft::new(RecordType::Note, "Package publication");
+        draft.kind = Some(kind.to_owned());
+        draft.body = "A candidate needs review before publication.".to_owned();
+        let created = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
+        let written = storage.read(&created.path).unwrap();
+        assert!(written.contains(&format!("\nkind: {kind}\n")));
+        assert!(written.contains("\nstate: active\n"));
+        assert!(written.ends_with("A candidate needs review before publication.\n"));
+        assert!(Notebook::new(&mut storage).check().unwrap().is_empty());
+    }
+}

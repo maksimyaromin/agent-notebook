@@ -34,10 +34,10 @@ Commands update the fields they own. The grammar preserves the body as text; sep
 | `id` | `<type>.<slug>` | every record, required | `add`, minted from the title or given with `--id` |
 | `type` | `task`, `decision`, `note`, `question` | required | `add` |
 | `state` | see the lifecycles below | required | the lifecycle commands |
-| `kind` | a Decision's `rule`, `shape`, `drift`; a Note's `fact`, `term`, `guide` | Decision, Note | `add --kind` |
+| `kind` | a Decision's `rule`, `shape`, `drift`; a Note's `fact`, `term`, `guide`, `idea`, `model`, `spec` | Decision, Note | `add --kind` |
 | `title` | text | required | `add`, `edit --title` |
 | `by` | text | any | `add`, from the git identity, or `--by` |
-| `via` | text | any | `add --via`, `comment --via`: the acting agent tool |
+| `via` | text | any | `add --via`: the creating agent tool; `comment --via` labels a log entry without changing this field |
 | `from` | an id | any | `add --from`, `edit --from`: the origin |
 | `tags` | `[a-z0-9-]+`, comma-separated | any | `add --tag`, `edit --tag`, `edit --untag` |
 | `link` | `<kind> <target>`, repeatable | any | `add --link`, `close --note`, `--pr`, `--sha`, `--report` |
@@ -49,6 +49,8 @@ Commands update the fields they own. The grammar preserves the body as text; sep
 | `hold`, `hold-until` | text; a date | Task | `hold --reason`, `hold --until`; `unhold` erases both |
 | `created`, `updated`, `closed` | dates | `created` required | the tool, on every write |
 | `review-by` | a date | any | `edit --review-by`: the explicit resurfacing date |
+
+The `idea`, `model` and `spec` kinds extend the Note vocabulary without changing its lifecycle or existing files. Older binaries reject these kinds, so every agent using the notebook needs a CLI that supports them before they are added.
 
 A key on a type it does not belong to is an `orphan-field` finding. Creation, update and closure dates record when the notebook learned or changed something. Put dates from project history in the body. Scheduling fields such as `review-by` and `hold-until` name future actions.
 
@@ -113,7 +115,7 @@ Ids use `<type>.<slug>`, with a slug matching `[a-z0-9-]+`. `add` derives one fr
 | Key | Default | Meaning |
 |---|---|---|
 | `format` | `1` | the version of the format the notebook is written in |
-| `budget` | `1500` | the Status token ceiling; `0` lifts it |
+| `budget` | `1500` | the estimated Status token budget; `0` disables budget-driven cuts; [limits](status.md#the-budget) still apply |
 | `debt-task-stale` | `7` | days an active Task may go without a log entry |
 | `debt-question-age` | `14` | days a free-standing Question may stay open |
 | `debt-question-age-task-born` | `7` | the same for a Question born from a Task |
