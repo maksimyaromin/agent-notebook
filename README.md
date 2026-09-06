@@ -1,4 +1,9 @@
-<h1 align="center">agent-notebook</h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./apps/docs/public/brand/anb-lockup-full-dark.svg" />
+    <img alt="supolka(agent-notebook)" src="./apps/docs/public/brand/anb-lockup-full-light.svg" width="380" />
+  </picture>
+</p>
 
 <p align="center">Working memory for projects built with coding agents.</p>
 
