@@ -9,7 +9,13 @@ The supplied skill helps an agent develop the model through concrete scenarios a
 
 ## Choose the right amount of structure
 
-Start with one model when the domain is small. Explain its purpose, responsibilities, vocabulary and the rules that connect its concepts. Add detail where it resolves an actual question: identity, aggregate boundaries, allowed state changes or information exchanged with another context.
+Start with one model when the domain is small. Explain its purpose, responsibilities, vocabulary and the rules that connect its concepts. Add detail where it resolves an actual question: identity, aggregate boundaries, allowed state changes or information exchanged with another context. A model is a document of several paragraphs, so write it in a file and add it from there:
+
+```sh
+anb add note "The operation library" --kind model --tag domain-model --tag operation-library --via codex --body-file model.md
+```
+
+`--body-file -` reads standard input instead, and `anb edit <id> --body-file model.md` replaces the body when the model changes.
 
 For a project with several bounded contexts, keep a model Note for each context that needs its own language and responsibilities. A context-map Note cites those models and describes who supplies information to whom, what the contract means and where translation is needed. A source directory or class name alone does not establish a domain boundary.
 

@@ -72,7 +72,7 @@ Start from concrete scenarios and check them against the code. Explain who owns 
 | A candidate operation | Who approves it, what approval changes and what happens after rejection | Definitions alone cannot establish allowed behavior |
 | A package within one context | How each context uses it and translates information for another | The same word need not describe the same concept |
 
-Keep local definitions in the model; extract terms when they need independent lookup or reuse. Split models where language or responsibility differs. A context map cites those models and explains integration direction and meaning. Tag models `domain-model` and related records by context so search finds them. Cite governing Decisions from models and models from specs and Tasks; keep each ruling in one place.
+Keep local definitions in the model; extract terms when they need independent lookup or reuse. Split models where language or responsibility differs. A context map cites those models and explains integration direction and meaning. Tag models `domain-model` and related records by context so search finds them. Cite governing Decisions from models and models from specs and Tasks; keep each ruling in one place. Write a model or a spec of several paragraphs from a file with `--body-file model.md`, or from a pipe with `--body-file -`; a document does not belong on a command line, and `edit --body-file` replaces a body without reading the record file by hand.
 
 ### Plan and execute
 

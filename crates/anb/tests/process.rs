@@ -23,6 +23,26 @@ fn anb(root: &Path, line: &[&str]) -> Output {
         .expect("the binary runs")
 }
 
+/// [`anb`] with `stdin` piped in, for the `-` a file flag takes.
+fn anb_fed(root: &Path, line: &[&str], stdin: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_anb"))
+        .args(["--notebook", root.to_str().unwrap()])
+        .args(line)
+        .env("HOME", root)
+        .env_remove("ANB_NOTEBOOK")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    std::io::Write::write_all(
+        &mut child.stdin.take().expect("stdin is piped"),
+        stdin.as_bytes(),
+    )
+    .expect("stdin is written");
+    child.wait_with_output().expect("the binary exits")
+}
+
 fn record(root: &Path, path: &str, text: &str) {
     let file = root.join(path);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -143,4 +163,35 @@ fn a_reader_that_stops_early_ends_the_reply_quietly() {
         "nothing is reported about it either: {}",
         String::from_utf8_lossy(&ended.stderr)
     );
+}
+
+/// A body of several paragraphs travels as a file or a pipe, never as a
+/// shell word: `-` on a file flag reads standard input.
+#[test]
+fn a_body_file_of_dash_reads_standard_input() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("nb");
+    let spec =
+        "# Scope\n\nThe download keeps the CSV's bytes.\n\n# Exclusions\n\nNo new columns.\n";
+
+    let added = anb_fed(
+        &root,
+        &[
+            "add",
+            "note",
+            "The download spec",
+            "--kind",
+            "spec",
+            "--body-file",
+            "-",
+        ],
+        spec,
+    );
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    let written = fs::read_to_string(root.join("notes/note.the-download-spec.md")).unwrap();
+    assert!(written.ends_with(spec), "{written}");
 }

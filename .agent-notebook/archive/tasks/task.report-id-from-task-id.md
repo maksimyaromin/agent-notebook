@@ -1,15 +1,17 @@
 ---
 id: task.report-id-from-task-id
 type: task
-state: review
+state: closed
 title: close --note mints the report id from the Task id
 by: Maksim Yaromin
 via: claude-code
 from: task.release-0-3-0
 link: issue https://github.com/maksimyaromin/agent-notebook/issues/44
+link: note note.report-report-id-from-task-id
 priority: 1
 created: 2026-09-06
 updated: 2026-09-06
+closed: 2026-09-06
 ---
 
 
