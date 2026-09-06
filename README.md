@@ -26,10 +26,10 @@ Install with Node.js 20 or later, then run setup in your repository root:
 
 ```sh
 npm install -g @supolka/agent-notebook
-anb setup
+anb setup --agent claude-code
 ```
 
-Setup installs instructions and skills, plus session-start hooks for Claude Code and Codex. In Codex, trust the project and review the hook with `/hooks`. Then ask your agent to use the notebook for a piece of work.
+Setup installs the instructions and skills the named agent reads, plus its session-start hook: `claude-code`, `codex`, or `agents-md` for any tool that reads `AGENTS.md`; repeat the flag for several. In Codex, trust the project and review the hook with `/hooks`. Then ask your agent to use the notebook for a piece of work.
 
 By default, records live in `.agent-notebook/` at the repository root, created when the agent adds the first record. The supplied workflow keeps this memory in git with the code. [The quickstart](https://agent-notebook.supolka.dev/start/quickstart/) explains what happens from setup through the next session, including other installation options.
 

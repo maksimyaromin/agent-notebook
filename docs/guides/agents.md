@@ -3,24 +3,24 @@ title: Wiring agents
 description: 'Install the notebook instructions, session-start hooks and skills, or adapt them to your workflow.'
 ---
 
-Run `anb setup` in the project root after installing `anb` on your PATH. Setup installs instructions and skills so agents can use the notebook, plus session-start hooks for Claude Code and Codex. Run it again after an upgrade to refresh the managed files.
+Run `anb setup --agent <name>` in the project root after installing `anb` on your PATH, naming each agent that works in the repository. Setup installs the instructions and skills that agent reads, and its session-start hook where the host runs one. Run it again after an upgrade to refresh the managed files.
 
 ```sh
-anb setup
+anb setup --agent claude-code
+anb setup --agent claude-code --agent codex
 ```
 
-The reply lists each file and whether it was written, already present, or left alone. Setup does not create the notebook itself; the first `anb add` does that.
+The reply lists each file and whether it was written, already present, or left alone, and names the agents it skipped. Without `--agent`, setup refuses and names the agents it knows: files for a tool the project does not run read as noise at best and as a commitment at worst. Setup does not create the notebook itself; the first `anb add` does that.
 
 ## What setup writes
 
-| File | Contents |
-|---|---|
-| `AGENTS.md` | A marked instruction block pointing to `anb status` and `anb --help`, appended as a paragraph of its own |
-| `CLAUDE.md` | The same block, unless the file already links to or imports `AGENTS.md` |
-| `.claude/settings.json` | A `SessionStart` hook running `anb status --hook` with a 15-second timeout |
-| `.codex/hooks.json` | The corresponding Codex hook |
-| `.claude/skills/anb/`, `.agents/skills/anb/` | The workflow skill, command and refusal references, worked session, planning and domain-modeling guidance |
-| `.claude/skills/anb-atlas/`, `.agents/skills/anb-atlas/` | The skill for drawing and reviewing the notebook |
+| Agent | Instructions | Hook | Skills |
+|---|---|---|---|
+| `claude-code` | `CLAUDE.md`, or `AGENTS.md` when `CLAUDE.md` links or imports it | `.claude/settings.json`: a `SessionStart` hook running `anb status --hook` with a 15-second timeout | `.claude/skills/anb/`, `.claude/skills/anb-atlas/` |
+| `codex` | `AGENTS.md` | `.codex/hooks.json`: the corresponding Codex hook | `.agents/skills/anb/`, `.agents/skills/anb-atlas/` |
+| `agents-md` | `AGENTS.md` | none | `.agents/skills/anb/`, `.agents/skills/anb-atlas/` |
+
+`agents-md` stands for any tool that follows the agents.md convention and reads skills from `.agents/skills`; a file two agents share is written once. The instructions are one marked block pointing to `anb status` and `anb --help`, appended as a paragraph of its own. The `anb` skill holds the workflow, the command and refusal references, the worked session and the planning and domain-modeling guidance; `anb-atlas` is the skill for drawing and reviewing the notebook.
 
 Setup adds its hook beside existing hook groups. It validates the files before writing: invalid JSON or an unmatched instruction marker causes a refusal before those changes are applied. Symlinks are reported and left alone, including an existing `CLAUDE.md` link to `AGENTS.md`.
 
@@ -50,4 +50,4 @@ The `anb-atlas` skill is authored separately and bundled with the binary. It use
 
 [Customizing the workflow](customization.md) gives complete recipes for a private notebook in `.tmp/xxx`, another storage location, custom skills and a review stage. Remove `managed-by: anb` from each skill file you maintain yourself; setup then reports it as `yours, left alone` during updates and removal.
 
-`anb setup --remove` removes managed instructions, hooks and skill files. Other tools' instruction text and hook groups remain, and a skill directory is removed only if it is empty. The notebook records are not removed.
+`anb setup --agent <name> --remove` removes the managed instructions, hooks and skill files of the named agents. A file two agents read goes only when every agent that reads it is named, and the reply says which it kept: `AGENTS.md` and `.agents/skills` need `codex` and `agents-md` named together, and `claude-code` too when `CLAUDE.md` links or imports `AGENTS.md`. Other tools' instruction text and hook groups remain, a skill directory is removed only if it is empty, and a host directory that held nothing but setup's files goes with them. The notebook records are not removed.

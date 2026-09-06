@@ -59,11 +59,11 @@ Changing the location selects a different notebook. It does not move or import e
 
 ## Keep your own version of a skill
 
-Setup installs the workflow in `.agents/skills/anb/` and `.claude/skills/anb/`. Edit the copy your agent reads; if you use both, apply the same changes to both copies.
+Setup installs the workflow where each named agent looks for skills: `.claude/skills/anb/` for Claude Code, `.agents/skills/anb/` for Codex and the agents.md convention. Edit the copy your agent reads; if you wire both, apply the same changes to both copies.
 
 1. Open `SKILL.md` and remove its `managed-by: anb` metadata entry. Keep the skill's name and description.
 2. Change the working instructions. Leave command syntax to the generated references unless you need to change those too.
-3. Run `anb setup` again. It should report the edited file as `yours, left alone`.
+3. Run `anb setup --agent <name>` again. It should report the edited file as `yours, left alone`.
 
 Ownership is per file. Remove the marker from each reference you customize too. Unchanged managed references can still receive updates. For a private skill, exclude its files locally as in the notebook recipe above; commit them when the workflow should be shared with the team.
 

@@ -37,9 +37,57 @@ const AGENTS_FILE: &str = "AGENTS.md";
 const CLAUDE_FILE: &str = "CLAUDE.md";
 const CLAUDE_SETTINGS: &str = ".claude/settings.json";
 const CODEX_HOOKS: &str = ".codex/hooks.json";
-/// Where each host looks for skills: Claude Code in its own directory,
-/// Codex and Pi in the shared one.
-const SKILL_HOSTS: [&str; 2] = [".claude/skills", ".agents/skills"];
+const CLAUDE_SKILLS: &str = ".claude/skills";
+const SHARED_SKILLS: &str = ".agents/skills";
+
+/// The instruction file an agent reads its one line from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Instructions {
+    /// `CLAUDE.md`, or `AGENTS.md` when `CLAUDE.md` links or imports it.
+    Claude,
+    /// `AGENTS.md`, the file of the agents.md convention.
+    Agents,
+}
+
+/// One agent setup can wire: what it reads instructions from, where its
+/// host runs a session-start hook, where it looks for skills.
+#[derive(Debug)]
+pub struct Agent {
+    pub name: &'static str,
+    instructions: Instructions,
+    hook: Option<&'static str>,
+    skills: &'static str,
+}
+
+/// Every agent setup knows. Codex and the agents.md convention share the
+/// instruction file and the skills directory; only Codex runs a project
+/// hook, so a tool that follows the convention alone is named apart.
+pub const AGENTS: [Agent; 3] = [
+    Agent {
+        name: "claude-code",
+        instructions: Instructions::Claude,
+        hook: Some(CLAUDE_SETTINGS),
+        skills: CLAUDE_SKILLS,
+    },
+    Agent {
+        name: "codex",
+        instructions: Instructions::Agents,
+        hook: Some(CODEX_HOOKS),
+        skills: SHARED_SKILLS,
+    },
+    Agent {
+        name: "agents-md",
+        instructions: Instructions::Agents,
+        hook: None,
+        skills: SHARED_SKILLS,
+    },
+];
+
+/// The agent names as `--agent` takes them, in the order setup lists them.
+#[must_use]
+pub fn agent_names() -> Vec<&'static str> {
+    AGENTS.iter().map(|agent| agent.name).collect()
+}
 
 /// What Codex asks of a project hook before it runs it, printed so a
 /// silent first session is not mistaken for a broken install.
@@ -64,6 +112,9 @@ pub enum Outcome {
     /// A skill file whose frontmatter no longer carries setup's mark: the
     /// user made it theirs, and setup neither rewrites nor removes it.
     Yours,
+    /// A file or directory an agent not named reads too: removal takes it
+    /// out only when every agent that reads it is named.
+    Shared,
 }
 
 impl Outcome {
@@ -78,6 +129,7 @@ impl Outcome {
             Outcome::Links => "links AGENTS.md",
             Outcome::Linked => "a link, left alone",
             Outcome::Yours => "yours, left alone",
+            Outcome::Shared => "read by an agent not named, kept",
         }
     }
 }
@@ -88,12 +140,14 @@ pub struct Wired {
     pub outcome: Outcome,
 }
 
-/// The reply: every file setup looked at, and the notice a host's own trust
-/// step earns.
+/// The reply: every file setup looked at, the agents it left alone, and the
+/// notice a host's own trust step earns.
 #[derive(Debug, PartialEq, Eq)]
 pub struct SetUp {
     pub removed: bool,
     pub files: Vec<Wired>,
+    /// The agents not named, so the choice is on record in the log.
+    pub skipped: Vec<&'static str>,
     pub notice: Option<&'static str>,
 }
 
@@ -108,27 +162,55 @@ enum Pending {
     Text(PathBuf, String),
     Settings(PathBuf, Value),
     Delete(PathBuf),
-    /// A file under a directory setup owns whole: the file goes, and so does
-    /// every directory this leaves empty, up to and including that one.
+    /// A file under a host's directory: the file goes, and so does every
+    /// directory this leaves empty, up to and including that one.
     DeleteUnder(PathBuf, PathBuf),
 }
 
-/// Install into, or remove from, the project at `project`. Every file is
-/// read and judged before the first is written, so a refusal leaves the
-/// project exactly as it was.
+/// Install into, or remove from, the project at `project`, for the agents
+/// `named` and no other: a file two of them share is planned once. Every
+/// file is read and judged before the first is written, so a refusal
+/// leaves the project exactly as it was.
 ///
 /// # Errors
-/// [`NotebookError::InvalidArgument`] when a settings file is not JSON or an
-/// instruction file carries a stray marker — setup rewrites nothing it
-/// cannot read back — or a storage failure on any read or write.
-pub fn apply(project: &Path, remove: bool) -> Result<SetUp, NotebookError> {
-    let mut plans = vec![
-        plan_snippet(project, AGENTS_FILE, remove)?,
-        plan_claude_file(project, remove)?,
-        plan_hook(project, CLAUDE_SETTINGS, remove)?,
-        plan_hook(project, CODEX_HOOKS, remove)?,
-    ];
-    for host in SKILL_HOSTS {
+/// [`NotebookError::InvalidArgument`] when no agent is named or a name is
+/// not one setup knows, when a settings file is not JSON or an instruction
+/// file carries a stray marker — setup rewrites nothing it cannot read
+/// back — or a storage failure on any read or write.
+pub fn apply(project: &Path, remove: bool, named: &[String]) -> Result<SetUp, NotebookError> {
+    let chosen = chosen_agents(named)?;
+    let is_chosen = |agent: &Agent| chosen.iter().any(|it| it.name == agent.name);
+    let reads_agents = |agent: &Agent| {
+        agent.instructions == Instructions::Agents
+            || (agent.instructions == Instructions::Claude && reads_agents_file(project))
+    };
+    // A removal takes a shared file out only when every agent that reads
+    // it is named: the file is as much the unnamed agent's.
+    let all_readers_named =
+        |reads: &dyn Fn(&Agent) -> bool| AGENTS.iter().filter(|agent| reads(agent)).all(is_chosen);
+
+    let mut plans = Vec::new();
+    if chosen.iter().any(|agent| reads_agents(agent)) {
+        if remove && !all_readers_named(&reads_agents) {
+            plans.push(left_alone(AGENTS_FILE, Outcome::Shared));
+        } else {
+            plans.push(plan_snippet(project, AGENTS_FILE, remove)?);
+        }
+    }
+    if chosen
+        .iter()
+        .any(|agent| agent.instructions == Instructions::Claude)
+    {
+        plans.push(plan_claude_file(project, remove)?);
+    }
+    for hook in distinct(chosen.iter().filter_map(|agent| agent.hook)) {
+        plans.push(plan_hook(project, hook, remove)?);
+    }
+    for host in distinct(chosen.iter().map(|agent| agent.skills)) {
+        if remove && !all_readers_named(&|agent: &Agent| agent.skills == host) {
+            plans.push(left_alone(host, Outcome::Shared));
+            continue;
+        }
         for skill in skill::installable() {
             let dir = format!("{host}/{}", skill.name);
             for (file, text) in &skill.files {
@@ -149,8 +231,64 @@ pub fn apply(project: &Path, remove: bool) -> Result<SetUp, NotebookError> {
     Ok(SetUp {
         removed: remove,
         files,
+        skipped: AGENTS
+            .iter()
+            .filter(|agent| !chosen.iter().any(|it| it.name == agent.name))
+            .map(|agent| agent.name)
+            .collect(),
         notice: codex_written.then_some(CODEX_NOTICE),
     })
+}
+
+/// The agents `named`, each once, in setup's own order. Nothing is written
+/// for an agent nobody named: the files of a tool the project does not run
+/// read as noise at best and as a commitment at worst.
+fn chosen_agents(named: &[String]) -> Result<Vec<&'static Agent>, NotebookError> {
+    let known = || agent_names().join(", ");
+    if named.is_empty() {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!(
+                "setup: name the agents to wire with --agent, one of {}",
+                known()
+            ),
+        });
+    }
+    if let Some(unknown) = named
+        .iter()
+        .find(|name| !AGENTS.iter().any(|agent| agent.name == name.as_str()))
+    {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!("setup: `{unknown}` is not an agent; one of {}", known()),
+        });
+    }
+    Ok(AGENTS
+        .iter()
+        .filter(|agent| named.iter().any(|name| name == agent.name))
+        .collect())
+}
+
+/// Each value once, in first-seen order.
+fn distinct<'a>(values: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
+    let mut seen = Vec::new();
+    for value in values {
+        if !seen.contains(&value) {
+            seen.push(value);
+        }
+    }
+    seen
+}
+
+/// Whether Claude Code reaches `AGENTS.md` through its own file: a
+/// `CLAUDE.md` that is a link to it or imports it.
+fn reads_agents_file(project: &Path) -> bool {
+    let path = project.join(CLAUDE_FILE);
+    if is_link(&path) {
+        return links_agents_file(project, &path);
+    }
+    read_text(&path)
+        .ok()
+        .flatten()
+        .is_some_and(|text| imports_agents_file(&text))
 }
 
 /// A skill file: written where absent or stale, left alone once the user
@@ -177,7 +315,7 @@ fn plan_skill_file(
     let (outcome, pending) = match (remove, existing) {
         (true, Some(_)) => (
             Outcome::Removed,
-            Some(Pending::DeleteUnder(path, project.join(dir))),
+            Some(Pending::DeleteUnder(path, host_root(project, dir))),
         ),
         (true, None) => (Outcome::Absent, None),
         (false, Some(text)) if text == rendered => (Outcome::Already, None),
@@ -297,9 +435,10 @@ fn plan_hook(project: &Path, file: &'static str, remove: bool) -> Result<Planned
     let settings = read_settings(&path, file)?;
     let (outcome, pending) = if remove {
         match hook_removed(settings) {
-            Some(rest) if rest.as_object().is_some_and(Map::is_empty) => {
-                (Outcome::Removed, Some(Pending::Delete(path)))
-            }
+            Some(rest) if rest.as_object().is_some_and(Map::is_empty) => (
+                Outcome::Removed,
+                Some(Pending::DeleteUnder(path, host_root(project, file))),
+            ),
             Some(rest) => (Outcome::Removed, Some(Pending::Settings(path, rest))),
             None => (Outcome::Absent, None),
         }
@@ -527,6 +666,13 @@ fn read_settings(path: &Path, file: &str) -> Result<Value, NotebookError> {
     serde_json::from_str(&text).map_err(|error| NotebookError::InvalidArgument {
         reason: format!("setup: {file} is not JSON ({error}) — fix it or move it aside"),
     })
+}
+
+/// The directory a host's files live under, `.codex` for `.codex/hooks.json`:
+/// what removal may take out once it stands empty, since a host directory
+/// holding nothing else was setup's alone.
+fn host_root(project: &Path, file: &str) -> PathBuf {
+    project.join(file.split_once('/').map_or(file, |(top, _)| top))
 }
 
 /// A directory setup emptied is setup's leftover; one holding anything else

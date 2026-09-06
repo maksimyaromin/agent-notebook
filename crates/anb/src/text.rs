@@ -554,6 +554,9 @@ fn setup_lines(done: &crate::setup::SetUp) -> String {
     for wired in &done.files {
         let _ = writeln!(out, "  {}: {}", wired.path, wired.outcome.word());
     }
+    if !done.skipped.is_empty() {
+        let _ = writeln!(out, "skipped: {}", done.skipped.join(", "));
+    }
     if let Some(notice) = done.notice {
         let _ = writeln!(out, "notice: {notice}");
     }
