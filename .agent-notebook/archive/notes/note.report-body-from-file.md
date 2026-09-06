@@ -9,6 +9,7 @@ created: 2026-09-06
 updated: 2026-09-06
 ---
 
+
 # add and edit take the body from a file or stdin
 
 `add --body` and `edit --body` took the body as one shell argument, so a model of nine paragraphs passed through every quoting rule of the shell, a body that began with a flag-shaped word was parsed as a flag until it was spelled `--body=…`, and changing one word of a record meant reading the body back and passing all of it to `edit --body`. `close --note <file>` already read a report from a file, so the asymmetry was visible on the same day's work.
@@ -23,6 +24,6 @@ updated: 2026-09-06
 
 - CLI tests: a model added from a file lands as its body byte for byte; an edit takes the whole body from `-`; a file that is not there is a recovery payload with the try line and writes nothing; `--body` beside `--body-file` is a command-line conflict. A process test pipes a spec into `add --body-file -` through the real binary. Each was shown red once.
 - `scripts/check.sh` green, the regenerated skill and reference pages included; `pnpm docs:check` green.
-- Smoke check by another model, once: no functional defect. Should-fix, taken: the shared test harness still called the file seam a report reader after the rename, swept to the file it reads. Should-fix, taken: an empty body file on edit clears the body as an empty body does, and a test now pins it. Nit, noted: the flag help names a sibling flag without backticks, as the close help does.
+- Smoke check: no functional defect. Should-fix, taken: the shared test harness still called the file seam a report reader after the rename, swept to the file it reads. Should-fix, taken: an empty body file on edit clears the body as an empty body does, and a test now pins it. Nit, noted: the flag help names a sibling flag without backticks, as the close help does.
 
 Pull request: https://github.com/maksimyaromin/agent-notebook/pull/52, squash-merged on a green CI check.

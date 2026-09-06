@@ -1,7 +1,7 @@
 ---
 id: task.release-0-3-0
 type: task
-state: open
+state: active
 title: Release 0.3.0: the first adopter's findings
 by: Maksim Yaromin
 via: claude-code
@@ -19,3 +19,4 @@ updated: 2026-09-06
 ---
 
 The hub for note.the-first-adopters-findings. Each child closes one issue with one pull request; the hub closes with the release that ships them: the versions moved together, the changelog entry, the tag, the workflow green, the packages on the registry, the milestone closed.
+- 2026-09-06 claude-code: the six children closed through pull requests 49 to 54; the workspace, the lock and the six manifests at 0.3.0, the changelog entry v2026.09.06.2 extracted by changelog-notes.sh, check-versions and check-tag ok; the release pull request next, then the tag

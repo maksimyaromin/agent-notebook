@@ -9,6 +9,7 @@ created: 2026-09-06
 updated: 2026-09-06
 ---
 
+
 # close --note mints the report id from the Task id
 
 `close --note` titled the ingested report `Report: <task title>` and minted its id from that title through the same slug cut every title goes through, so the prefix spent seven of the forty characters and the cut landed on whatever word the title had there: `note.report-grill-rounds-2-and-3-how`, and in this notebook `note.report-setup-appends-its-snippet-as-its` and `note.report-status-json-carries-debt-as`, both minted this same day. An id is read far more often than it is minted, and a reader could not name a Task's report from the Task.
@@ -26,6 +27,6 @@ updated: 2026-09-06
 - Two core tests, shown red once: a Task titled `A demo record` with id `task.demo` closes into `note.report-demo`, and a fifty-six-character slug is cut to `note.report-alpha-beta-gamma-delta-epsilon-zeta-eta-theta`, the last word boundary that leaves room for a suffix. The existing tests for the replay, the resumed close, the second report after a reopen and the archived report hold; the CLI snapshots name the new id.
 - The rendered skill and the book examples print the same report ids as before, since their Task slugs equal their title slugs, so the skill check and the reference pages stayed green without regeneration.
 - `scripts/check.sh` green; `pnpm docs:check` green.
-- Smoke check by another model, once: no correctness defect; the boundary arithmetic, the collision path against a live and an archived Note, the resumed close and the printed ids in the skill and the book were each traced. Should-fix, taken: the report's id was minted from a second read of the corpus on every close, so the minting is now one seam with two callers, the title for every record and the Task id for a report, inside the one corpus read create already makes. Should-fix, taken: the rationale for the collision suffix had two homes after the extraction and has one. Nit, noted: a Task id without a dot is unreachable through the close path, so the fallback in the report id stays.
+- Smoke check: no correctness defect; the boundary arithmetic, the collision path against a live and an archived Note, the resumed close and the printed ids in the skill and the book were each traced. Should-fix, taken: the report's id was minted from a second read of the corpus on every close, so the minting is now one seam with two callers, the title for every record and the Task id for a report, inside the one corpus read create already makes. Should-fix, taken: the rationale for the collision suffix had two homes after the extraction and has one. Nit, noted: a Task id without a dot is unreachable through the close path, so the fallback in the report id stays.
 
 Pull request: https://github.com/maksimyaromin/agent-notebook/pull/51, squash-merged on a green CI check.
