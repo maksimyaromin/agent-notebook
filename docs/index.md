@@ -1,8 +1,9 @@
 ---
-title: agent-notebook
+title: Working memory for coding agents
 description: 'Working memory for coding agents, with a deterministic CLI and customizable workflow skills.'
 template: splash
 hero:
+  title: agent-notebook
   tagline: Working memory for projects built with coding agents.
   actions:
     - text: Get started

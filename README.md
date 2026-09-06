@@ -14,6 +14,10 @@
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-667aeb?style=flat-square" /></a>
 </p>
 
+<p align="center">
+  <img alt="A terminal session: anb adds, starts and logs a Task, records a rule, shows Status to the next session, closes the Task with its report, archives it and passes the check." src="./apps/docs/public/demo.gif" />
+</p>
+
 agent-notebook helps coding agents continue work with the decisions, findings and open questions from earlier sessions. It keeps that knowledge connected to the work it came from, so another agent can understand how the project got here and what to do next.
 
 A deterministic CLI handles the records. It checks changes, reports their consequences and gives the agent a next step when a command is refused. The supplied skills describe a complete working method: how to organize work, maintain project knowledge and finish with evidence.
