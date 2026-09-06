@@ -15,7 +15,7 @@ The reply lists each file and whether it was written, already present, or left a
 
 | File | Contents |
 |---|---|
-| `AGENTS.md` | A marked instruction block pointing to `anb status` and `anb --help` |
+| `AGENTS.md` | A marked instruction block pointing to `anb status` and `anb --help`, appended as a paragraph of its own |
 | `CLAUDE.md` | The same block, unless the file already links to or imports `AGENTS.md` |
 | `.claude/settings.json` | A `SessionStart` hook running `anb status --hook` with a 15-second timeout |
 | `.codex/hooks.json` | The corresponding Codex hook |

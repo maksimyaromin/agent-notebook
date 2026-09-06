@@ -332,7 +332,10 @@ pub fn snippet_applied(text: &str, file: &str) -> Result<Option<String>, Noteboo
         return Ok(Some(format!("{}{SNIPPET}{}", &text[..start], &text[end..])));
     }
     let mut patched = text.to_owned();
-    if !patched.is_empty() && !patched.ends_with('\n') {
+    // CommonMark reads a non-blank line right after a list item or a
+    // paragraph as a continuation of it, so the snippet stands behind a
+    // blank line of its own.
+    while !patched.is_empty() && !patched.ends_with("\n\n") {
         patched.push('\n');
     }
     patched.push_str(SNIPPET);
@@ -354,7 +357,25 @@ pub fn snippet_removed(text: &str, file: &str) -> Result<Option<String>, Noteboo
     } else {
         end
     };
-    Ok(Some(format!("{}{}", &text[..start], &text[end..])))
+    let (before, after) = (&text[..start], &text[end..]);
+    let before = if after.is_empty() || after.starts_with('\n') {
+        without_paragraph_break(before)
+    } else {
+        before
+    };
+    Ok(Some(format!("{before}{after}")))
+}
+
+/// `before` without the blank line that ends it, when one does. Setup put
+/// that break ahead of an appended snippet where the guide ended on one
+/// newline, and removal cannot tell that guide from one that ended on a
+/// blank line of its own: the first comes back as it was, the second
+/// ending on one newline.
+fn without_paragraph_break(before: &str) -> &str {
+    before
+        .strip_suffix('\n')
+        .filter(|kept| kept.ends_with('\n'))
+        .unwrap_or(before)
 }
 
 /// The byte range of the marker-bounded segment, begin marker to the end of
@@ -564,7 +585,77 @@ mod tests {
             snippet_applied("# Guide without a final newline", "AGENTS.md")
                 .unwrap()
                 .unwrap(),
-            format!("# Guide without a final newline\n{SNIPPET}\n")
+            format!("# Guide without a final newline\n\n{SNIPPET}\n")
+        );
+    }
+
+    #[test]
+    fn a_snippet_appended_after_a_list_item_is_a_paragraph_of_its_own() {
+        let ends_with_a_list = "# Guide\n- one paragraph or list item is one physical line\n";
+        let patched = snippet_applied(ends_with_a_list, "AGENTS.md")
+            .unwrap()
+            .unwrap();
+        assert_eq!(patched, format!("{ends_with_a_list}\n{SNIPPET}\n"));
+        assert_eq!(snippet_applied(&patched, "AGENTS.md").unwrap(), None);
+    }
+
+    #[test]
+    fn a_guide_already_ending_on_a_blank_line_gets_no_second_one() {
+        let ends_blank = "# Guide\n\nRead the docs.\n\n";
+        assert_eq!(
+            snippet_applied(ends_blank, "AGENTS.md").unwrap().unwrap(),
+            format!("{ends_blank}{SNIPPET}\n")
+        );
+    }
+
+    #[test]
+    fn a_guide_ending_on_a_newline_reads_as_it_did_after_a_round_trip() {
+        let guide = "# Guide\n- one paragraph or list item is one physical line\n";
+        let patched = snippet_applied(guide, "AGENTS.md").unwrap().unwrap();
+        assert_eq!(
+            snippet_removed(&patched, "AGENTS.md").unwrap().unwrap(),
+            guide
+        );
+    }
+
+    #[test]
+    fn a_guide_without_a_final_newline_gains_one_over_a_round_trip() {
+        let patched = snippet_applied("# Guide", "AGENTS.md").unwrap().unwrap();
+        assert_eq!(
+            snippet_removed(&patched, "AGENTS.md").unwrap().unwrap(),
+            "# Guide\n"
+        );
+    }
+
+    #[test]
+    fn a_guide_ending_on_blank_lines_comes_back_one_blank_line_shorter() {
+        for (guide, after) in [
+            ("# Guide\n\n", "# Guide\n"),
+            ("# Guide\n\n\n", "# Guide\n\n"),
+        ] {
+            let patched = snippet_applied(guide, "AGENTS.md").unwrap().unwrap();
+            assert_eq!(
+                snippet_removed(&patched, "AGENTS.md").unwrap().unwrap(),
+                after,
+                "{guide:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_snippet_placed_between_two_paragraphs_leaves_one_break_behind() {
+        let mid_file = format!("# Guide\n\n{SNIPPET}\n\nmore\n");
+        assert_eq!(
+            snippet_removed(&mid_file, "AGENTS.md").unwrap().unwrap(),
+            "# Guide\n\nmore\n"
+        );
+        let followed_by_text = format!("# Guide\n\n{SNIPPET}\nmore\n");
+        assert_eq!(
+            snippet_removed(&followed_by_text, "AGENTS.md")
+                .unwrap()
+                .unwrap(),
+            "# Guide\n\nmore\n",
+            "the break ahead of the snippet was the guide's own"
         );
     }
 
