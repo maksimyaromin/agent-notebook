@@ -92,9 +92,11 @@ mod narrowed_by_identity {
     use super::holding;
     use crate::*;
 
-    /// One person's records are the ones they created and the Tasks they
-    /// took; a Task of theirs someone else took is that person's now, and a
-    /// Task they took from someone else's creation is theirs too.
+    /// Work belongs to who holds it and authorship is a different fact:
+    /// one person's records are the Tasks they hold and the records of
+    /// every other type they wrote. A Task they wrote and handed over is
+    /// the other person's, a Task they hold from someone else's planning
+    /// is theirs, and a Task nobody holds is nobody's, whoever wrote it.
     fn a_team_notebook() -> MemoryStorage {
         storage_with(&[
             (
@@ -144,7 +146,7 @@ mod narrowed_by_identity {
     }
 
     #[test]
-    fn a_listing_narrowed_to_one_identity_keeps_what_it_created_or_holds() {
+    fn a_listing_narrowed_to_one_identity_keeps_the_tasks_it_holds_and_what_it_wrote() {
         let mut storage = a_team_notebook();
         let notebook = Notebook::new(&mut storage);
         let listed: Vec<String> = notebook
@@ -153,22 +155,41 @@ mod narrowed_by_identity {
             .into_iter()
             .map(|row| row.id)
             .collect();
-        assert_eq!(
-            listed,
-            [
-                "task.given-away",
-                "task.mine",
-                "task.taken",
-                "decision.mine"
-            ]
-        );
+        assert_eq!(listed, ["task.taken", "decision.mine"]);
         let queued: Vec<String> = notebook
             .ready(&by("Grace"))
             .unwrap()
             .into_iter()
             .map(|row| row.id)
             .collect();
-        assert_eq!(queued, ["task.given-away", "task.taken", "task.theirs"]);
+        assert_eq!(queued, ["task.given-away"]);
+    }
+
+    /// The pool is the Tasks nobody holds, whoever wrote them: the work
+    /// anyone may take. A Decision nobody signed is not in it, since only
+    /// work is taken.
+    #[test]
+    fn the_pool_is_the_tasks_nobody_holds() {
+        let mut storage = a_team_notebook();
+        let notebook = Notebook::new(&mut storage);
+        let pool = Filter {
+            untaken: true,
+            ..Filter::default()
+        };
+        let listed: Vec<String> = notebook
+            .list(&pool)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(listed, ["task.mine", "task.theirs"]);
+        let queued: Vec<String> = notebook
+            .ready(&pool)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(queued, ["task.mine", "task.theirs"]);
     }
 
     /// A row carries who it names, so a reader of the listing sees who took
@@ -1137,15 +1158,25 @@ mod task_map {
             ),
             (
                 "tasks/task.open.md",
-                &task("task.open", "open", &["from: task.hub", "by: Grace"], ""),
+                &task(
+                    "task.open",
+                    "open",
+                    &["from: task.hub", "taken-by: Grace"],
+                    "",
+                ),
             ),
             (
                 "archive/tasks/task.done.md",
-                &task("task.done", "closed", &["from: task.hub", "by: Grace"], ""),
+                &task(
+                    "task.done",
+                    "closed",
+                    &["from: task.hub", "taken-by: Grace"],
+                    "",
+                ),
             ),
             (
                 "tasks/task.outside.md",
-                &task("task.outside", "open", &["by: Grace"], ""),
+                &task("task.outside", "open", &["taken-by: Grace"], ""),
             ),
         ])
     }

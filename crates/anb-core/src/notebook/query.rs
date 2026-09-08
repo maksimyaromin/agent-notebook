@@ -62,12 +62,20 @@ impl Admission {
             && filter
                 .by
                 .as_deref()
-                .is_none_or(|by| Attribution::of(record).names(by))
+                .is_none_or(|by| record.belongs_to() == Some(by))
+            && (!filter.untaken || is_untaken(record))
             && self
                 .needle
                 .as_deref()
                 .is_none_or(|needle| holds_text(record, needle))
     }
+}
+
+/// Whether the record is a Task nobody holds: one of the pool anyone may
+/// take. A record of another type is held by nobody and is not in the
+/// pool either, since only work is taken.
+pub(super) fn is_untaken(record: &Record) -> bool {
+    record.record_type() == Some(RecordType::Task) && record.taken_by().is_none()
 }
 
 /// The tags a record carries, as the envelope lists them.
@@ -621,17 +629,17 @@ fn own_first<'a>(
     identity: Option<&str>,
     within: impl Fn(&Record, &Record) -> std::cmp::Ordering,
 ) -> Vec<(&'a Record, Attribution)> {
-    let mut ranked: Vec<(&Record, Attribution)> = records
-        .map(|record| (record, Attribution::of(record)))
-        .collect();
-    let others_first =
-        |attribution: &Attribution| identity.is_none() || attribution.name() != identity;
-    ranked.sort_by(|(left, left_of), (right, right_of)| {
-        others_first(left_of)
-            .cmp(&others_first(right_of))
+    let mut ranked: Vec<&Record> = records.collect();
+    let others_first = |record: &Record| identity.is_none() || record.belongs_to() != identity;
+    ranked.sort_by(|left, right| {
+        others_first(left)
+            .cmp(&others_first(right))
             .then_with(|| within(left, right))
     });
     ranked
+        .into_iter()
+        .map(|record| (record, Attribution::of(record)))
+        .collect()
 }
 
 /// The active Tasks not on hold: the dashboard's active lines, the first

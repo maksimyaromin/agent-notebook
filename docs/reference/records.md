@@ -39,7 +39,7 @@ Commands update the fields they own. The grammar preserves the body as text; sep
 | `title` | text | required | `add`, `edit --title` |
 | `by` | text | any | `add`, from the identity (`ANB_BY`, else the git `user.name`), or `--by` |
 | `via` | text | any | `add --via`: the creating agent tool; `comment --via` signs a log entry `by/via` without changing this field |
-| `taken-by` | text | Task | `start`, from the identity, when the Task has none; `edit --taken-by` hands it over; `edit --clear taken-by` erases it |
+| `taken-by` | text | Task | who holds the Task: `start`, from the identity, when the Task has none; `add --taken-by` or `add --mine` hands it over as it is written, `edit --taken-by` later; `edit --clear taken-by` erases it |
 | `from` | an id | any | `add --from`, `edit --from`: the origin |
 | `tags` | `[a-z0-9-]+`, comma-separated | any | `add --tag`, `edit --tag`, `edit --untag` |
 | `link` | `<kind> <target>`, repeatable | any | `add --link`, `edit --link`, `edit --unlink`, `close --note`, `--pr`, `--sha`, `--report` |
@@ -85,7 +85,7 @@ Notes are `active` or `retired`. `retire` ends a Note; adding a successor with `
 
 Tasks can be held or blocked independently of their lifecycle state. A `hold` field makes a Task held; an unresolved dependency makes it blocked. `ready` selects open Tasks that are neither held nor blocked.
 
-Nobody assigns a Task: someone takes it. `start` records who took it as `taken-by` when the Task has none, and refuses a Task someone else took with `taken`; `edit --taken-by` hands it over.
+A Task belongs to whoever holds it, named by `taken-by`; `by` is the author and a different fact. `start` records who took it as `taken-by` when the Task has none, and refuses a Task someone else holds with `taken`; `add --taken-by` hands a Task over as it is written and `edit --taken-by` later. A Task nobody holds is nobody's, whoever wrote it.
 
 Closing a completed Task requires `--note`, `--pr`, `--sha`, `--report` or `--no-proof`. `--reason` ends a Task without completing it, including from open. Questions close with `--resolved-by` or `--reason`. See [Tasks](../guides/tasks.md#closing-with-a-proof) for proof selection.
 
@@ -120,7 +120,7 @@ Ids use `<type>.<slug>`, with a slug matching `[a-z0-9-]+`. `add` derives one fr
 |---|---|---|
 | `format` | `1` | the version of the format the notebook is written in |
 | `budget` | `1500` | the estimated Status token budget; `0` disables budget-driven cuts; [limits](status.md#the-budget) still apply |
-| `scope` | `team` | whose records a read answers with when the call names nobody: `team` for everyone's, `mine` for the ones the identity created or took; `--team`, `--mine` and `--by` outrank it for one call |
+| `scope` | `team` | whose records a read answers with when the call names nobody: `team` for everyone's, `mine` for the Tasks the identity holds and the records it wrote; `--team`, `--mine`, `--by` and `--untaken` outrank it for one call |
 | `debt-task-stale` | `7` | days an active Task may go without a log entry |
 | `debt-question-age` | `14` | days a free-standing Question may stay open |
 | `debt-question-age-task-born` | `7` | the same for a Question born from a Task |

@@ -59,10 +59,22 @@ ok: block task.negative-corpus-wired-into-ci — waits on task.grammar-parser-ac
 
 ## The queue
 
-The queue shows what can start now; the blocked child waits, and the `taken-by` column would name a Task someone already took:
+A Task planned for a colleague is handed over as it is written, and the queue shows what can start now: the blocked child waits, the `taken-by` column names who holds a Task, and `--untaken` is the pool, the Tasks nobody holds:
+
+```
+$ anb add task "Port the parser to Go" --priority 3 --taken-by Grace
+ok: add task.port-the-parser-to-go — tasks/task.port-the-parser-to-go.md
+```
 
 ```
 $ anb ready
+ready[2]{id,priority,age,taken-by,title}:
+  task.grammar-parser-accepts-fences,1,0d,-,Grammar parser accepts fences
+  task.port-the-parser-to-go,3,0d,Grace,Port the parser to Go
+```
+
+```
+$ anb ready --untaken
 ready[1]{id,priority,age,taken-by,title}:
   task.grammar-parser-accepts-fences,1,0d,-,Grammar parser accepts fences
 ```
@@ -73,9 +85,19 @@ ready[1]{id,priority,age,taken-by,title}:
   task.grammar-parser-accepts-fences,1,0d,-,Grammar parser accepts fences
 ```
 
+Narrowed to the user's own, with `--mine` or the config key `scope: mine`, a dashboard holds the Tasks the user holds and the records the user wrote; Ada holds nothing yet, so it counts the pool where her next work is:
+
+```
+$ anb status --mine --budget 0
+ok: notebook — 4 tasks, 0 decisions, 0 notes, 0 questions
+by: Ada — anb status --team
+untaken: 1 — anb ready --untaken
+budget: ~47 tokens (no ceiling)
+```
+
 ## A session at work
 
-A session takes the top of the queue, which records who took it as `taken-by`, logs as it goes with the entry signed `by/via`, and parks a doubt without widening its scope:
+A session takes the top of the pool, which records who holds it as `taken-by`, logs as it goes with the entry signed `by/via`, and parks a doubt without widening its scope:
 
 ```
 $ anb start task.grammar-parser-accepts-fences
@@ -123,23 +145,25 @@ records[2]{id,state,priority,title}:
 
 ## Status
 
-Status opens the session with the work: the active Task and its last log line, the queue and the open Questions; an active Task another person took would carry their name after its title:
+Status opens the session with the work: the active Task and its last log line, the queue with who holds each Task, and the open Questions; an active Task another person holds would carry their name after its title:
 
 ```
 $ anb status --budget 0
-ok: notebook — 3 tasks, 2 decisions, 1 note, 1 question
+ok: notebook — 4 tasks, 2 decisions, 1 note, 1 question
 active: task.grammar-parser-accepts-fences "Grammar parser accepts fences"
 log: "- 2026-01-15 Ada/codex: fences parse; the indented-body case is next"
+ready[1]{id,priority,age,taken-by,title}:
+  task.port-the-parser-to-go,3,0d,Grace,Port the parser to Go
 questions[1]{id,age,by,title}:
   question.do-fences-nest,0d,Ada,Do fences nest?
-budget: ~93 tokens (no ceiling)
+budget: ~123 tokens (no ceiling)
 ```
 
-Narrowed to the user's own, with `--mine` or the config key `scope: mine`, it says whose it is and how to widen it:
+Narrowed to the user's own, it says whose it is and how to widen it, and a colleague's Task is not in it:
 
 ```
 $ anb status --mine --budget 0
-ok: notebook — 3 tasks, 2 decisions, 1 note, 1 question
+ok: notebook — 4 tasks, 2 decisions, 1 note, 1 question
 by: Ada — anb status --team
 active: task.grammar-parser-accepts-fences "Grammar parser accepts fences"
 log: "- 2026-01-15 Ada/codex: fences parse; the indented-body case is next"
@@ -182,12 +206,7 @@ carried[1]: note.report-grammar-parser-accepts-fences
 
 ## Ending without work, pausing
 
-A Task overtaken before it started ends with its reason, from open, and is archived like any closed record; a pause carries its reason too:
-
-```
-$ anb add task "Port the parser to Go"
-ok: add task.port-the-parser-to-go — tasks/task.port-the-parser-to-go.md
-```
+A Task overtaken before it started ends with its reason, from open, whoever holds it, and is archived like any closed record; a pause carries its reason too:
 
 ```
 $ anb close task.port-the-parser-to-go --reason "overtaken by decision.a-fence-body-is-opaque"
@@ -206,7 +225,7 @@ ok: hold task.negative-corpus-wired-into-ci — held until 2026-01-20
 
 ## Reading back, and the gate
 
-Reading back: one record, the whole notebook, the records that are Ada's own, the records holding a text with the archive reached, and the gate, which is clean because every settled record was archived as it settled:
+Reading back: one record, the whole notebook, the records that are Ada's own, which the hub she wrote and nobody holds is not, the records holding a text with the archive reached, and the gate, which is clean because every settled record was archived as it settled:
 
 ```
 $ anb show task.ship-the-parser
@@ -237,9 +256,7 @@ records[5]{id,state,priority,title}:
 
 ```
 $ anb list --mine
-records[4]{id,state,priority,title}:
-  task.negative-corpus-wired-into-ci,open,2,Negative corpus wired into CI
-  task.ship-the-parser,open,-,Ship the parser
+records[2]{id,state,priority,title}:
   decision.a-fence-body-is-opaque,active,-,A fence body is opaque
   decision.fences-never-nest,active,-,Fences never nest
 ```

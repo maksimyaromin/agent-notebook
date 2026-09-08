@@ -319,9 +319,9 @@ mod status_dashboard {
 
     /// Several people work one notebook, and each session opens on its own
     /// person's work: the reader's Tasks lead, whatever was touched last,
-    /// and every other line says whose it is, so nobody resumes another
-    /// person's Task by mistake. A Task nobody is named on is nobody's to
-    /// mark.
+    /// and every other line says who holds it, so nobody resumes another
+    /// person's Task by mistake. A Task nobody holds is nobody's to mark,
+    /// whoever wrote it.
     #[test]
     fn the_active_lines_lead_with_the_readers_own_and_mark_the_others() {
         fn active(id: &str, updated: &str, extra: &[&str]) -> String {
@@ -363,7 +363,7 @@ mod status_dashboard {
             [
                 "active: task.mine \"A demo record\"",
                 "active: task.hers \"A demo record\" (Grace)",
-                "active: task.legacy \"A demo record\" (Maks)",
+                "active: task.legacy \"A demo record\"",
                 "active: task.nobodys \"A demo record\"",
             ],
             "{}",
@@ -598,9 +598,10 @@ mod status_dashboard {
         assert!(!status.text.contains("decision.rule"), "{}", status.text);
     }
 
-    /// A dashboard narrowed to one identity holds that person's work and
-    /// nothing else, says whose it is, and points every hint at the same
-    /// narrowing, so a reader who follows one lands on the same rows.
+    /// A dashboard narrowed to one identity holds the Tasks that person
+    /// holds and the Questions they asked, nothing else, says whose it is,
+    /// and points every hint at the same narrowing, so a reader who follows
+    /// one lands on the same rows.
     #[test]
     fn a_dashboard_narrowed_to_one_identity_holds_their_work_and_says_so() {
         let mut files = vec![
@@ -634,7 +635,13 @@ mod status_dashboard {
         for index in 0..7 {
             files.push((
                 format!("tasks/task.r{index}.md"),
-                record_file(&format!("task.r{index}"), "task", "open", &["by: Ada"], ""),
+                record_file(
+                    &format!("task.r{index}"),
+                    "task",
+                    "open",
+                    &["by: Grace", "taken-by: Ada"],
+                    "",
+                ),
             ));
         }
         let mut storage = MemoryStorage::from_files(files);
@@ -663,8 +670,96 @@ mod status_dashboard {
         assert_eq!(status.by.as_deref(), Some("Ada"));
     }
 
-    /// A narrowed dashboard with nothing of that person's in it is quiet
-    /// for them, and still says so: the team may be at work.
+    /// A Task written by the reader and handed to a colleague is the
+    /// colleague's in every section: it never opens the reader's session,
+    /// and it is not in the reader's queue.
+    #[test]
+    fn a_task_the_reader_wrote_and_handed_over_is_not_in_their_dashboard() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.planned-for-grace.md",
+                &record_file(
+                    "task.planned-for-grace",
+                    "task",
+                    "active",
+                    &["by: Ada", "taken-by: Grace"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.planned-for-nobody.md",
+                &record_file("task.planned-for-nobody", "task", "open", &["by: Ada"], ""),
+            ),
+            (
+                "tasks/task.planned-for-ada.md",
+                &record_file(
+                    "task.planned-for-ada",
+                    "task",
+                    "open",
+                    &["by: Ada", "taken-by: Ada"],
+                    "",
+                ),
+            ),
+        ]);
+        let text = status_by(&mut storage, "Ada", Some("Ada"));
+        assert!(!text.contains("active:"), "{text}");
+        assert!(
+            text.contains("ready[1]{id,priority,age,taken-by,title}:\n  task.planned-for-ada,"),
+            "{text}"
+        );
+        assert!(
+            text.contains("untaken: 1 — anb ready --untaken\n"),
+            "{text}"
+        );
+    }
+
+    /// A dashboard narrowed to one identity hides the pool with the rest
+    /// of the team's work, so it counts the pool where a session with an
+    /// empty queue looks for its next work, and a pool alone keeps the
+    /// notebook from reading as quiet. The whole team's dashboard lists the
+    /// pool in its queue and needs no count.
+    #[test]
+    fn a_narrowed_dashboard_counts_the_pool_and_a_pool_alone_is_not_quiet() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.free.md",
+                &record_file("task.free", "task", "open", &["by: Grace"], ""),
+            ),
+            (
+                "tasks/task.blocked.md",
+                &record_file(
+                    "task.blocked",
+                    "task",
+                    "open",
+                    &["blocked-by: task.free"],
+                    "",
+                ),
+            ),
+        ]);
+        let status = Notebook::new(&mut storage)
+            .with_identity(Some("Ada"))
+            .status(TODAY, Budget::Unbounded, Some("Ada"), no_lost_proofs)
+            .unwrap();
+        assert!(!status.quiet, "{}", status.text);
+        let lines: Vec<&str> = status.text.lines().collect();
+        assert_eq!(
+            lines[..3],
+            [
+                "ok: notebook — 2 tasks, 0 decisions, 0 notes, 0 questions",
+                "by: Ada — anb status --team",
+                "untaken: 1 — anb ready --untaken",
+            ],
+            "{}",
+            status.text
+        );
+        assert!(lines[3].starts_with("budget:"), "{}", status.text);
+        assert_eq!(status.untaken, 1);
+        let team = status_text(&mut storage);
+        assert!(!team.contains("untaken:"), "{team}");
+    }
+
+    /// A narrowed dashboard with nothing of that person's in it and no
+    /// pool is quiet for them, and still says so: the team may be at work.
     #[test]
     fn a_narrowed_dashboard_with_nothing_of_theirs_is_quiet_and_points_at_the_team() {
         let mut storage = storage_with(&[(

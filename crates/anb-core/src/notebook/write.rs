@@ -56,6 +56,9 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
             return invalid(format!("priority: {priority} is outside 0 to 4"));
         }
     }
+    if let Some(taken_by) = &draft.taken_by {
+        guard_taken_by(draft.record_type, taken_by)?;
+    }
     if draft.supersedes.is_some()
         && !matches!(draft.record_type, RecordType::Decision | RecordType::Note)
     {
@@ -76,7 +79,7 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     Ok(())
 }
 
-/// Who took a Task is one non-empty line, and only a Task is taken; the
+/// Who holds a Task is one non-empty line, and only a Task is held; the
 /// eraser is `--clear`, not an empty name.
 fn guard_taken_by(record_type: RecordType, taken_by: &str) -> Result<(), NotebookError> {
     if record_type != RecordType::Task {
@@ -521,6 +524,7 @@ pub(super) fn render_draft(draft: &Draft, id: &str, by: Option<&str>, today: &st
     for (key, value) in [
         ("kind", &draft.kind),
         ("via", &draft.via),
+        (TAKEN_BY, &draft.taken_by),
         ("from", &draft.from),
         ("supersedes", &draft.supersedes),
     ] {

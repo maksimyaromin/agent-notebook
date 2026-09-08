@@ -21,8 +21,11 @@ pub struct Filter {
     /// One epic's scope: the hub, what it waits on, and what was born
     /// inside it.
     pub hub: Option<String>,
-    /// One identity's records: the ones it created or took.
+    /// One identity's work: the Tasks it holds and the other records it
+    /// wrote.
     pub by: Option<String>,
+    /// Only the Tasks nobody holds: the pool anyone may take.
+    pub untaken: bool,
     /// Only records whose id, title, tags, people or body hold this text,
     /// matched without regard to case.
     pub text: Option<String>,
@@ -48,7 +51,8 @@ pub struct Focus {
 }
 
 /// A record to be created; `id: None` mints one from the title, `by: None`
-/// signs it with the notebook's identity.
+/// signs it with the notebook's identity, `taken_by` hands a Task over as
+/// it is written.
 #[derive(Debug)]
 pub struct Draft {
     pub record_type: RecordType,
@@ -57,6 +61,7 @@ pub struct Draft {
     pub kind: Option<String>,
     pub by: Option<String>,
     pub via: Option<String>,
+    pub taken_by: Option<String>,
     pub from: Option<String>,
     pub tags: Vec<String>,
     pub links: Vec<Link>,
@@ -75,6 +80,7 @@ impl Draft {
             kind: None,
             by: None,
             via: None,
+            taken_by: None,
             from: None,
             tags: Vec::new(),
             links: Vec::new(),

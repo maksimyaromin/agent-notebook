@@ -59,6 +59,58 @@ fn a_draft_is_signed_with_the_identity_unless_it_names_its_own() {
     );
 }
 
+/// A planner hands a Task over as it is written, so it is the other
+/// person's from the moment it exists; the name is stored trimmed, as
+/// every name is.
+#[test]
+fn a_task_drafted_for_someone_is_theirs_from_the_moment_it_exists() {
+    let mut storage = MemoryStorage::new();
+    let mut notebook = Notebook::new(&mut storage).with_identity(Some("Ada"));
+    let mut handed = Draft::new(RecordType::Task, "Planned for Grace");
+    handed.taken_by = Some(" Grace ".to_owned());
+    let created = notebook.create(&handed, TODAY).unwrap();
+    assert!(
+        storage
+            .read(&created.path)
+            .unwrap()
+            .contains("\nby: Ada\ntaken-by: Grace\n")
+    );
+    let theirs: Vec<String> = Notebook::new(&mut storage)
+        .ready(&Filter {
+            by: Some("Grace".to_owned()),
+            ..Filter::default()
+        })
+        .unwrap()
+        .into_iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(theirs, ["task.planned-for-grace"]);
+}
+
+/// Only work is held: a draft of any other type cannot name a holder, and
+/// an empty name is no hand-over.
+#[test]
+fn a_holder_on_a_draft_that_is_not_a_task_or_an_empty_one_is_refused() {
+    let mut storage = MemoryStorage::new();
+    let mut notebook = Notebook::new(&mut storage);
+    let mut decision = Draft::new(RecordType::Decision, "Held");
+    decision.taken_by = Some("Grace".to_owned());
+    assert!(matches!(
+        notebook.create(&decision, TODAY),
+        Err(NotebookError::InvalidArgument { .. })
+    ));
+    let mut blank = Draft::new(RecordType::Task, "Held by nobody");
+    blank.taken_by = Some("  ".to_owned());
+    assert!(matches!(
+        notebook.create(&blank, TODAY),
+        Err(NotebookError::InvalidArgument { .. })
+    ));
+    assert!(
+        storage.list("tasks").unwrap().is_empty(),
+        "nothing was written"
+    );
+}
+
 #[test]
 fn a_caller_supplied_id_that_is_taken_names_its_holder() {
     let mut storage = storage_with(&[("archive/tasks/task.demo.md", &task_file("closed", &[]))]);

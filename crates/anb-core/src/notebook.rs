@@ -45,8 +45,8 @@ use crate::record::{
     not_utf8_finding,
 };
 use crate::reply::{
-    Archived, Attribution, CitedProof, Closed, Commented, Created, Deleted, Edged, Edited, Graph,
-    Held, ListedRecord, ReadyTask, Restored, Transitioned, View,
+    Archived, CitedProof, Closed, Commented, Created, Deleted, Edged, Edited, Graph, Held,
+    ListedRecord, ReadyTask, Restored, Transitioned, View,
 };
 use crate::request::{Draft, Edit, Filter, Focus, GraphSlice, Link, Proof};
 use crate::resolve::{
@@ -293,7 +293,7 @@ impl<'a> Notebook<'a> {
         let records = &corpus.records;
         let resolvable = corpus.resolver();
         let debt = self.decay(&corpus, today_day, settle)?;
-        let named = |record: &Record| by.is_none_or(|by| Attribution::of(record).names(by));
+        let named = |record: &Record| by.is_none_or(|by| record.belongs_to() == Some(by));
         let scoped: Vec<&Record> = records
             .iter()
             .filter(|record| !debt::is_excluded(record, &resolvable) && named(record))
@@ -307,6 +307,7 @@ impl<'a> Notebook<'a> {
             review: query::review_tasks(&scoped, identity),
             held: query::held_tasks(&scoped, identity),
             ready: query::ready_rows(records, &resolvable, named),
+            untaken: query::ready_rows(records, &resolvable, query::is_untaken).len(),
             questions: query::open_questions(&scoped, identity),
             debt: debt.len(),
             today_day,
@@ -600,12 +601,12 @@ impl<'a> Notebook<'a> {
     }
 
     /// `open | review → active`, taking the Task: the identity is recorded
-    /// as `taken-by` unless someone already took it. A Task another
-    /// identity took is refused — handing it over is a correction made
+    /// as `taken-by` unless someone already holds it. A Task another
+    /// identity holds is refused — handing it over is a correction made
     /// deliberately with `edit --taken-by` — and so is a replay against
     /// it, since answering `already` would tell a second person the work
     /// is theirs. A host that knows nobody takes nothing and is refused
-    /// any taken Task the same way.
+    /// any held Task the same way.
     ///
     /// # Errors
     /// [`NotebookError::Taken`] naming who took it, plus the refusals of

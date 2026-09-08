@@ -17,7 +17,7 @@ ready[1]{id,priority,age,taken-by,title}:
   task.negative-corpus-wired-into-ci,-,0d,-,Negative corpus wired into CI
 ```
 
-`ready` lists open Tasks with no unresolved dependencies and no hold, ordered by priority and then age. Priority `0` is most urgent; `-` means none was set. The `taken-by` column names a Task someone already took. Use `anb ready --for <hub>` for one epic, then `anb start <id>` to take a Task into work.
+`ready` lists open Tasks with no unresolved dependencies and no hold, ordered by priority and then age. Priority `0` is most urgent; `-` means none was set. The `taken-by` column names who holds a Task; `anb ready --untaken` is the pool, the Tasks nobody holds. Use `anb ready --for <hub>` for one epic, then `anb start <id>` to take a Task into work.
 
 The supplied skill keeps one Task active at a time per person. The CLI allows several, so check Status before starting another.
 
@@ -25,9 +25,9 @@ The supplied skill keeps one Task active at a time per person. The CLI allows se
 
 The CLI knows who is asking: `ANB_BY` names the identity, else the git `user.name` does. Every `add` signs its record `by` that identity, and every `comment` signs its log entry `by/via`, so the person stays in the trail beside the tool.
 
-Nobody assigns work in the notebook: a Task is taken. `start` records who took it as `taken-by`. Status lists your own active Tasks first and names who took any other, so you resume your work and not a colleague's. A Task someone else took refuses `start` with `taken`; handing it over is `anb edit <id> --taken-by <name>`, a decision made on purpose.
+A Task belongs to whoever holds it, and authorship is a separate fact: `taken-by` names the holder, `by` the author. `start` takes a Task nobody holds and records you as `taken-by`; a Task someone else holds refuses `start` with `taken`. A planner hands a Task over in the command that writes it, `anb add task "<title>" --taken-by <name>`, or later with `anb edit <id> --taken-by <name>`; `anb add task "<title>" --mine` takes a Task for yourself. A Task nobody holds is nobody's, however many people wrote or planned it. Status lists your own active Tasks first and names who holds any other, so you resume your work and not a colleague's.
 
-Reading is the whole project's by default: `status`, `ready`, `list` and `graph` show everyone's records, your own first where the order matters. `--mine` narrows any of them to the records you created or took; `--by <name>` does the same for a colleague. A notebook whose config sets `scope: mine` makes that the default for every read, including the session hook, and `--team` widens one call to the whole project, which is how you choose new work when your own queue is empty. `list --match <name>` finds the records that name a person, since it matches `by`, `via` and `taken-by`.
+Reading is the whole project's by default: `status`, `ready`, `list` and `graph` show everyone's records, your own first where the order matters. `--mine` narrows any of them to your work, the Tasks you hold and the Questions, Decisions and Notes you wrote; `--by <name>` does the same for a colleague; `--untaken` is the pool, the Tasks nobody holds. A notebook whose config sets `scope: mine` makes your own work the default for every read, including the session hook; Status then counts the pool on an `untaken:` line when there is one, so a session whose own queue is empty knows where its next work is, and `--team` widens one call to the whole project. `list --match <name>` finds the records that name a person, since it matches `by`, `via` and `taken-by`.
 
 ## Leave a useful log
 

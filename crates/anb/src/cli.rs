@@ -39,7 +39,7 @@ pub enum Command {
     /// notebook appears on first write.
     Add(AddArgs),
     /// open | review → active: take the Task into work, or back into it;
-    /// the Task records who took it, and one taken by someone else is refused.
+    /// the Task records who holds it, and one somebody else holds is refused.
     Start { id: String },
     /// active → review: hand the work to a human for acceptance.
     Submit { id: String },
@@ -87,7 +87,7 @@ pub enum Command {
     /// active → retired: end a Decision or Note that has no successor.
     Retire { id: String },
     /// The dispatch queue: open, unblocked, unheld Tasks, most urgent first,
-    /// each naming who took it when someone did.
+    /// each naming who holds it when someone does.
     Ready {
         /// Every row; the listing is bounded by default.
         #[arg(long)]
@@ -210,6 +210,14 @@ pub struct AddArgs {
     /// The acting agent tool.
     #[arg(long)]
     pub via: Option<String>,
+    /// Who will do the task: hands it over as it is written. Omitted, the
+    /// task is nobody's until someone starts it.
+    #[arg(long = "taken-by", value_name = "NAME", conflicts_with = "mine")]
+    pub taken_by: Option<String>,
+    /// Take the task for yourself: `--taken-by` with the identity the
+    /// writers sign with.
+    #[arg(long)]
+    pub mine: bool,
     /// A task's urgency, 0 to 4, 0 the most urgent.
     #[arg(long)]
     pub priority: Option<u32>,
@@ -257,7 +265,7 @@ pub struct EditArgs {
     /// The explicit resurfacing date.
     #[arg(long, value_name = "DATE")]
     pub review_by: Option<String>,
-    /// Who took the task: the hand-over that lets another identity start it.
+    /// Who holds the task: the hand-over that lets another identity start it.
     #[arg(long = "taken-by", value_name = "NAME")]
     pub taken_by: Option<String>,
     /// The optional field to erase: `from`, `priority`, `review-by`, or
@@ -326,7 +334,7 @@ pub const NARROWING: &str = "Narrowing";
 #[derive(Args)]
 #[command(next_help_heading = NARROWING)]
 pub struct Whose {
-    /// Only records this identity created or took.
+    /// Only this identity's work: the tasks it holds and the records it wrote.
     #[arg(long, value_name = "NAME", conflicts_with_all = ["mine", "team"])]
     pub by: Option<String>,
     /// Only your own: `--by` with the identity the writers sign with.
@@ -346,6 +354,10 @@ pub struct Whose {
 pub struct Narrowing {
     #[command(flatten)]
     pub whose: Whose,
+    /// Only the tasks nobody holds, the pool anyone may take, whatever the
+    /// notebook's `scope` key says.
+    #[arg(long, conflicts_with_all = ["by", "mine", "team"])]
+    pub untaken: bool,
     /// Only records inside this record's scope: an epic, what it waits on
     /// and what was born inside it.
     #[arg(long = "for", value_name = "ID")]

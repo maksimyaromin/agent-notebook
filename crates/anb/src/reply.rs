@@ -53,6 +53,9 @@ fn narrowing_flags(filter: &Filter) -> String {
     if let Some(by) = &filter.by {
         let _ = write!(out, " --by {}", shell_word(by));
     }
+    if filter.untaken {
+        out.push_str(" --untaken");
+    }
     if let Some(text) = &filter.text {
         let _ = write!(out, " --match {}", shell_word(text));
     }
@@ -249,7 +252,7 @@ pub fn execute(
     match command {
         Command::Add(mut args) => {
             let body = body_text(args.body.take(), args.body_file.take(), read_file)?;
-            let draft = draft(args, body.unwrap_or_default());
+            let draft = draft(args, body.unwrap_or_default(), identity.as_deref())?;
             created("add", &mut notebook, &draft, today)
         }
         Command::Retire { id } => Ok(moved("retire", notebook.retire(&id, today)?)),
@@ -486,11 +489,23 @@ fn body_text(
     }
 }
 
-fn draft(args: AddArgs, body: String) -> Draft {
+/// The draft as the Core takes it. `--mine` is `--taken-by` with the
+/// identity the host acts as, so a host that knows nobody has nobody to
+/// take the task for and says so.
+fn draft(args: AddArgs, body: String, identity: Option<&str>) -> Result<Draft, NotebookError> {
     let mut draft = Draft::new(args.record_type, &args.title);
     draft.id = args.id;
     draft.by = args.by;
     draft.via = args.via;
+    draft.taken_by = if args.mine {
+        Some(own_name(
+            identity,
+            "mine: no identity to take the task for",
+            "",
+        )?)
+    } else {
+        args.taken_by
+    };
     draft.from = args.from;
     draft.tags = args.tags;
     draft.links = args.links.iter().map(|raw| parsed_link(raw)).collect();
@@ -498,7 +513,25 @@ fn draft(args: AddArgs, body: String) -> Draft {
     draft.priority = args.priority;
     draft.kind = args.kind;
     draft.supersedes = args.supersedes;
-    draft
+    Ok(draft)
+}
+
+/// The identity a call stands in for, or the refusal that names how a
+/// host that knows nobody gets one, and the `way_around` when the call has
+/// one.
+fn own_name(
+    identity: Option<&str>,
+    lacking: &str,
+    way_around: &str,
+) -> Result<String, NotebookError> {
+    identity
+        .map(str::to_owned)
+        .ok_or_else(|| NotebookError::InvalidArgument {
+            reason: format!(
+                "{lacking}; set git user.name or {}{way_around}",
+                crate::identity::IDENTITY_ENV
+            ),
+        })
 }
 
 /// `<kind> <target>` split at the first space; a link without one arrives
@@ -553,6 +586,7 @@ fn filter(
 ) -> Result<Filter, NotebookError> {
     let Narrowing {
         whose,
+        untaken,
         scope,
         tags,
         text,
@@ -562,12 +596,20 @@ fn filter(
         kinds,
         archive,
     } = extent;
+    // The pool is nobody's by definition, so asking for it answers the
+    // whose question outright and leaves the config key aside.
+    let by = if untaken {
+        None
+    } else {
+        named(whose, notebook.config()?.scope(), identity)?
+    };
     Ok(Filter {
         types,
         kinds,
         tags,
         hub: scope,
-        by: named(whose, notebook.config()?.scope(), identity)?,
+        by,
+        untaken,
         text,
         archive,
     })
@@ -584,16 +626,7 @@ fn named(
     identity: Option<&str>,
 ) -> Result<Option<String>, NotebookError> {
     let Whose { by, mine, team } = whose;
-    let own = |lacking: &str| {
-        identity
-            .map(str::to_owned)
-            .ok_or_else(|| NotebookError::InvalidArgument {
-                reason: format!(
-                    "{lacking}; set git user.name or {}, or pass --team",
-                    crate::identity::IDENTITY_ENV
-                ),
-            })
-    };
+    let own = |lacking: &str| own_name(identity, lacking, ", or pass --team");
     if let Some(by) = by {
         return Ok(Some(by));
     }

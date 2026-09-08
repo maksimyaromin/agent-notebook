@@ -36,7 +36,7 @@ ready[1]{id,priority,age,taken-by,title}:
 
 ## Narrowing
 
-`list`, `ready` and `graph` take the same narrowing flags: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine` and `--team`; `list` and `graph` also take `--type`, `--kind` and `--archive`, which a queue of live Tasks has no use for. Each is a predicate over the same notebook, so two flags ask for the intersection, and a narrowed listing's truncation hint carries every flag it was asked with. `status` takes `--by`, `--mine` and `--team`. Whose records a read answers with when none of those three is given is the notebook's `scope` config key, everyone's by default.
+`list`, `ready` and `graph` take the same narrowing flags: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine`, `--team` and `--untaken`; `list` and `graph` also take `--type`, `--kind` and `--archive`, which a queue of live Tasks has no use for. Each is a predicate over the same notebook, so two flags ask for the intersection, and a narrowed listing's truncation hint carries every flag it was asked with. `--by` and `--mine` answer with one person's work, the Tasks they hold and the records they wrote; `--untaken` with the pool, the Tasks nobody holds. `status` takes `--by`, `--mine` and `--team`. Whose records a read answers with when the call names nobody is the notebook's `scope` config key, everyone's by default.
 
 ## Bounds
 
