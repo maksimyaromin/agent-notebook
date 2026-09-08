@@ -1,5 +1,27 @@
 # Changelog
 
+## agent-notebook v2026.09.08
+
+The notebook knows who is asking. Two issues from a team sharing one notebook close here: `by` was written and never read back, and a notebook of rules with no Task started every session blind to them. The packages move to 0.4.0: the ready table gains a column and a log entry is signed `by/via`, so a script that parsed either by position reads the header first.
+
+### New
+
+- **A Task is taken, never assigned.** `start` records who took the Task as `taken-by` and refuses a Task someone else took, a replay by another identity included, with the new `taken` refusal; `edit --taken-by` hands it over and `edit --clear taken-by` erases it. Nobody assigns work: `add` has no way to take a Task for someone else. (#67)
+- **Your own records, and a colleague's.** `ready` and `list` take `--mine` and `--by <name>`, composable with `--for`, keeping the records an identity created or took; the ready table names who took each Task in a `taken-by` column, and `search` matches `by`, `via` and `taken-by`. (#67)
+- **The identity the host acts under.** `ANB_BY` names it outright, for a checkout with no git identity or one whose git name is not the notebook's; otherwise git's `user.name` answers. `add` signs `by` with it, and `--mine` without one is refused with the fix named. (#67)
+
+### Improved
+
+- **Status opens on your work.** The caller's active Tasks lead the dashboard, and a Task another person took carries their name after its title; the hook gets the same. Every other section stays the whole project's. (#67)
+- **A log entry names the person and the hand.** `comment` signs `by/via`, the form a cited record is attributed in, so the human stays in the trail beside the tool. (#67)
+- **Rows carry their people.** `list`, `ready` and `search` rows, and Status `active` rows, carry `by` and `taken-by` in `--json` when the record has them. (#67)
+
+### Fixed
+
+- **A standing rule opens Status.** A notebook holding rule Decisions and no Task printed the quiet line, so the session hook delivered nothing of the law until the first Task existed; a live rule now counts as signal, and a shape Decision or a Note alone still leaves the notebook quiet. (#67)
+
+Packages in this release: `@supolka/agent-notebook@0.4.0` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.06.2
 
 The third release of the day, and the first shaped by an adopter: seven issues were filed after the tool was set up on an existing project and its history replayed through the live verbs, and six of them close here. The packages move to 0.3.0: `anb setup` now refuses to wire an agent nobody named, so a script that ran it bare must name one.
