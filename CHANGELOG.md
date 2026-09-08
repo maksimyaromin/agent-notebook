@@ -1,5 +1,25 @@
 # Changelog
 
+## agent-notebook v2026.09.08.1
+
+Status is where the work continues, and every listing narrows the same way. A team on one notebook asked for a read side that answers each of its questions once, and for a complexity revision before another flag was added; the revision is this release. The packages move to 0.5.0: `search` and `overview` are gone, `graph --ready` with them, Status no longer prints rules, epics or Debt rows, and the graph document is at version 3, so a script built on any of those reads the entries below first.
+
+### New
+
+- **One narrowing for every read.** `list`, `ready` and `graph` take `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine` and `--team`; `list` and `graph` also take `--type`, `--kind` and `--archive`. Each flag is a predicate over the same notebook, two flags ask for the intersection, and a narrowing changes what is shown, never what is true: a Task waiting on a colleague's stays blocked when their work is left out. A kind no type allows, a malformed tag or an empty text is refused with the vocabulary named, and a truncation hint carries every flag it was asked with. `anb <verb> --help` and the commands reference document the flags once. (#72)
+- **The notebook says whose records a read answers with.** The config key `scope` is `team` by default; `scope: mine` narrows every read, Status and the session hook included, to the records the identity created or took, and `--team` widens one call. `--mine` and `scope: mine` without an identity are refused with the fix named. (#72)
+- **The open Questions open the session.** Status carries a `questions[N]{id,age,by,title}` section, the reader's own first and then the oldest first, so a session sees the doubt it is about to work past. (#72)
+- **`anb debt`.** Every sign of decay on its own line, in the clock table's order, bounded like every listing, with the same rows as `{count, debt}` in `--json`. (#72)
+
+### Improved
+
+- **Status is the work.** Active Tasks with the first one's last log line, review, held, the ready queue, the open Questions, and `debt: N — anb debt`. Rules and epics have no section and knowledge never opens the gate: a notebook of rules alone is quiet, and a rule is read before the work it binds with `list --type decision --kind rule`. Review and held lead with the reader's own and name another person's, and held carries a `taken-by` column. Under a narrowing a `by: <name> — anb status --team` line says so, and every hint on the dashboard carries the same `--by`. (#72)
+- **`search` is `list --match`.** A text is one more predicate over id, title, tags, people and body, composable with every other flag; `--archive` reaches history, which `search` read by default. `overview` is `list --all`, and a type of it `list --type <t>`. (#72)
+- **The graph is `list` with edges.** `graph` takes the listing's flags and no `--ready`: a ready Task waits on nothing live, so a graph of ready Tasks alone had no edges to draw, and every node still carries `ready` for a page to key on. The document's `slice` names each narrowing under its flag, and `v` is 3. (#72)
+- **The dashboard opens nothing in the archive.** Epic progress is a read of its own: `ready --for <hub>` is an epic's queue, `list --for <hub> --archive` its whole membership, and a hub's graph node carries `closed/total` and `next`. (#72)
+
+Packages in this release: `@supolka/agent-notebook@0.5.0` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.08
 
 The notebook knows who is asking. Two issues from a team sharing one notebook close here: `by` was written and never read back, and a notebook of rules with no Task started every session blind to them. The packages move to 0.4.0: the ready table gains a column and a log entry is signed `by/via`, so a script that parsed either by position reads the header first.
