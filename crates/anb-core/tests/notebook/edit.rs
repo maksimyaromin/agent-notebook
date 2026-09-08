@@ -477,6 +477,80 @@ mod edit_verb {
         assert!(text.contains("\nupdated: 2026-08-27\n"));
     }
 
+    /// Handing a Task over is a correction like any other: the line naming
+    /// who took it is set, replaced and erased through `edit`, and an empty
+    /// name is refused, since the eraser is `--clear`.
+    #[test]
+    fn who_took_a_task_is_set_replaced_and_cleared_by_edit() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
+        let mut notebook = Notebook::new(&mut storage);
+        let taken = notebook
+            .edit(
+                "task.demo",
+                &Edit {
+                    taken_by: Some("Grace".to_owned()),
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(taken.changed, vec!["taken-by"]);
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .contains("\ntaken-by: Grace\n")
+        );
+
+        let error = Notebook::new(&mut storage)
+            .edit(
+                "task.demo",
+                &Edit {
+                    taken_by: Some("  ".to_owned()),
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::InvalidArgument { .. }));
+
+        let cleared = Notebook::new(&mut storage)
+            .edit(
+                "task.demo",
+                &Edit {
+                    clear: vec!["taken-by".to_owned()],
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(cleared.changed, vec!["taken-by"]);
+        assert!(
+            !storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .contains("taken-by")
+        );
+    }
+
+    #[test]
+    fn taken_by_on_a_record_that_is_not_a_task_is_refused() {
+        let text = record_file("decision.demo", "decision", "active", &[], "");
+        let mut storage = storage_with(&[("decisions/decision.demo.md", &text)]);
+        let error = Notebook::new(&mut storage)
+            .edit(
+                "decision.demo",
+                &Edit {
+                    taken_by: Some("Grace".to_owned()),
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::InvalidArgument { .. }));
+        assert_eq!(storage.read("decisions/decision.demo.md").unwrap(), text);
+    }
+
     #[test]
     fn a_cleared_field_leaves_the_record() {
         let mut storage = storage_with(&[(

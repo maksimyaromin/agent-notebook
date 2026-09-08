@@ -11,7 +11,9 @@ use crate::grammar::{self, Residence};
 use crate::graph::{TaskGraph, TaskNode};
 use crate::mention;
 use crate::record::{REF_KEYS, Record, RecordType, TaskState, linked_record};
-use crate::reply::{Blocker, Cited, CitedProof, Counts, Epic, GraphNode, ListedRecord, ReadyTask};
+use crate::reply::{
+    Attribution, Blocker, Cited, CitedProof, Counts, Epic, GraphNode, ListedRecord, ReadyTask,
+};
 use crate::request::Draft;
 use crate::resolve::{Resolver, is_archived, path_stem, type_of};
 use crate::status::{ActiveTask, HeldTask, StatusRule};
@@ -156,6 +158,7 @@ pub(super) fn listed_row(record: &Record, resolvable: &Resolver<'_>) -> ListedRe
         id: path_stem(record.path()).to_owned(),
         state,
         priority: file.field("priority").and_then(|value| value.parse().ok()),
+        attribution: Attribution::of(record),
         title: file
             .field("title")
             .map(str::to_owned)
@@ -257,12 +260,17 @@ pub(super) fn graph_node(
     }
 }
 
+/// Whether the record answers a search: the needle stands in its id, its
+/// title, its tags, its people, or its body.
 pub(super) fn matches_query(record: &Record, needle: &str) -> bool {
     let file = record.file();
     [
         Some(path_stem(record.path())),
         file.field("title"),
         file.field("tags"),
+        file.field("by"),
+        file.field("via"),
+        file.field("taken-by"),
         Some(file.body()),
     ]
     .into_iter()
@@ -311,6 +319,7 @@ fn ready_row(record: &Record) -> ReadyTask {
         id: path_stem(record.path()).to_owned(),
         priority: file.field("priority").and_then(|value| value.parse().ok()),
         created: file.field("created").unwrap_or_default().to_owned(),
+        attribution: Attribution::of(record),
         title: encode::bounded_text(file.field("title").unwrap_or_default().to_owned()),
     }
 }
@@ -541,12 +550,14 @@ pub(super) fn held_tasks(live_valid: &[&Record]) -> Vec<HeldTask> {
         .collect()
 }
 
-/// The active Tasks not on hold, the most recently touched first: the
-/// dashboard's active lines, the first carrying the last log line — the
-/// mechanical "where I stopped". A held one is paused on purpose and is
-/// not where a session resumes; [`held_tasks`] names it instead.
-pub(super) fn active_tasks(live_valid: &[&Record]) -> Vec<ActiveTask> {
-    let mut active: Vec<&Record> = live_valid
+/// The active Tasks not on hold: the dashboard's active lines, the first
+/// carrying the last log line — the mechanical "where I stopped". The
+/// caller's own come first, so a notebook several people work in opens on
+/// the reader's work; within a tier the most recently touched leads. A
+/// held one is paused on purpose and is not where a session resumes;
+/// [`held_tasks`] names it instead.
+pub(super) fn active_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<ActiveTask> {
+    let mut active: Vec<(&Record, Attribution)> = live_valid
         .iter()
         .copied()
         .filter(|record| {
@@ -554,20 +565,25 @@ pub(super) fn active_tasks(live_valid: &[&Record]) -> Vec<ActiveTask> {
                 && record.state() == Some("active")
                 && record.hold().is_none()
         })
+        .map(|record| (record, Attribution::of(record)))
         .collect();
-    active.sort_by(|left, right| {
-        touched(right)
-            .cmp(touched(left))
+    let others_first =
+        |attribution: &Attribution| identity.is_none() || attribution.name() != identity;
+    active.sort_by(|(left, left_of), (right, right_of)| {
+        others_first(left_of)
+            .cmp(&others_first(right_of))
+            .then_with(|| touched(right).cmp(touched(left)))
             .then_with(|| path_stem(left.path()).cmp(path_stem(right.path())))
     });
     active
-        .iter()
+        .into_iter()
         .enumerate()
-        .map(|(position, record)| ActiveTask {
+        .map(|(position, (record, attribution))| ActiveTask {
             id: path_stem(record.path()).to_owned(),
             title: encode::bounded_text(
                 record.file().field("title").unwrap_or_default().to_owned(),
             ),
+            attribution,
             log: (position == 0)
                 .then(|| last_log_line(record))
                 .flatten()

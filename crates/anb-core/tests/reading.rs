@@ -3,7 +3,7 @@
 //! cross the Storage seam is behaviour, watched here at the seam itself.
 
 use anb_core::{
-    Budget, CitedProof, Draft, MemoryStorage, Notebook, NotebookError, RecordType, Storage,
+    Budget, CitedProof, Draft, Filter, MemoryStorage, Notebook, NotebookError, RecordType, Storage,
     StorageError,
 };
 use std::cell::RefCell;
@@ -89,12 +89,20 @@ fn nothing_lost(_cited: &[CitedProof]) -> Vec<CitedProof> {
     Vec::new()
 }
 
+/// The listing narrowed to one hub's scope.
+fn within(hub: &str) -> Filter {
+    Filter {
+        hub: Some(hub.to_owned()),
+        ..Filter::default()
+    }
+}
+
 #[test]
 fn a_query_about_live_work_opens_nothing_in_the_archive() {
     let mut storage = watched(3, 200);
     let notebook = Notebook::new(&mut storage);
-    notebook.ready().unwrap();
-    notebook.list().unwrap();
+    notebook.ready(&Filter::default()).unwrap();
+    notebook.list(&Filter::default()).unwrap();
     notebook.view("task.live-0").unwrap();
 
     assert_eq!(
@@ -210,7 +218,9 @@ fn the_widening_opens_each_filed_record_once_when_the_edges_loop() {
         )
         .unwrap();
 
-    Notebook::new(&mut storage).list_for("task.live").unwrap();
+    Notebook::new(&mut storage)
+        .list(&within("task.live"))
+        .unwrap();
 
     let mut opened = storage.archived_reads();
     opened.sort();
@@ -323,7 +333,9 @@ fn a_record_filed_between_the_listing_and_the_read_is_skipped() {
         files: watched(3, 0).files,
         gone: "tasks/task.live-1.md".to_owned(),
     };
-    let rows = Notebook::new(&mut storage).list().unwrap();
+    let rows = Notebook::new(&mut storage)
+        .list(&Filter::default())
+        .unwrap();
 
     let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
     assert_eq!(

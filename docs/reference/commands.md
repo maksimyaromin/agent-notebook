@@ -21,7 +21,7 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 | `--link <LINK>` | `<kind> <target>`, e.g. `pr https://…`; repeatable |
 | `--body <BODY>` | The prose under the envelope; omitted, the record opens empty |
 | `--body-file <PATH>` | The prose under the envelope, read from a file; `-` reads standard input. Refused beside --body |
-| `--by <BY>` | The accountable identity; omitted, git identity fills it |
+| `--by <BY>` | The accountable identity; omitted, `ANB_BY` or the git identity fills it |
 | `--via <VIA>` | The acting agent tool |
 | `--priority <PRIORITY>` | A task's urgency, 0 to 4, 0 the most urgent |
 | `--kind <KIND>` | A decision's rule, shape, or drift; a note's fact, term, guide, idea, model, or spec |
@@ -29,7 +29,7 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 
 ### anb start
 
-open | review → active: take the Task into work, or back into it
+open | review → active: take the Task into work, or back into it; the Task records who took it, and one taken by someone else is refused
 
 Arguments: `<ID>`
 
@@ -92,7 +92,7 @@ Arguments: `<ID> <ON>`
 
 ### anb comment
 
-Append one entry to a Task's log, where the next session resumes
+Append one entry to a Task's log, where the next session resumes; the entry is signed by the identity, `/` the tool when `--via` names one
 
 Arguments: `<ID> <TEXT>`
 
@@ -108,11 +108,13 @@ Arguments: `<ID>`
 
 ### anb ready
 
-The dispatch queue: open, unblocked, unheld Tasks, most urgent first
+The dispatch queue: open, unblocked, unheld Tasks, most urgent first, each naming who took it when someone did
 
 | Flag | Meaning |
 |---|---|
 | `--for <ID>` | Only work this record's scope reaches: an epic's own queue |
+| `--by <NAME>` | Only Tasks this identity created or took |
+| `--mine` | Only your own: `--by` with the identity the writers sign with |
 | `--all` | Every row; the listing is bounded by default |
 
 ### anb list
@@ -122,6 +124,8 @@ Every live record
 | Flag | Meaning |
 |---|---|
 | `--for <ID>` | Only records this one's scope reaches: an epic and its work |
+| `--by <NAME>` | Only records this identity created or took |
+| `--mine` | Only your own: `--by` with the identity the writers sign with |
 | `--all` | Every row; the listing is bounded by default |
 
 ### anb show
@@ -187,11 +191,12 @@ Arguments: `<ID>`
 | `--from <FROM>` | Origin: the record this record was born from |
 | `--priority <PRIORITY>` | 0 to 4, 0 the most urgent |
 | `--review-by <DATE>` | The explicit resurfacing date |
-| `--clear <FIELD>` | The optional field to erase: `from`, `priority`, or `review-by`; repeatable |
+| `--taken-by <NAME>` | Who took the task: the hand-over that lets another identity start it |
+| `--clear <FIELD>` | The optional field to erase: `from`, `priority`, `review-by`, or `taken-by`; repeatable |
 
 ### anb search
 
-Find records by substring, the archive included
+Find records by substring over id, title, tags, people and body, the archive included
 
 Arguments: `<QUERY>`
 

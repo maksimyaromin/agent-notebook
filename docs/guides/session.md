@@ -13,13 +13,21 @@ If there is no active Task, inspect the ready queue:
 
 ```text
 $ anb ready
-ready[1]{id,priority,age,title}:
-  task.negative-corpus-wired-into-ci,-,0d,Negative corpus wired into CI
+ready[1]{id,priority,age,taken-by,title}:
+  task.negative-corpus-wired-into-ci,-,0d,-,Negative corpus wired into CI
 ```
 
-`ready` lists open Tasks with no unresolved dependencies and no hold, ordered by priority and then age. Priority `0` is most urgent; `-` means none was set. Use `anb ready --for <hub>` for one epic, then `anb start <id>` to take a Task into work.
+`ready` lists open Tasks with no unresolved dependencies and no hold, ordered by priority and then age. Priority `0` is most urgent; `-` means none was set. The `taken-by` column names a Task someone already took. Use `anb ready --for <hub>` for one epic, then `anb start <id>` to take a Task into work.
 
-The supplied skill keeps one Task active at a time. The CLI allows several, so check Status before starting another.
+The supplied skill keeps one Task active at a time per person. The CLI allows several, so check Status before starting another.
+
+## Several people, one notebook
+
+The CLI knows who is asking: `ANB_BY` names the identity, else the git `user.name` does. Every `add` signs its record `by` that identity, and every `comment` signs its log entry `by/via`, so the person stays in the trail beside the tool.
+
+Nobody assigns work in the notebook: a Task is taken. `start` records who took it as `taken-by`. Status lists your own active Tasks first and names who took any other, so you resume your work and not a colleague's. A Task someone else took refuses `start` with `taken`; handing it over is `anb edit <id> --taken-by <name>`, a decision made on purpose.
+
+Reading stays the whole project's by default: `ready`, `list` and `search` show everyone's records, and Status shows every rule and the whole queue. `anb ready --mine` and `anb list --mine` narrow to the records you created or hold; `--by <name>` does the same for a colleague. `search` matches `by`, `via` and `taken-by`, so a name finds the records that carry it.
 
 ## Leave a useful log
 

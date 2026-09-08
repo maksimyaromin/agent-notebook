@@ -107,7 +107,7 @@ anb add task "Rename the CSV download button" --id task.csv-download --from note
 anb check
 ```
 
-These explicit ids make the example runnable. In ordinary work, use the ids returned by the CLI, including collision suffixes. Add `--via` to every agent `add` and `comment`, using your actual tool name, such as `codex` or `claude-code`. Leave `by` to the accountable person; `via` identifies the tool, and on comments labels the log entry. Other verbs do not accept it.
+These explicit ids make the example runnable. In ordinary work, use the ids returned by the CLI, including collision suffixes. Add `--via` to every agent `add` and `comment`, using your actual tool name, such as `codex` or `claude-code`. Leave `by` to the accountable person: the CLI signs it from `ANB_BY` or the git identity, and a comment is signed `by/via`, so the person stays in the trail beside the tool. Other verbs do not accept `--via`.
 
 ## Quick reference
 
@@ -131,7 +131,9 @@ Choose by what a later reader needs, with an explicit `--kind` for Notes and Dec
 
 ### Orient
 
-Read `anb status` unless the hook supplied it. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Read its cited knowledge and relevant code. Search before creating records: search matches ids, titles and tags, including the archive, but not bodies. Use `show --all` for a truncated body and scoped lists for larger work; loading the whole notebook obscures the immediate decision.
+Read `anb status` unless the hook supplied it. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Read its cited knowledge and relevant code. Search before creating records: search matches ids, titles, tags and the people named in the envelope, including the archive, but not bodies. Use `show --all` for a truncated body and scoped lists for larger work; loading the whole notebook obscures the immediate decision.
+
+Several people can share one notebook, and nobody assigns work in it: a Task is taken. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names a Task someone already took; choose one nobody took, or one the user took, and read `ready --mine` when the queue is long. `start` records the user as the Task's `taken-by` and refuses a Task another person took; handing it over is `edit <id> --taken-by <name>`, decided by the user, never by the agent.
 
 ### Shape the idea
 
@@ -156,7 +158,7 @@ Keep local definitions in the model; extract terms when they need independent lo
 
 Make each Task a reviewable result with constraints, behavior to preserve and completion evidence. For an epic, create a hub `--from` the idea, tag it `epic`, create children `--from` the hub, and `block <hub> <child>` for each deliverable. Add child dependencies only where one result is required by another. Read `ready --for <hub>` to choose work. A ready hub still needs verification of the overall outcome.
 
-Keep one Task in flight by default. Start it before work; when switching subjects, log the handoff and hold unfinished work with a reason. Comment with the result, evidence and next step, using `--via`. Update models and specs when their meaning changes. Supersede a Decision when its ruling changes; edit it when clarifying the same ruling. A Decision that cites another as context declares the relationship once, on `add` or later with `edit`: `--link "within decision.x"` for a rule that is part of a wider one, `--link "departs-from decision.x"` for a drift. `may-conflict` then names only the pair nobody has judged; read those records before deciding whether a conflict exists.
+Keep one Task in flight per person by default. Start it before work; when switching subjects, log the handoff and hold unfinished work with a reason, or hand the Task over with `edit --taken-by`. Comment with the result, evidence and next step, using `--via`. Update models and specs when their meaning changes. Supersede a Decision when its ruling changes; edit it when clarifying the same ruling. A Decision that cites another as context declares the relationship once, on `add` or later with `edit`: `--link "within decision.x"` for a rule that is part of a wider one, `--link "departs-from decision.x"` for a drift. `may-conflict` then names only the pair nobody has judged; read those records before deciding whether a conflict exists.
 
 Close answered Questions with `--resolved-by <decision-or-task>`, or `--reason` citing a Note when knowledge answers them, then archive. A genuine review date can be set on a drift Decision with `edit --review-by`; leave it unset when none is known.
 
@@ -177,10 +179,11 @@ Run `anb check`, address findings and recheck. When no CLI repair exists, report
 | Quote an id intended as a relationship | Cite it outside backticks | Quoted examples do not create mentions |
 | Retry a refused command unchanged | Read its `try:` instruction and fill its placeholders | Refusals explain the required correction |
 | Repeat `add` after an uncertain result | Inspect the notebook first | Creation without an explicit id can produce duplicates |
+| Start a Task marked as another person's | Pick a Task nobody took, or ask the user before `edit --taken-by` | Two people working one Task learn of it from a merge conflict |
 
 ## References
 
-Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads. Use the installed `anb-atlas` skill for a visual review.
+Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list`, `ready` and `search` rows carry `by` and `taken-by` there. Use the installed `anb-atlas` skill for a visual review.
 
 For a named personal practice, search and show with `--global`; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.
 "#;
@@ -286,7 +289,9 @@ fn flag_help(flag: &Arg) -> String {
 fn session_section(out: &mut String) {
     out.push_str("Every reply below is what the tool printed, run on ");
     out.push_str(TODAY);
-    out.push_str(" by an agent whose git identity is `Ada`.\n\n");
+    out.push_str(
+        " by an agent working as `Ada`, the identity the host resolved from `ANB_BY` or git.\n\n",
+    );
     let mut notebook = Scratch::new();
     for step in SESSION {
         match step {
@@ -403,18 +408,22 @@ const SESSION: &[Step] = &[
         "task.grammar-parser-accepts-fences",
     ]),
     Step::Head("The queue"),
-    Step::Say("The queue shows what can start now; the blocked child waits:"),
+    Step::Say(
+        "The queue shows what can start now; the blocked child waits, and the `taken-by` column would name a Task someone already took:",
+    ),
     Step::Run(&["ready"]),
     Step::Run(&["ready", "--for", "task.ship-the-parser"]),
     Step::Head("A session at work"),
     Step::Say(
-        "A session takes the top of the queue, logs as it goes, and parks a doubt without widening its scope:",
+        "A session takes the top of the queue, which records who took it as `taken-by`, logs as it goes with the entry signed `by/via`, and parks a doubt without widening its scope:",
     ),
     Step::Run(&["start", "task.grammar-parser-accepts-fences"]),
     Step::Run(&[
         "comment",
         "task.grammar-parser-accepts-fences",
         "fences parse; the indented-body case is next",
+        "--via",
+        "codex",
     ]),
     Step::Run(&[
         "add",
@@ -425,7 +434,7 @@ const SESSION: &[Step] = &[
     ]),
     Step::Head("Decisions and Notes"),
     Step::Say(
-        "A ruling is a Decision; a term is a Note. A second Decision on the same ground is nudged about the first, so read it before going on:",
+        "A ruling is a Decision; a term is a Note, here recorded by a colleague. A second Decision on the same ground is nudged about the first, so read it before going on:",
     ),
     Step::Run(&[
         "add",
@@ -459,6 +468,8 @@ const SESSION: &[Step] = &[
         "Fence",
         "--kind",
         "term",
+        "--by",
+        "Grace",
         "--body",
         "A fence is a pair of triple-backtick lines; the parser treats the lines between as one opaque body.",
     ]),
@@ -473,7 +484,7 @@ const SESSION: &[Step] = &[
     Step::Run(&["archive", "question.do-fences-nest"]),
     Step::Head("Status"),
     Step::Say(
-        "Status opens the session with the active Task and its last log line, the rules, the queue and the epics:",
+        "Status opens the session with the active Task and its last log line, the rules, the queue and the epics; an active Task another person held would carry their name after its title:",
     ),
     Step::Run(&["status", "--budget", "0"]),
     Step::Head("Closing a Task"),
@@ -513,10 +524,11 @@ const SESSION: &[Step] = &[
     ]),
     Step::Head("Reading back, and the gate"),
     Step::Say(
-        "Reading back: one record, the whole notebook, a search that reaches the archive, and the gate, which is clean because every settled record was archived as it settled:",
+        "Reading back: one record, the whole notebook, the records that are Ada's own, a search that reaches the archive, and the gate, which is clean because every settled record was archived as it settled:",
     ),
     Step::Run(&["show", "task.ship-the-parser"]),
     Step::Run(&["list"]),
+    Step::Run(&["list", "--mine"]),
     Step::Run(&["search", "fence"]),
     Step::Run(&["check"]),
 ];
@@ -542,6 +554,17 @@ const REFUSALS: &[Step] = &[
         "The record's state does not allow the move; the valid moves are listed, each with its command.",
     ),
     Step::Run(&["close", "task.ship-the-parser", "--no-proof"]),
+    Step::Head("taken"),
+    Step::Say(
+        "Another person took the Task. `start` takes work, so a Task already taken changes hands through `edit --taken-by` first, on purpose.",
+    ),
+    Step::Run(&[
+        "edit",
+        "task.grammar-parser-accepts-fences",
+        "--taken-by",
+        "Grace",
+    ]),
+    Step::Run(&["start", "task.grammar-parser-accepts-fences"]),
     Step::Head("invalid-argument"),
     Step::Say(
         "A flag or value is invalid for this command or record type. The reply suggests a valid form.",
@@ -642,7 +665,7 @@ impl Scratch {
         };
         let no_lost = |_: &[anb_core::CitedProof]| Vec::new();
         let host = Host {
-            git_by: || Some(AUTHOR.to_owned()),
+            identity: || Some(AUTHOR.to_owned()),
             read_file: &read_file,
             lost_proofs: &no_lost,
             user_notebook: None,

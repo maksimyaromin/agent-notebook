@@ -31,6 +31,12 @@ pub enum NotebookError {
         id: String,
         expected: String,
     },
+    /// Another identity took the Task: `start` takes work, and a Task
+    /// already taken changes hands through `edit --taken-by` first.
+    Taken {
+        id: String,
+        taken_by: String,
+    },
     /// The record's state does not allow this move; `valid` names the
     /// moves it does allow, each the word its retry command is keyed by.
     InvalidTransition {
@@ -80,6 +86,7 @@ impl NotebookError {
             NotebookError::Archived { .. } => "archived",
             NotebookError::InvalidRecord { .. } => "invalid-record",
             NotebookError::WrongType { .. } => "wrong-type",
+            NotebookError::Taken { .. } => "taken",
             NotebookError::InvalidTransition { .. } => "invalid-transition",
             NotebookError::InvalidArgument { .. } => "invalid-argument",
             NotebookError::DuplicateId { .. } => "duplicate-id",
@@ -109,6 +116,9 @@ impl std::fmt::Display for NotebookError {
             }
             NotebookError::WrongType { id, expected } => {
                 write!(f, "`{id}` is not {expected}")
+            }
+            NotebookError::Taken { id, taken_by } => {
+                write!(f, "`{id}` is taken by {taken_by}")
             }
             NotebookError::InvalidTransition { id, state, valid } => {
                 if valid.is_empty() {

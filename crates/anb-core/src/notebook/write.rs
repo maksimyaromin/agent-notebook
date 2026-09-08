@@ -4,9 +4,10 @@
 
 use super::error::NotebookError;
 use crate::date;
+use crate::encode;
 use crate::grammar::{self, RecordFile};
 use crate::record::{Record, RecordType};
-use crate::request::{CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, Proof, REVIEW_BY};
+use crate::request::{CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, Proof, REVIEW_BY, TAKEN_BY};
 use crate::resolve::{path_stem, record_path, type_of};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -55,7 +56,6 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
             return invalid(format!("priority: {priority} is outside 0 to 4"));
         }
     }
-
     if draft.supersedes.is_some()
         && !matches!(draft.record_type, RecordType::Decision | RecordType::Note)
     {
@@ -72,6 +72,23 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     }
     for link in &draft.links {
         guard_link(link)?;
+    }
+    Ok(())
+}
+
+/// Who took a Task is one non-empty line, and only a Task is taken; the
+/// eraser is `--clear`, not an empty name.
+fn guard_taken_by(record_type: RecordType, taken_by: &str) -> Result<(), NotebookError> {
+    if record_type != RecordType::Task {
+        return Err(NotebookError::InvalidArgument {
+            reason: "taken-by: applies only to a task".to_owned(),
+        });
+    }
+    guard_single_line(TAKEN_BY, taken_by)?;
+    if taken_by.trim().is_empty() {
+        return Err(NotebookError::InvalidArgument {
+            reason: "taken-by: must not be empty; --clear taken-by erases it".to_owned(),
+        });
     }
     Ok(())
 }
@@ -102,7 +119,7 @@ pub(super) fn validate_edit(
 
     if edit.changes_nothing() {
         return invalid(
-            "edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, or --clear"
+            "edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, --taken-by, or --clear"
                 .to_owned(),
         );
     }
@@ -133,6 +150,9 @@ pub(super) fn validate_edit(
         && let Some(why) = grammar::date_error(date)
     {
         return invalid(format!("review-by: {why}"));
+    }
+    if let Some(taken_by) = &edit.taken_by {
+        guard_taken_by(record_type, taken_by)?;
     }
     let mut cleared = Vec::new();
     for field in &edit.clear {
@@ -197,14 +217,18 @@ pub(super) fn guard_single_line(field: &str, value: &str) -> Result<(), Notebook
     Ok(())
 }
 
-/// The author slot of a log entry: trimmed, one line, and `None` when
+/// One half of a signature — the identity or the acting hand — under the
+/// envelope key it would be written as: trimmed, one line, and `None` when
 /// nothing was given.
-pub(super) fn guarded_author(author: Option<&str>) -> Result<Option<&str>, NotebookError> {
-    let author = author.map(str::trim).filter(|name| !name.is_empty());
-    if let Some(author) = author {
-        guard_single_line("author", author)?;
+pub(super) fn guarded_name<'a>(
+    field: &str,
+    name: Option<&'a str>,
+) -> Result<Option<&'a str>, NotebookError> {
+    let name = name.map(str::trim).filter(|name| !name.is_empty());
+    if let Some(name) = name {
+        guard_single_line(field, name)?;
     }
-    Ok(author)
+    Ok(name)
 }
 
 /// The reason a record ends without work, or without a record to close
@@ -221,10 +245,11 @@ pub(super) fn guarded_reason<'a>(verb: &str, reason: &'a str) -> Result<&'a str,
     Ok(reason)
 }
 
-/// One Task-log entry. An unsigned one carries `-` in the author slot, so
-/// every entry keeps the same shape.
-pub(super) fn log_entry(today: &str, author: Option<&str>, text: &str) -> String {
-    format!("- {today} {}: {text}", author.unwrap_or("-"))
+/// One Task-log entry, signed the way a cited record is attributed: the
+/// identity, `/` the acting hand. An unsigned one carries `-`, so every
+/// entry keeps the same shape.
+pub(super) fn log_entry(today: &str, by: Option<&str>, via: Option<&str>, text: &str) -> String {
+    format!("- {today} {}: {text}", encode::author(by, via))
 }
 pub(super) fn parsed_type(id: &str) -> Result<RecordType, NotebookError> {
     match grammar::id_error(id) {
@@ -399,6 +424,10 @@ fn edited_fields(edit: &Edit, cleared: &[&'static str]) -> Vec<(&'static str, Op
         (FROM, edit.from.clone()),
         (PRIORITY, edit.priority.map(|priority| priority.to_string())),
         (REVIEW_BY, edit.review_by.clone()),
+        (
+            TAKEN_BY,
+            edit.taken_by.as_deref().map(str::trim).map(str::to_owned),
+        ),
     ]
     .into_iter()
     .filter_map(|(key, value)| value.map(|value| (key, Some(value))))
@@ -477,24 +506,26 @@ pub(super) fn edited_body(content: &str) -> String {
     }
 }
 
-/// Render a draft as a canonical record file. The splice machinery places
-/// every field, so the canonical order has one home: the grammar's field
-/// table.
-pub(super) fn render_draft(draft: &Draft, id: &str, today: &str) -> String {
+/// Render a draft as a canonical record file, signed `by`. The splice
+/// machinery places every field, so the canonical order has one home: the
+/// grammar's field table.
+pub(super) fn render_draft(draft: &Draft, id: &str, by: Option<&str>, today: &str) -> String {
     let mut file = RecordFile::parse("---\n---\n");
     file.set_field("id", id);
     file.set_field("type", draft.record_type.word());
     file.set_field("state", draft.record_type.initial_state());
     file.set_field("title", draft.title.trim());
+    if let Some(by) = by {
+        file.set_field("by", by);
+    }
     for (key, value) in [
         ("kind", &draft.kind),
-        ("by", &draft.by),
         ("via", &draft.via),
         ("from", &draft.from),
         ("supersedes", &draft.supersedes),
     ] {
         if let Some(value) = value {
-            file.set_field(key, value);
+            file.set_field(key, value.trim());
         }
     }
     if !draft.tags.is_empty() {

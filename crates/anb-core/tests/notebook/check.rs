@@ -676,7 +676,7 @@ mod unreadable_files {
             "tasks/task.binary.md",
             &[("tasks/task.a.md", &text)],
         );
-        let rows = Notebook::new(storage).list().unwrap();
+        let rows = Notebook::new(storage).list(&Filter::default()).unwrap();
         let states: Vec<(&str, &str)> = rows
             .iter()
             .map(|row| (row.id.as_str(), row.state.as_str()))

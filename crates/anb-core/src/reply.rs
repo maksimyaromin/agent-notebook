@@ -66,6 +66,48 @@ pub struct Edged {
     pub already: bool,
 }
 
+/// The people a record names: who created it and, on a Task, who took it.
+/// A listing is narrowed by it and the dashboard sorts by it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Attribution {
+    pub by: Option<String>,
+    pub taken_by: Option<String>,
+}
+
+impl Attribution {
+    pub(crate) fn of(record: &Record) -> Attribution {
+        Attribution {
+            by: record.file().field("by").map(str::to_owned),
+            taken_by: record.taken_by().map(str::to_owned),
+        }
+    }
+
+    /// Whether `identity` created or took the record.
+    #[must_use]
+    pub fn names(&self, identity: &str) -> bool {
+        self.by.as_deref() == Some(identity) || self.taken_by.as_deref() == Some(identity)
+    }
+
+    /// The one name that answers whose the record is: who took it, else who
+    /// created it.
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        self.taken_by.as_deref().or(self.by.as_deref())
+    }
+}
+
+/// Which records a listing shows. Every narrowing is a predicate over the
+/// same notebook, so asking for two asks for the intersection; the default
+/// shows everything.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Filter {
+    /// One epic's scope: the hub, what it waits on, and what was born
+    /// inside it.
+    pub hub: Option<String>,
+    /// One identity's records: the ones it created or took.
+    pub by: Option<String>,
+}
+
 /// One ready Task. It carries `created`, not an age: the Core holds no
 /// clock, so "how old" is the caller's derivation from its own today.
 #[derive(Debug, PartialEq, Eq)]
@@ -73,6 +115,7 @@ pub struct ReadyTask {
     pub id: String,
     pub priority: Option<u8>,
     pub created: String,
+    pub attribution: Attribution,
     /// The Task's title, cut by [`encode::bounded_text`] like every other
     /// text a derived reply carries.
     pub title: String,
@@ -80,17 +123,24 @@ pub struct ReadyTask {
 
 impl ReadyTask {
     /// The ready table — header and the first `shown` rows, ages derived
-    /// from `today_day`. The caller owns its own truncation hint.
+    /// from `today_day`. The caller owns its own truncation hint. The row
+    /// carries who took the Task and not who created it, because a reader
+    /// picking work asks whether a Task is already taken.
     #[must_use]
     pub fn table(rows: &[ReadyTask], shown: usize, today_day: i64) -> String {
-        let mut out = format!("ready[{}]{{id,priority,age,title}}:\n", rows.len());
+        let mut out = format!("ready[{}]{{id,priority,age,taken-by,title}}:\n", rows.len());
         for row in rows.iter().take(shown) {
             let priority = row
                 .priority
                 .map_or_else(|| "-".to_owned(), |priority| priority.to_string());
+            let taken_by = row
+                .attribution
+                .taken_by
+                .as_deref()
+                .map_or_else(|| "-".to_owned(), encode::quoted_if_delimited);
             let _ = writeln!(
                 out,
-                "  {},{priority},{}d,{}",
+                "  {},{priority},{}d,{taken_by},{}",
                 row.id,
                 age_days(&row.created, today_day),
                 encode::quoted_if_delimited(&row.title)
@@ -123,16 +173,11 @@ impl Cited {
         }
     }
 
-    /// `by`, plus `/via` when an agent hand wrote it; no identity at all
-    /// prints as `-` — the reader judges the pair, so a side is never blank.
+    /// The record's [`encode::author`]: the reader judges the pair, so a
+    /// side is never blank.
     #[must_use]
     pub fn author(&self) -> String {
-        match (&self.by, &self.via) {
-            (Some(by), Some(via)) => format!("{by}/{via}"),
-            (Some(by), None) => by.clone(),
-            (None, Some(via)) => format!("-/{via}"),
-            (None, None) => "-".to_owned(),
-        }
+        encode::author(self.by.as_deref(), self.via.as_deref())
     }
 }
 
@@ -226,6 +271,7 @@ pub struct ListedRecord {
     pub id: String,
     pub state: String,
     pub priority: Option<u8>,
+    pub attribution: Attribution,
     /// Cut by [`encode::bounded_text`], as `ReadyTask`'s is.
     pub title: Option<String>,
 }
@@ -520,6 +566,7 @@ mod tests {
             id: id.to_owned(),
             priority,
             created: created.to_owned(),
+            attribution: Attribution::default(),
             title: title.to_owned(),
         }
     }
@@ -535,7 +582,7 @@ mod tests {
         let today_day = date::day_number("2026-08-28").unwrap();
         assert_eq!(
             ReadyTask::table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,title}:\n  task.demo,-,4d,\"Degrades sections, keeps Budget\"\n"
+            "ready[1]{id,priority,age,taken-by,title}:\n  task.demo,-,4d,-,\"Degrades sections, keeps Budget\"\n"
         );
     }
 
@@ -544,7 +591,7 @@ mod tests {
         let rows = [row("task.demo", Some(1), "", "A demo record")];
         assert_eq!(
             ReadyTask::table(&rows, 1, 20_000),
-            "ready[1]{id,priority,age,title}:\n  task.demo,1,0d,A demo record\n"
+            "ready[1]{id,priority,age,taken-by,title}:\n  task.demo,1,0d,-,A demo record\n"
         );
     }
 
@@ -556,7 +603,7 @@ mod tests {
         let today_day = date::day_number("2026-08-28").unwrap();
         assert_eq!(
             ReadyTask::table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,title}:\n  task.demo,-,0d,A demo record\n"
+            "ready[1]{id,priority,age,taken-by,title}:\n  task.demo,-,0d,-,A demo record\n"
         );
     }
 
@@ -573,7 +620,7 @@ mod tests {
         let today_day = date::day_number("2026-08-28").unwrap();
         assert_eq!(
             ReadyTask::table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,title}:\n  task.demo,-,0d,\"Harmless\\u001b[2K\\rShipped\"\n"
+            "ready[1]{id,priority,age,taken-by,title}:\n  task.demo,-,0d,-,\"Harmless\\u001b[2K\\rShipped\"\n"
         );
     }
 }

@@ -14,8 +14,19 @@ mod listing {
         )]);
         let notebook = Notebook::new(&mut storage);
 
-        let listed = notebook.list().unwrap().pop().unwrap().title.unwrap();
-        let queued = notebook.ready().unwrap().pop().unwrap().title;
+        let listed = notebook
+            .list(&Filter::default())
+            .unwrap()
+            .pop()
+            .unwrap()
+            .title
+            .unwrap();
+        let queued = notebook
+            .ready(&Filter::default())
+            .unwrap()
+            .pop()
+            .unwrap()
+            .title;
         for title in [listed, queued] {
             assert!(
                 title.chars().count() <= anb_core::encode::TEXT_BOUND,
@@ -51,7 +62,9 @@ mod listing {
                 &record_file("note.gone", "note", "retired", &[], ""),
             ),
         ]);
-        let rows = Notebook::new(&mut storage).list().unwrap();
+        let rows = Notebook::new(&mut storage)
+            .list(&Filter::default())
+            .unwrap();
         let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -64,6 +77,7 @@ mod listing {
                 id: "task.b".into(),
                 state: "open".into(),
                 priority: Some(1),
+                attribution: anb_core::Attribution::default(),
                 title: Some("A demo record".into()),
             }
         );
@@ -71,6 +85,187 @@ mod listing {
             rows[2].priority, None,
             "a record without the field carries none"
         );
+    }
+}
+
+mod narrowed_by_identity {
+    use crate::*;
+
+    /// One person's records are the ones they created and the Tasks they
+    /// took; a Task of theirs someone else took is that person's now, and a
+    /// Task they took from someone else's creation is theirs too.
+    fn a_team_notebook() -> MemoryStorage {
+        storage_with(&[
+            (
+                "tasks/task.mine.md",
+                &record_file("task.mine", "task", "open", &["by: Ada"], ""),
+            ),
+            (
+                "tasks/task.taken.md",
+                &record_file(
+                    "task.taken",
+                    "task",
+                    "open",
+                    &["by: Grace", "taken-by: Ada"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.given-away.md",
+                &record_file(
+                    "task.given-away",
+                    "task",
+                    "open",
+                    &["by: Ada", "taken-by: Grace"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.theirs.md",
+                &record_file("task.theirs", "task", "open", &["by: Grace"], ""),
+            ),
+            (
+                "decisions/decision.mine.md",
+                &record_file("decision.mine", "decision", "active", &["by: Ada"], ""),
+            ),
+            (
+                "decisions/decision.nobodys.md",
+                &record_file("decision.nobodys", "decision", "active", &[], ""),
+            ),
+        ])
+    }
+
+    fn by(identity: &str) -> Filter {
+        Filter {
+            by: Some(identity.to_owned()),
+            ..Filter::default()
+        }
+    }
+
+    #[test]
+    fn a_listing_narrowed_to_one_identity_keeps_what_it_created_or_holds() {
+        let mut storage = a_team_notebook();
+        let notebook = Notebook::new(&mut storage);
+        let listed: Vec<String> = notebook
+            .list(&by("Ada"))
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "task.given-away",
+                "task.mine",
+                "task.taken",
+                "decision.mine"
+            ]
+        );
+        let queued: Vec<String> = notebook
+            .ready(&by("Grace"))
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(queued, ["task.given-away", "task.taken", "task.theirs"]);
+    }
+
+    /// A row carries who it names, so a reader of the listing sees who took
+    /// a Task without opening the record.
+    #[test]
+    fn a_row_carries_its_creator_and_who_took_it() {
+        let mut storage = a_team_notebook();
+        let rows = Notebook::new(&mut storage)
+            .ready(&Filter::default())
+            .unwrap();
+        let taken = rows.iter().find(|row| row.id == "task.taken").unwrap();
+        assert_eq!(
+            taken.attribution,
+            anb_core::Attribution {
+                by: Some("Grace".to_owned()),
+                taken_by: Some("Ada".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn the_scope_and_the_identity_narrow_together() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hub.md",
+                &record_file(
+                    "task.hub",
+                    "task",
+                    "open",
+                    &["blocked-by: task.child-a", "blocked-by: task.child-b"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.child-a.md",
+                &record_file(
+                    "task.child-a",
+                    "task",
+                    "open",
+                    &["from: task.hub", "taken-by: Ada"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.child-b.md",
+                &record_file(
+                    "task.child-b",
+                    "task",
+                    "open",
+                    &["from: task.hub", "taken-by: Grace"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.elsewhere.md",
+                &record_file("task.elsewhere", "task", "open", &["taken-by: Ada"], ""),
+            ),
+        ]);
+        let ids: Vec<String> = Notebook::new(&mut storage)
+            .ready(&Filter {
+                hub: Some("task.hub".to_owned()),
+                by: Some("Ada".to_owned()),
+            })
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(ids, ["task.child-a"]);
+    }
+
+    #[test]
+    fn a_search_finds_a_record_by_the_people_it_names() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.taken.md",
+                &record_file(
+                    "task.taken",
+                    "task",
+                    "open",
+                    &["by: Grace Hopper", "via: codex", "taken-by: Ada"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.other.md",
+                &record_file("task.other", "task", "open", &[], ""),
+            ),
+        ]);
+        let notebook = Notebook::new(&mut storage);
+        for needle in ["hopper", "codex", "ada"] {
+            let ids: Vec<String> = notebook
+                .search(needle)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect();
+            assert_eq!(ids, ["task.taken"], "{needle}");
+        }
     }
 }
 

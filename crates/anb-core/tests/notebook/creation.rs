@@ -32,6 +32,33 @@ fn create_mints_the_id_from_the_title_and_writes_the_canonical_file() {
     );
 }
 
+/// The accountable identity is the notebook's to know: a draft that names
+/// nobody is signed with it, and a draft that names someone is signed as
+/// it says.
+#[test]
+fn a_draft_is_signed_with_the_identity_unless_it_names_its_own() {
+    let mut storage = MemoryStorage::new();
+    let mut notebook = Notebook::new(&mut storage).with_identity(Some("Ada"));
+    let unsigned = notebook
+        .create(&Draft::new(RecordType::Note, "Unsigned"), TODAY)
+        .unwrap();
+    let mut signed = Draft::new(RecordType::Note, "Signed");
+    signed.by = Some("  Grace ".to_owned());
+    let signed = notebook.create(&signed, TODAY).unwrap();
+    assert!(
+        storage
+            .read(&unsigned.path)
+            .unwrap()
+            .contains("\nby: Ada\n")
+    );
+    assert!(
+        storage
+            .read(&signed.path)
+            .unwrap()
+            .contains("\nby: Grace\n")
+    );
+}
+
 #[test]
 fn a_caller_supplied_id_that_is_taken_names_its_holder() {
     let mut storage = storage_with(&[("archive/tasks/task.demo.md", &task_file("closed", &[]))]);

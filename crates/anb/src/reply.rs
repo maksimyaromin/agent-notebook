@@ -9,9 +9,9 @@ use crate::skill::{self, Drift};
 use anb_core::encode::ROW_BOUND;
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, Deleted, Draft, Edged, Edit, Edited,
-    FileFinding, Focus, Graph, GraphSlice, Held, Link, ListedRecord, Notebook, NotebookError,
-    Overview, Proof, ReadyTask, RecordType, Repair, Restored, Status, Storage, StorageError,
-    Transitioned, View, path_stem,
+    FileFinding, Filter, Focus, Graph, GraphSlice, Held, Link, ListedRecord, Notebook,
+    NotebookError, Overview, Proof, ReadyTask, RecordType, Repair, Restored, Status, Storage,
+    StorageError, Transitioned, View, path_stem,
 };
 use std::fmt::Write as _;
 use std::path::Path;
@@ -24,13 +24,32 @@ pub fn shown(total: usize, all: bool) -> usize {
 }
 
 /// The command that lifts a bounded listing: the one the caller ran, with
-/// `--all` on it. A scoped listing answers a different question from the
-/// bare verb, so the scope travels with the hint.
+/// `--all` on it. A narrowed listing answers a different question from the
+/// bare verb, so every narrowing travels with the hint.
 #[must_use]
-pub fn lifted(verb: &str, scope: Option<&str>) -> String {
-    match scope {
-        Some(scope) => format!("anb {verb} --for {scope} --all"),
-        None => format!("anb {verb} --all"),
+pub fn lifted(verb: &str, filter: &Filter) -> String {
+    let mut out = format!("anb {verb}");
+    if let Some(hub) = &filter.hub {
+        let _ = write!(out, " --for {hub}");
+    }
+    if let Some(by) = &filter.by {
+        let _ = write!(out, " --by {}", shell_quoted(by));
+    }
+    out.push_str(" --all");
+    out
+}
+
+/// A value as one shell word, single-quoted so every character stays
+/// literal and a hint carrying it stays executable.
+#[must_use]
+pub fn shell_quoted(value: &str) -> String {
+    let bare = value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if bare && !value.is_empty() {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 
@@ -70,12 +89,12 @@ pub enum Reply {
     Commented(Commented),
     Ready {
         rows: Vec<ReadyTask>,
-        scope: Option<String>,
+        filter: Filter,
         all: bool,
     },
     Listing {
         rows: Vec<ListedRecord>,
-        scope: Option<String>,
+        filter: Filter,
         all: bool,
     },
     Viewed {
@@ -171,15 +190,16 @@ fn skilled(dir: Option<&Path>, check: bool) -> Result<SkillReply, NotebookError>
 /// a new host fact is a field rather than another parameter at every call
 /// site.
 ///
-/// `git_by` is the accountable identity as git knows it, read only by the
-/// commands that write one; a command's own flag outranks it. `read_file`
+/// `identity` is the accountable identity the host acts as — `ANB_BY`, else
+/// git's `user.name` — which the notebook signs with, takes Tasks as, and
+/// reads `--mine` by; a command's own `--by` outranks it. `read_file`
 /// opens a file by a path the caller typed, or standard input for `-`,
 /// which Storage cannot serve: Storage speaks only in paths under the
 /// notebook root, and a report or a body is written wherever the work
 /// happened. `today` is the host's date — the Core holds no clock.
 #[derive(Clone, Copy)]
 pub struct Host<'a> {
-    pub git_by: fn() -> Option<String>,
+    pub identity: fn() -> Option<String>,
     /// Borrowed rather than a plain `fn`, because a caller may need to
     /// close over where it reads from — the tests hand in a table of
     /// files, the shell reads the filesystem.
@@ -211,18 +231,21 @@ pub fn execute(
     host: Host<'_>,
 ) -> Result<Reply, NotebookError> {
     let Host {
-        git_by,
+        identity,
         read_file,
         lost_proofs,
         user_notebook,
         project_dir,
         today,
     } = host;
-    let mut notebook = Notebook::new(storage).with_user(user_notebook);
+    let identity = identity();
+    let mut notebook = Notebook::new(storage)
+        .with_user(user_notebook)
+        .with_identity(identity.as_deref());
     match command {
         Command::Add(mut args) => {
             let body = body_text(args.body.take(), args.body_file.take(), read_file)?;
-            let draft = draft(args, body.unwrap_or_default(), git_by);
+            let draft = draft(args, body.unwrap_or_default());
             created("add", &mut notebook, &draft, today)
         }
         Command::Retire { id } => Ok(moved("retire", notebook.retire(&id, today)?)),
@@ -232,7 +255,6 @@ pub fn execute(
             &mut notebook,
             args,
             read_file,
-            git_by,
             today,
         )?)),
         Command::Reopen { id } => Ok(moved("reopen", notebook.reopen(&id, today)?)),
@@ -248,25 +270,24 @@ pub fn execute(
         Command::Unhold { id } => Ok(Reply::Unheld(notebook.unhold(&id, today)?)),
         Command::Block { id, on } => Ok(Reply::Blocked(notebook.block(&id, &on, today)?)),
         Command::Unblock { id, on } => Ok(Reply::Unblocked(notebook.unblock(&id, &on, today)?)),
-        Command::Comment { id, text, via } => {
-            let author = via.or_else(git_by);
-            Ok(Reply::Commented(notebook.comment(
-                &id,
-                author.as_deref(),
-                &text,
-                today,
-            )?))
-        }
-        Command::Ready { scope, all } => Ok(Reply::Ready {
-            rows: queued(&notebook, scope.as_deref())?,
+        Command::Comment { id, text, via } => Ok(Reply::Commented(notebook.comment(
+            &id,
+            via.as_deref(),
+            &text,
+            today,
+        )?)),
+        Command::Ready {
             scope,
+            by,
+            mine,
             all,
-        }),
-        Command::List { scope, all } => Ok(Reply::Listing {
-            rows: listed(&notebook, scope.as_deref())?,
+        } => queued(&notebook, identity.as_deref(), scope, by, mine, all),
+        Command::List {
             scope,
+            by,
+            mine,
             all,
-        }),
+        } => listed(&notebook, identity.as_deref(), scope, by, mine, all),
         Command::Show { id, all } => Ok(Reply::Viewed {
             view: notebook.view(&id)?,
             all,
@@ -427,6 +448,7 @@ fn edited(
         from,
         priority,
         review_by,
+        taken_by,
         clear,
     } = args;
     let edit = Edit {
@@ -439,6 +461,7 @@ fn edited(
         from,
         priority,
         review_by,
+        taken_by,
         clear,
     };
     Ok(Reply::Edited(notebook.edit(&id, &edit, today)?))
@@ -461,10 +484,10 @@ fn body_text(
     }
 }
 
-fn draft(args: AddArgs, body: String, git_by: impl FnOnce() -> Option<String>) -> Draft {
+fn draft(args: AddArgs, body: String) -> Draft {
     let mut draft = Draft::new(args.record_type, &args.title);
     draft.id = args.id;
-    draft.by = args.by.or_else(git_by);
+    draft.by = args.by;
     draft.via = args.via;
     draft.from = args.from;
     draft.tags = args.tags;
@@ -486,23 +509,66 @@ fn parsed_link(raw: &str) -> Link {
     }
 }
 
-/// The dispatch queue, whole or narrowed to one epic.
-fn queued(notebook: &Notebook<'_>, scope: Option<&str>) -> Result<Vec<ReadyTask>, NotebookError> {
-    match scope {
-        Some(hub) => notebook.ready_for(hub),
-        None => notebook.ready(),
-    }
+/// The dispatch queue, narrowed as the caller asked.
+fn queued(
+    notebook: &Notebook<'_>,
+    identity: Option<&str>,
+    scope: Option<String>,
+    by: Option<String>,
+    mine: bool,
+    all: bool,
+) -> Result<Reply, NotebookError> {
+    let filter = narrowing(scope, by, mine, identity)?;
+    Ok(Reply::Ready {
+        rows: notebook.ready(&filter)?,
+        filter,
+        all,
+    })
 }
 
-/// The live listing, whole or narrowed to one epic.
+/// The live listing, narrowed as the caller asked.
 fn listed(
     notebook: &Notebook<'_>,
-    scope: Option<&str>,
-) -> Result<Vec<ListedRecord>, NotebookError> {
-    match scope {
-        Some(hub) => notebook.list_for(hub),
-        None => notebook.list(),
-    }
+    identity: Option<&str>,
+    scope: Option<String>,
+    by: Option<String>,
+    mine: bool,
+    all: bool,
+) -> Result<Reply, NotebookError> {
+    let filter = narrowing(scope, by, mine, identity)?;
+    Ok(Reply::Listing {
+        rows: notebook.list(&filter)?,
+        filter,
+        all,
+    })
+}
+
+/// The narrowing a listing was asked with. `--mine` is `--by` with the
+/// identity the host acts as, so a host that knows nobody has nothing to
+/// narrow by and says so, rather than answering an empty list that reads
+/// as "nothing is yours".
+fn narrowing(
+    scope: Option<String>,
+    by: Option<String>,
+    mine: bool,
+    identity: Option<&str>,
+) -> Result<Filter, NotebookError> {
+    let by = match (by, mine) {
+        (by, false) => by,
+        (_, true) => {
+            Some(
+                identity
+                    .map(str::to_owned)
+                    .ok_or_else(|| NotebookError::InvalidArgument {
+                        reason: format!(
+                            "mine: no identity to match; set git user.name or {}",
+                            crate::identity::IDENTITY_ENV
+                        ),
+                    })?,
+            )
+        }
+    };
+    Ok(Filter { hub: scope, by })
 }
 
 /// The one way a close was told to end the record. `--note` names a file
@@ -536,7 +602,6 @@ fn close_reply(
     notebook: &mut Notebook<'_>,
     args: CloseArgs,
     read_file: &dyn Fn(&str) -> Result<String, StorageError>,
-    git_by: impl FnOnce() -> Option<String>,
     today: &str,
 ) -> Result<Closed, NotebookError> {
     let CloseArgs {
@@ -561,7 +626,7 @@ fn close_reply(
     ])? {
         Closing::Ingest(path) => {
             let report = read_file(&path).map_err(|error| file_refusal("note", &error))?;
-            notebook.close_with_report(&id, &report, git_by().as_deref(), today)
+            notebook.close_with_report(&id, &report, today)
         }
         Closing::Stored(proof) => notebook.close(&id, &proof, today),
         Closing::Reason(reason) => notebook.close_with_reason(&id, &reason, today),

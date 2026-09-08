@@ -52,6 +52,22 @@ try: anb start task.ship-the-parser
 try: anb close task.ship-the-parser --reason "<why>"
 ```
 
+## taken
+
+Another person took the Task. `start` takes work, so a Task already taken changes hands through `edit --taken-by` first, on purpose.
+
+```
+$ anb edit task.grammar-parser-accepts-fences --taken-by Grace
+ok: edit task.grammar-parser-accepts-fences — taken-by
+```
+
+```
+$ anb start task.grammar-parser-accepts-fences
+error[taken]: `task.grammar-parser-accepts-fences` is taken by Grace
+try: anb edit task.grammar-parser-accepts-fences --taken-by "<name>"
+try: anb show task.grammar-parser-accepts-fences
+```
+
 ## invalid-argument
 
 A flag or value is invalid for this command or record type. The reply suggests a valid form.

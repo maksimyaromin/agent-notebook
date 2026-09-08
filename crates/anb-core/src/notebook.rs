@@ -45,8 +45,9 @@ use crate::record::{
     not_utf8_finding,
 };
 use crate::reply::{
-    Archived, CitedProof, Closed, Commented, Counts, Created, Deleted, Edged, Edited, Focus, Graph,
-    GraphSlice, Held, ListedRecord, Overview, ReadyTask, Restored, Transitioned, TypeSection, View,
+    Archived, CitedProof, Closed, Commented, Counts, Created, Deleted, Edged, Edited, Filter,
+    Focus, Graph, GraphSlice, Held, ListedRecord, Overview, ReadyTask, Restored, Transitioned,
+    TypeSection, View,
 };
 use crate::request::{Draft, Edit, Link, Proof};
 use crate::resolve::{
@@ -73,6 +74,12 @@ pub struct Notebook<'a> {
     /// such root; a root that cannot be read counts as one, since a second
     /// notebook is consulted for a hint and never fails a write or the gate.
     user: Option<&'a dyn Storage>,
+    /// The accountable identity this notebook is worked under: what a new
+    /// record's `by` and a log entry's signature carry unless a request
+    /// names another, who `start` records as having taken the Task, and
+    /// whose work the dashboard opens on. `None` is a host that knows
+    /// nobody, and the notebook then signs nothing and takes nothing.
+    identity: Option<&'a str>,
 }
 
 impl<'a> Notebook<'a> {
@@ -80,6 +87,7 @@ impl<'a> Notebook<'a> {
         Notebook {
             storage,
             user: None,
+            identity: None,
         }
     }
 
@@ -87,6 +95,19 @@ impl<'a> Notebook<'a> {
     #[must_use]
     pub fn with_user(self, user: Option<&'a dyn Storage>) -> Self {
         Notebook { user, ..self }
+    }
+
+    /// The same notebook worked under `identity`.
+    #[must_use]
+    pub fn with_identity(self, identity: Option<&'a str>) -> Self {
+        Notebook { identity, ..self }
+    }
+
+    /// The identity as a record may carry it: one non-empty line. A host
+    /// hands it in from an environment it does not judge, so the guard
+    /// stands here, once, where every write reads it.
+    fn guarded_identity(&self) -> Result<Option<&'a str>, NotebookError> {
+        write::guarded_name("by", self.identity)
     }
 
     /// Read one record by id, live or archived.
@@ -106,52 +127,54 @@ impl<'a> Notebook<'a> {
     }
 
     /// The dispatch queue: open, unblocked, unheld Tasks, the most
-    /// urgent first. Invalid records are excluded, as from every derived
-    /// query; `check` names them.
-    ///
-    /// # Errors
-    /// A storage failure.
-    pub fn ready(&self) -> Result<Vec<ReadyTask>, NotebookError> {
-        let corpus = self.live_corpus()?;
-        Ok(query::ready_rows(&corpus.records, &corpus.resolver()))
-    }
-
-    /// [`Notebook::ready`] narrowed to one hub's scope: the queue for
-    /// "what is next inside this epic".
+    /// urgent first, narrowed by `filter` — to one epic's scope for "what
+    /// is next inside this epic", to one identity's for "what is mine".
+    /// Invalid records are excluded, as from every derived query; `check`
+    /// names them.
     ///
     /// # Errors
     /// [`NotebookError::UnknownId`] when the hub names no record,
     /// [`NotebookError::InvalidArgument`] on a malformed id, or a storage
     /// failure.
-    pub fn ready_for(&self, hub: &str) -> Result<Vec<ReadyTask>, NotebookError> {
-        let (corpus, scope) = self.scoped(hub)?;
+    pub fn ready(&self, filter: &Filter) -> Result<Vec<ReadyTask>, NotebookError> {
+        let (corpus, scope) = self.narrowed(filter)?;
         Ok(query::ready_rows(&corpus.records, &corpus.resolver())
             .into_iter()
-            .filter(|row| scope.contains(&row.id))
+            .filter(|row| shown(filter, scope.as_ref(), &row.id, &row.attribution))
             .collect())
     }
 
-    /// [`Notebook::list`] narrowed to one hub's scope, the hub itself
-    /// included: what a reader opening an epic wants to see.
+    /// The live listing, in type-major file order, narrowed by `filter`; a
+    /// hub's scope includes the hub itself, so a reader opening an epic
+    /// sees it beside its work. An invalid record is a row of state `invalid`
+    /// — excluded from mutation and derived queries, never from sight;
+    /// `check` names its findings.
     ///
     /// # Errors
-    /// See [`Notebook::ready_for`].
-    pub fn list_for(&self, hub: &str) -> Result<Vec<ListedRecord>, NotebookError> {
-        let (corpus, scope) = self.scoped(hub)?;
+    /// See [`Notebook::ready`].
+    pub fn list(&self, filter: &Filter) -> Result<Vec<ListedRecord>, NotebookError> {
+        let (corpus, scope) = self.narrowed(filter)?;
         let resolvable = corpus.resolver();
         Ok(corpus
             .records
             .iter()
-            .filter(|record| scope.contains(path_stem(record.path())))
             .map(|record| query::listed_row(record, &resolvable))
+            .filter(|row| shown(filter, scope.as_ref(), &row.id, &row.attribution))
             .collect())
     }
 
-    /// The whole notebook and the ids inside `hub`'s scope. A scope narrows
-    /// what is *shown*, never what is *read*: a row is blocked, excluded and
-    /// resolved against every record, so scoping a query cannot change any
-    /// row's verdict — only which rows reach the reader.
-    fn scoped(&self, hub: &str) -> Result<(Corpus, BTreeSet<String>), NotebookError> {
+    /// The whole notebook and, when the filter names a hub, the ids inside
+    /// its scope. A filter narrows what is *shown*, never what is *read*: a
+    /// row is blocked, excluded and resolved against every record, so
+    /// narrowing a query cannot change any row's verdict — only which rows
+    /// reach the reader.
+    fn narrowed(
+        &self,
+        filter: &Filter,
+    ) -> Result<(Corpus, Option<BTreeSet<String>>), NotebookError> {
+        let Some(hub) = &filter.hub else {
+            return Ok((self.live_corpus()?, None));
+        };
         write::parsed_type(hub)?;
         if self.holder_path(hub)?.is_none() {
             return Err(NotebookError::UnknownId { id: hub.to_owned() });
@@ -163,7 +186,7 @@ impl<'a> Notebook<'a> {
             .into_iter()
             .map(str::to_owned)
             .collect();
-        Ok((corpus, scope))
+        Ok((corpus, Some(scope)))
     }
 
     /// The archived records the live ones still name as a blocker or an
@@ -309,8 +332,9 @@ impl<'a> Notebook<'a> {
         };
         let queue = query::ready_rows(records, &resolvable);
         let inputs = StatusInputs {
+            identity: self.identity.map(str::to_owned),
             counts: query::live_counts(records),
-            active: query::active_tasks(&live_valid),
+            active: query::active_tasks(&live_valid, self.identity),
             review: query::review_tasks(&live_valid),
             held: query::held_tasks(&live_valid),
             rules: query::standing_rules(&live_valid),
@@ -322,25 +346,10 @@ impl<'a> Notebook<'a> {
         Ok(status::assemble(inputs, budget))
     }
 
-    /// The live listing, in type-major file order. An invalid record is a
-    /// row of state `invalid` — excluded from mutation and derived queries,
-    /// never from sight; `check` names its findings.
-    ///
-    /// # Errors
-    /// A storage failure.
-    pub fn list(&self) -> Result<Vec<ListedRecord>, NotebookError> {
-        let corpus = self.live_corpus()?;
-        let resolvable = corpus.resolver();
-        Ok(corpus
-            .records
-            .iter()
-            .map(|record| query::listed_row(record, &resolvable))
-            .collect())
-    }
-
-    /// Find records by case-insensitive substring over id, title, tags, and
-    /// body — live and archived alike: the archive is history, and history
-    /// is findable. Rows share the listing shape.
+    /// Find records by case-insensitive substring over id, title, tags, the
+    /// people named in the envelope, and body — live and archived alike:
+    /// the archive is history, and history is findable. Rows share the
+    /// listing shape.
     ///
     /// # Errors
     /// [`NotebookError::InvalidArgument`] on an empty query, or a storage
@@ -565,8 +574,9 @@ impl<'a> Notebook<'a> {
         }
     }
 
-    /// Create a record, minting an id from the title unless one is given.
-    /// A draft declaring `supersedes` performs the whole supersession: the
+    /// Create a record, minting an id from the title unless one is given
+    /// and signing it with the notebook's identity unless the draft names
+    /// its own. A draft declaring `supersedes` performs the whole supersession: the
     /// new record is written first, then the victim gains the back-pointer
     /// and flips to its superseded state — a rule recorded as replaced can
     /// never be read as live. A Decision declaring none is answered with
@@ -594,6 +604,7 @@ impl<'a> Notebook<'a> {
     ) -> Result<Created, NotebookError> {
         write::guard_today(today)?;
         write::validate_draft(draft)?;
+        let by = write::guarded_name("by", draft.by.as_deref().or(self.identity))?;
         if let Some(origin) = &draft.from {
             self.guard_ref_exists("from", origin)?;
         }
@@ -609,7 +620,7 @@ impl<'a> Notebook<'a> {
         let may_conflict = query::conflict_candidates(draft, records, &corpus.resolver());
         let path = record_path(&id, draft.record_type, false);
         self.storage
-            .write(&path, &write::render_draft(draft, &id, today))?;
+            .write(&path, &write::render_draft(draft, &id, by, today))?;
 
         if let Some(victim) = victim {
             self.flip_victim(victim, &id, today)?;
@@ -642,12 +653,35 @@ impl<'a> Notebook<'a> {
         Ok(())
     }
 
-    /// `open → active`.
+    /// `open | review → active`, taking the Task: the identity is recorded
+    /// as `taken-by` unless someone already took it. A Task another
+    /// identity took is refused — handing it over is a correction made
+    /// deliberately with `edit --taken-by` — and so is a replay against
+    /// it, since answering `already` would tell a second person the work
+    /// is theirs. A host that knows nobody takes nothing and is refused
+    /// any taken Task the same way.
     ///
     /// # Errors
-    /// See [`Notebook::close`]; `start` carries no proof.
+    /// [`NotebookError::Taken`] naming who took it, plus the refusals of
+    /// [`Notebook::close`]; `start` carries no proof.
     pub fn start(&mut self, id: &str, today: &str) -> Result<Transitioned, NotebookError> {
-        self.task_transition(id, TaskAction::Start, today, |_| {})
+        write::guard_today(today)?;
+        let identity = self.guarded_identity()?;
+        let loaded = self.load_live(id, &[RecordType::Task])?;
+        let transition = decided(&loaded, TaskAction::Start)?;
+        if let Some(taken_by) = loaded.record.taken_by()
+            && Some(taken_by) != identity
+        {
+            return Err(NotebookError::Taken {
+                id: id.to_owned(),
+                taken_by: taken_by.to_owned(),
+            });
+        }
+        self.transitioned(loaded, transition, today, |file| {
+            if let Some(me) = identity {
+                file.set_field("taken-by", me);
+            }
+        })
     }
 
     /// `active → review`: hand the work to a human for acceptance.
@@ -738,8 +772,9 @@ impl<'a> Notebook<'a> {
     }
 
     /// Close carrying `report` as its proof: the text becomes a Note born
-    /// from the Task, and the close links that Note. One motion, and the
-    /// proof travels with the notebook instead of pointing out of it.
+    /// from the Task and signed with the notebook's identity, and the close
+    /// links that Note. One motion, and the proof travels with the notebook
+    /// instead of pointing out of it.
     ///
     /// The Note is minted only when the close is a real move, so a replay
     /// creates nothing; the one Note this call will ever reuse is the one
@@ -754,7 +789,6 @@ impl<'a> Notebook<'a> {
         &mut self,
         id: &str,
         report: &str,
-        by: Option<&str>,
         today: &str,
     ) -> Result<Closed, NotebookError> {
         if report.trim().is_empty() {
@@ -778,7 +812,7 @@ impl<'a> Notebook<'a> {
             return self.close(id, &Proof::Waived, today);
         }
         let title = write::report_note_title(task.record.file().field("title").unwrap_or(id));
-        let note = self.ingest_report(id, &title, report, by, today)?;
+        let note = self.ingest_report(id, &title, report, today)?;
         let mut closed = self.close(id, &Proof::Note(note.id.clone()), today)?;
         closed.report_note = Some(note.id);
         closed.dangling_mentions = note.dangling_mentions;
@@ -792,7 +826,6 @@ impl<'a> Notebook<'a> {
         origin: &str,
         title: &str,
         report: &str,
-        by: Option<&str>,
         today: &str,
     ) -> Result<IngestedReport, NotebookError> {
         if let Some(id) = self.standing_report(origin, report)? {
@@ -803,7 +836,6 @@ impl<'a> Notebook<'a> {
         }
         let mut draft = Draft::new(RecordType::Note, title);
         draft.from = Some(origin.to_owned());
-        draft.by = by.map(str::to_owned);
         report.clone_into(&mut draft.body);
         let created = self.create_minting(&draft, today, || Ok(write::report_note_id(origin)))?;
         Ok(IngestedReport {
@@ -918,20 +950,22 @@ impl<'a> Notebook<'a> {
     }
 
     /// Append one dated log entry to a Task's body — the append-only
-    /// progress trail, in the log convention `- <date> <author>: <text>`.
-    /// The Task's state does not gate the verb: the trail may narrate a
-    /// close as well as the work. Replaying the trail's tail answers
-    /// `already: true` and changes no byte.
+    /// progress trail, in the log convention `- <date> <author>: <text>`,
+    /// the author being the notebook's identity and `via`, the acting hand,
+    /// in the `by/via` form a cited record is attributed in. The Task's
+    /// state does not gate the verb: the trail may narrate a close as well
+    /// as the work. Replaying the trail's tail answers `already: true` and
+    /// changes no byte.
     ///
     /// # Errors
     /// [`NotebookError::InvalidArgument`] on an empty or multi-line entry or
-    /// a multi-line author, [`NotebookError::WrongType`],
+    /// a multi-line signature, [`NotebookError::WrongType`],
     /// [`NotebookError::UnknownId`], [`NotebookError::Archived`],
     /// [`NotebookError::InvalidRecord`], or a storage failure.
     pub fn comment(
         &mut self,
         id: &str,
-        author: Option<&str>,
+        via: Option<&str>,
         text: &str,
         today: &str,
     ) -> Result<Commented, NotebookError> {
@@ -943,9 +977,10 @@ impl<'a> Notebook<'a> {
                 reason: "comment: the text must not be empty".to_owned(),
             });
         }
-        let author = write::guarded_author(author)?;
+        let by = self.guarded_identity()?;
+        let via = write::guarded_name("via", via)?;
 
-        let entry = write::log_entry(today, author, text);
+        let entry = write::log_entry(today, by, via, text);
         let loaded = self.load_live(id, &[RecordType::Task])?;
         // A replay carries the nudge too: the entry is the trail's tail, so
         // its citations stand in the body either way.
@@ -1486,29 +1521,30 @@ impl<'a> Notebook<'a> {
     ) -> Result<Transitioned, NotebookError> {
         write::guard_today(today)?;
         let loaded = self.load_live(id, &[RecordType::Task])?;
-        let state_word = loaded.state_word();
-        let state = TaskState::from_word(state_word)
-            .expect("a clean task carries a state from the task enum");
+        let transition = decided(&loaded, action)?;
+        self.transitioned(loaded, transition, today, stamp_extras)
+    }
 
-        let transition =
-            state
-                .transition(action)
-                .map_err(|valid| NotebookError::InvalidTransition {
-                    id: id.to_owned(),
-                    state: state_word.to_owned(),
-                    valid: valid.into_iter().map(TaskAction::word).collect(),
-                })?;
+    /// The write half of a Task move: a replay changes no byte, a move
+    /// splices the state, the verb's own fields and the date.
+    fn transitioned(
+        &mut self,
+        loaded: LoadedLive,
+        transition: Transition,
+        today: &str,
+        stamp_extras: impl FnOnce(&mut RecordFile),
+    ) -> Result<Transitioned, NotebookError> {
+        let id = path_stem(&loaded.path).to_owned();
         let Transition::Move { from, to } = transition else {
-            return Ok(Transitioned::replayed(id, state.word()));
+            return Ok(Transitioned::replayed(&id, loaded.task_state().word()));
         };
-
         let mut file = loaded.record.into_file();
         file.set_field("state", to.word());
         stamp_extras(&mut file);
         file.set_field("updated", today);
         self.storage.write(&loaded.path, &file.render())?;
         Ok(Transitioned {
-            id: id.to_owned(),
+            id,
             from: from.word(),
             to: to.word(),
             already: false,
@@ -1778,6 +1814,34 @@ impl<'a> Notebook<'a> {
     fn live_corpus(&self) -> Result<Corpus, NotebookError> {
         read_live_corpus(self.storage)
     }
+}
+
+/// What `action` comes to for a loaded Task, decided before any byte moves.
+///
+/// # Errors
+/// [`NotebookError::InvalidTransition`] naming the moves the state allows.
+fn decided(loaded: &LoadedLive, action: TaskAction) -> Result<Transition, NotebookError> {
+    loaded
+        .task_state()
+        .transition(action)
+        .map_err(|valid| NotebookError::InvalidTransition {
+            id: path_stem(&loaded.path).to_owned(),
+            state: loaded.state_word().to_owned(),
+            valid: valid.into_iter().map(TaskAction::word).collect(),
+        })
+}
+
+/// Which rows of a narrowed listing reach the reader: the ones inside the
+/// hub's scope when one is named, and the ones naming the identity when one
+/// is.
+fn shown(
+    filter: &Filter,
+    scope: Option<&BTreeSet<String>>,
+    id: &str,
+    attribution: &crate::reply::Attribution,
+) -> bool {
+    scope.is_none_or(|scope| scope.contains(id))
+        && filter.by.as_deref().is_none_or(|by| attribution.names(by))
 }
 
 /// [`Notebook::live_corpus`] over any root, so a second notebook is read by

@@ -29,7 +29,7 @@ anb add task "Rename the CSV download button" --id task.csv-download --from note
 anb check
 ```
 
-These explicit ids make the example runnable. In ordinary work, use the ids returned by the CLI, including collision suffixes. Add `--via` to every agent `add` and `comment`, using your actual tool name, such as `codex` or `claude-code`. Leave `by` to the accountable person; `via` identifies the tool, and on comments labels the log entry. Other verbs do not accept it.
+These explicit ids make the example runnable. In ordinary work, use the ids returned by the CLI, including collision suffixes. Add `--via` to every agent `add` and `comment`, using your actual tool name, such as `codex` or `claude-code`. Leave `by` to the accountable person: the CLI signs it from `ANB_BY` or the git identity, and a comment is signed `by/via`, so the person stays in the trail beside the tool. Other verbs do not accept `--via`.
 
 ## Quick reference
 
@@ -53,7 +53,9 @@ Choose by what a later reader needs, with an explicit `--kind` for Notes and Dec
 
 ### Orient
 
-Read `anb status` unless the hook supplied it. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Read its cited knowledge and relevant code. Search before creating records: search matches ids, titles and tags, including the archive, but not bodies. Use `show --all` for a truncated body and scoped lists for larger work; loading the whole notebook obscures the immediate decision.
+Read `anb status` unless the hook supplied it. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Read its cited knowledge and relevant code. Search before creating records: search matches ids, titles, tags and the people named in the envelope, including the archive, but not bodies. Use `show --all` for a truncated body and scoped lists for larger work; loading the whole notebook obscures the immediate decision.
+
+Several people can share one notebook, and nobody assigns work in it: a Task is taken. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names a Task someone already took; choose one nobody took, or one the user took, and read `ready --mine` when the queue is long. `start` records the user as the Task's `taken-by` and refuses a Task another person took; handing it over is `edit <id> --taken-by <name>`, decided by the user, never by the agent.
 
 ### Shape the idea
 
@@ -78,7 +80,7 @@ Keep local definitions in the model; extract terms when they need independent lo
 
 Make each Task a reviewable result with constraints, behavior to preserve and completion evidence. For an epic, create a hub `--from` the idea, tag it `epic`, create children `--from` the hub, and `block <hub> <child>` for each deliverable. Add child dependencies only where one result is required by another. Read `ready --for <hub>` to choose work. A ready hub still needs verification of the overall outcome.
 
-Keep one Task in flight by default. Start it before work; when switching subjects, log the handoff and hold unfinished work with a reason. Comment with the result, evidence and next step, using `--via`. Update models and specs when their meaning changes. Supersede a Decision when its ruling changes; edit it when clarifying the same ruling. A Decision that cites another as context declares the relationship once, on `add` or later with `edit`: `--link "within decision.x"` for a rule that is part of a wider one, `--link "departs-from decision.x"` for a drift. `may-conflict` then names only the pair nobody has judged; read those records before deciding whether a conflict exists.
+Keep one Task in flight per person by default. Start it before work; when switching subjects, log the handoff and hold unfinished work with a reason, or hand the Task over with `edit --taken-by`. Comment with the result, evidence and next step, using `--via`. Update models and specs when their meaning changes. Supersede a Decision when its ruling changes; edit it when clarifying the same ruling. A Decision that cites another as context declares the relationship once, on `add` or later with `edit`: `--link "within decision.x"` for a rule that is part of a wider one, `--link "departs-from decision.x"` for a drift. `may-conflict` then names only the pair nobody has judged; read those records before deciding whether a conflict exists.
 
 Close answered Questions with `--resolved-by <decision-or-task>`, or `--reason` citing a Note when knowledge answers them, then archive. A genuine review date can be set on a drift Decision with `edit --review-by`; leave it unset when none is known.
 
@@ -99,9 +101,10 @@ Run `anb check`, address findings and recheck. When no CLI repair exists, report
 | Quote an id intended as a relationship | Cite it outside backticks | Quoted examples do not create mentions |
 | Retry a refused command unchanged | Read its `try:` instruction and fill its placeholders | Refusals explain the required correction |
 | Repeat `add` after an uncertain result | Inspect the notebook first | Creation without an explicit id can produce duplicates |
+| Start a Task marked as another person's | Pick a Task nobody took, or ask the user before `edit --taken-by` | Two people working one Task learn of it from a merge conflict |
 
 ## References
 
-Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads. Use the installed `anb-atlas` skill for a visual review.
+Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list`, `ready` and `search` rows carry `by` and `taken-by` there. Use the installed `anb-atlas` skill for a visual review.
 
 For a named personal practice, search and show with `--global`; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.

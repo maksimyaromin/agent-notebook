@@ -16,7 +16,7 @@ mod restore;
 mod status;
 
 use anb_core::{
-    Blocker, Budget, CitedProof, DebtSignal, Draft, Edit, FindingCode, Link, MemoryStorage,
+    Blocker, Budget, CitedProof, DebtSignal, Draft, Edit, Filter, FindingCode, Link, MemoryStorage,
     Notebook, NotebookError, Proof, RecordType, Repair, Storage, StorageError, Transitioned,
 };
 
@@ -42,6 +42,14 @@ fn record_file(id: &str, type_word: &str, state: &str, extra_lines: &[&str], bod
     text.push_str("created: 2026-08-24\nupdated: 2026-08-25\n---\n");
     text.push_str(body);
     text
+}
+
+/// The listing narrowed to one hub's scope.
+fn within(hub: &str) -> Filter {
+    Filter {
+        hub: Some(hub.to_owned()),
+        ..Filter::default()
+    }
 }
 
 fn storage_with(files: &[(&str, &str)]) -> MemoryStorage {

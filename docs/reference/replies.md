@@ -28,8 +28,8 @@ Creation is different: `add` without `--id` can mint another id from the same ti
 A listing names its columns once and prints comma rows:
 
 ```
-ready[1]{id,priority,age,title}:
-  task.negative-corpus-wired-into-ci,-,0d,Negative corpus wired into CI
+ready[1]{id,priority,age,taken-by,title}:
+  task.negative-corpus-wired-into-ci,-,0d,-,Negative corpus wired into CI
 ```
 
 `-` is an absent value. A value holding a comma or a quote is quoted. An empty listing is `count: 0`.
@@ -42,7 +42,7 @@ Listings have default row limits and report omissions. Use `--all` to lift them.
 
 `--json` selects compact JSON. Mutation replies identify the operation with `ok`; read commands use fields appropriate to the result. For example, `ready` returns `count` and `ready`, `list` returns `count` and `records`, and `search` returns `count` and `matches`.
 
-Nested lists of consequences use `{count, rows}`. A truncated body uses `{lines, head, tail}`. Refusals provide `error`, `message`, `findings` and `try`. Parse these fields by name. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their own result structures.
+A `list`, `ready` or `search` row carries `by` and `taken-by` when the record has them, so a script filters by identity without reading the files. Nested lists of consequences use `{count, rows}`. A truncated body uses `{lines, head, tail}`. Refusals provide `error`, `message`, `findings` and `try`. Parse these fields by name. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their own result structures.
 
 ## Refusals
 

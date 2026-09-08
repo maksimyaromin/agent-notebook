@@ -120,6 +120,20 @@ pub fn body_ends(body: &str) -> Option<(&str, usize, &str)> {
     ))
 }
 
+/// The one spelling of who stands behind a text: `by`, plus `/via` when an
+/// agent hand wrote it; no identity at all prints as `-`, so a reader
+/// judging two sides never meets a blank one. A log entry is signed with
+/// it, and a cited record is attributed with it.
+#[must_use]
+pub fn author(by: Option<&str>, via: Option<&str>) -> String {
+    match (by, via) {
+        (Some(by), Some(via)) => format!("{by}/{via}"),
+        (Some(by), None) => by.to_owned(),
+        (None, Some(via)) => format!("-/{via}"),
+        (None, None) => "-".to_owned(),
+    }
+}
+
 /// A table value carrying the row delimiter, a quote, or a character a
 /// terminal acts on is JSON-quoted; everything else stays bare.
 ///

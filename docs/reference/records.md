@@ -14,6 +14,7 @@ type: task
 state: closed
 title: Parser accepts fenced bodies
 by: Alex
+taken-by: Alex
 tags: parser
 link: note note.report-parser-accepts-fenced-bodies
 created: 2026-09-05
@@ -36,8 +37,9 @@ Commands update the fields they own. The grammar preserves the body as text; sep
 | `state` | see the lifecycles below | required | the lifecycle commands |
 | `kind` | a Decision's `rule`, `shape`, `drift`; a Note's `fact`, `term`, `guide`, `idea`, `model`, `spec` | Decision, Note | `add --kind` |
 | `title` | text | required | `add`, `edit --title` |
-| `by` | text | any | `add`, from the git identity, or `--by` |
-| `via` | text | any | `add --via`: the creating agent tool; `comment --via` labels a log entry without changing this field |
+| `by` | text | any | `add`, from the identity (`ANB_BY`, else the git `user.name`), or `--by` |
+| `via` | text | any | `add --via`: the creating agent tool; `comment --via` signs a log entry `by/via` without changing this field |
+| `taken-by` | text | Task | `start`, from the identity, when the Task has none; `edit --taken-by` hands it over; `edit --clear taken-by` erases it |
 | `from` | an id | any | `add --from`, `edit --from`: the origin |
 | `tags` | `[a-z0-9-]+`, comma-separated | any | `add --tag`, `edit --tag`, `edit --untag` |
 | `link` | `<kind> <target>`, repeatable | any | `add --link`, `edit --link`, `edit --unlink`, `close --note`, `--pr`, `--sha`, `--report` |
@@ -82,6 +84,8 @@ stateDiagram-v2
 Notes are `active` or `retired`. `retire` ends a Note; adding a successor with `--supersedes` also retires the predecessor and writes its `superseded-by` field.
 
 Tasks can be held or blocked independently of their lifecycle state. A `hold` field makes a Task held; an unresolved dependency makes it blocked. `ready` selects open Tasks that are neither held nor blocked.
+
+Nobody assigns a Task: someone takes it. `start` records who took it as `taken-by` when the Task has none, and refuses a Task someone else took with `taken`; `edit --taken-by` hands it over.
 
 Closing a completed Task requires `--note`, `--pr`, `--sha`, `--report` or `--no-proof`. `--reason` ends a Task without completing it, including from open. Questions close with `--resolved-by` or `--reason`. See [Tasks](../guides/tasks.md#closing-with-a-proof) for proof selection.
 

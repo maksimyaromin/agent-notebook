@@ -195,3 +195,41 @@ fn a_body_file_of_dash_reads_standard_input() {
     let written = fs::read_to_string(root.join("notes/note.the-download-spec.md")).unwrap();
     assert!(written.ends_with(spec), "{written}");
 }
+
+/// A checkout with no git identity, or one whose git name is not the name
+/// the notebook should know, names itself through the environment: the
+/// record is signed with it, and `start` takes the Task as it.
+#[test]
+fn the_identity_in_the_environment_signs_and_takes() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("nb");
+
+    let added = Command::new(env!("CARGO_BIN_EXE_anb"))
+        .args(["--notebook", root.to_str().unwrap()])
+        .args(["add", "task", "A demo record"])
+        .env("HOME", dir.path())
+        .env("ANB_BY", "Grace Hopper")
+        .output()
+        .expect("the binary runs");
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    let started = Command::new(env!("CARGO_BIN_EXE_anb"))
+        .args(["--notebook", root.to_str().unwrap()])
+        .args(["start", "task.a-demo-record"])
+        .env("HOME", dir.path())
+        .env("ANB_BY", "Grace Hopper")
+        .output()
+        .expect("the binary runs");
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+
+    let written = fs::read_to_string(root.join("tasks/task.a-demo-record.md")).unwrap();
+    assert!(written.contains("\nby: Grace Hopper\n"), "{written}");
+    assert!(written.contains("\ntaken-by: Grace Hopper\n"), "{written}");
+}

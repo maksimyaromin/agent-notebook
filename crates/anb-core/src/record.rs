@@ -357,6 +357,13 @@ impl Record {
         self.file.field("resolved-by")
     }
 
+    /// Who took the Task into work: written by `start`, corrected by
+    /// `edit --taken-by`.
+    #[must_use]
+    pub fn taken_by(&self) -> Option<&str> {
+        self.file.field("taken-by")
+    }
+
     #[must_use]
     pub fn hold(&self) -> Option<&str> {
         self.file.field("hold")
@@ -378,6 +385,7 @@ pub(crate) fn not_utf8_finding() -> Finding {
 
 /// Fields legal only on some types; elsewhere they are orphans.
 const TYPE_BOUND_FIELDS: &[(&str, &[RecordType])] = &[
+    ("taken-by", &[RecordType::Task]),
     ("priority", &[RecordType::Task]),
     ("hold", &[RecordType::Task]),
     ("hold-until", &[RecordType::Task]),

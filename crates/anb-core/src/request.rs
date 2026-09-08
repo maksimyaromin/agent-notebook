@@ -6,7 +6,8 @@
 
 use crate::record::RecordType;
 
-/// A record to be created; `id: None` mints one from the title.
+/// A record to be created; `id: None` mints one from the title, `by: None`
+/// signs it with the notebook's identity.
 #[derive(Debug)]
 pub struct Draft {
     pub record_type: RecordType,
@@ -101,6 +102,7 @@ pub struct Edit {
     pub from: Option<String>,
     pub priority: Option<u32>,
     pub review_by: Option<String>,
+    pub taken_by: Option<String>,
     /// The optional fields to erase, by their envelope key — `review-by`,
     /// not `review_by`. A record that never carried the field is already
     /// as asked, so the clear is a no-op.
@@ -111,11 +113,12 @@ pub struct Edit {
 /// those with an eraser of their own — a body through an empty `--body`, a
 /// tag through `--untag`. A field the record's type does not allow is
 /// erasable all the same; erasing it is the repair.
-pub(crate) const CLEARABLE: [&str; 3] = [FROM, PRIORITY, REVIEW_BY];
+pub(crate) const CLEARABLE: [&str; 4] = [FROM, PRIORITY, REVIEW_BY, TAKEN_BY];
 
 pub(crate) const FROM: &str = "from";
 pub(crate) const PRIORITY: &str = "priority";
 pub(crate) const REVIEW_BY: &str = "review-by";
+pub(crate) const TAKEN_BY: &str = "taken-by";
 
 impl Edit {
     pub(crate) fn changes_nothing(&self) -> bool {
@@ -128,6 +131,7 @@ impl Edit {
             && self.from.is_none()
             && self.priority.is_none()
             && self.review_by.is_none()
+            && self.taken_by.is_none()
             && self.clear.is_empty()
     }
 }

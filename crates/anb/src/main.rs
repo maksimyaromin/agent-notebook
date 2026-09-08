@@ -1,5 +1,5 @@
-//! The binary: wire the real world — cwd, clock, git identity — to the
-//! shell and print one reply.
+//! The binary: wire the real world — cwd, clock, identity — to the shell
+//! and print one reply.
 
 use anb::cli::{Cli, Command};
 use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root, unusable_root, user_root};
@@ -129,7 +129,7 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
 
     let lost = |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited);
     let host = Host {
-        git_by: anb::git::user_name,
+        identity: anb::identity::name,
         read_file: &read_file,
         lost_proofs: &lost,
         user_notebook: user.as_ref().map(|user| user as &dyn anb_core::Storage),
