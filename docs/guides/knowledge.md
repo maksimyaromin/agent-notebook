@@ -43,7 +43,7 @@ $ anb edit decision.a-fence-body-is-opaque --link "within decision.fences-never-
 ok: edit decision.a-fence-body-is-opaque — link
 ```
 
-`add --link` declares it at creation; `edit --unlink` takes a link out, spelled as it stands. A link whose target is shaped like a record id must name a record. Shared tags alone trigger the write-time hint, not persistent Debt.
+`add --link` declares it at creation; `edit --unlink` takes a link out, spelled as it stands. A link whose target is shaped like a record id must name a record, and it relates the two under the link's kind: `anb show decision.fences-never-nest` lists the drift as `linked-by[1]: decision.a-fence-body-is-opaque (within)`, the graph draws the edge, and `anb list --for decision.fences-never-nest` reaches every record that links it. The same holds for any kind you choose, such as a document declaring its schema with `--link "schema note.primitives-schema"`. Shared tags alone trigger the write-time hint, not persistent Debt.
 
 ## Notes
 
@@ -73,7 +73,7 @@ $ anb add question "Do fences nest?" --from task.parser-accepts-fenced-bodies
 ok: add question.do-fences-nest — questions/question.do-fences-nest.md
 ```
 
-Use `anb close <question> --resolved-by <decision-or-task>` when a record answers it. Use `anb close <question> --reason "<why>"` when it closes without such a record. A Question cannot close without one of these outcomes.
+`--to <name>` puts the Question to the person who can settle it, and their Status shows it. Use `anb close <question> --resolved-by <decision-or-task>` when a record answers it. Use `anb close <question> --reason "<why>"` when it closes without such a record. A Question cannot close without one of these outcomes.
 
 Open Questions become Debt after their age threshold. If the origin Task closes first, the Question surfaces immediately. The reminder asks you to resolve the uncertainty; it does not assume that finishing the Task answered it.
 
@@ -83,7 +83,7 @@ The supplied skill asks agents to pass `--via` on `add` and `comment`, using a c
 
 ## Citations
 
-Write a bare record id in a body or comment to reference it. Put the id in backticks when you are discussing its spelling or using it as an example. `anb show` derives incoming and outgoing mentions from the prose.
+Write a bare record id in a body or comment to reference it. Put the id in backticks when you are discussing its spelling or using it as an example. `anb show` derives incoming and outgoing mentions from the prose. A mention is context; a relation the record should carry as a fact, such as the schema a document follows, is a `link` in the envelope, which the tool walks back from the other end.
 
 A reference to an unknown id produces a hint without rejecting the write:
 

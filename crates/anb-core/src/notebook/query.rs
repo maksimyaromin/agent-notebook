@@ -59,11 +59,12 @@ impl Admission {
                 .iter()
                 .all(|wanted| tags_of(record).any(|tag| tag == wanted))
             && self.scope.as_ref().is_none_or(|scope| scope.contains(id))
-            && filter
-                .by
-                .as_deref()
-                .is_none_or(|by| record.belongs_to() == Some(by))
+            && filter.by.as_deref().is_none_or(|by| record.concerns(by))
             && (!filter.untaken || is_untaken(record))
+            && filter
+                .to
+                .as_deref()
+                .is_none_or(|to| record.addressee() == Some(to))
             && self
                 .needle
                 .as_deref()
@@ -182,13 +183,14 @@ fn shared_tag_count(record: &Record, draft_tags: &BTreeSet<&str>) -> usize {
         .count()
 }
 
-/// The records this one names as a blocker or as its Origin: the edges a
-/// scope walk follows, from the end that carries them.
+/// The records this one names as a blocker, as its Origin or as a link
+/// target: the edges a walk follows, from the end that carries them.
 pub(super) fn kin_of(record: &Record) -> impl Iterator<Item = &str> {
     record
         .file()
         .field_values("blocked-by")
         .chain(record.origin())
+        .chain(record.linked_records().map(|(_, target)| target))
 }
 
 pub(super) fn edge_exists(record: &Record, target: &str) -> bool {
@@ -314,6 +316,10 @@ pub(super) fn graph_node(
         archived: is_archived(record.path()),
         blocked_by: file.field_values("blocked-by").map(str::to_owned).collect(),
         origin: record.origin().map(str::to_owned),
+        links: record
+            .linked_records()
+            .map(|(kind, target)| (kind.to_owned(), target.to_owned()))
+            .collect(),
         fields: file
             .fields()
             .map(|(key, value)| (key.to_owned(), value.to_owned()))
@@ -430,7 +436,7 @@ fn open_rows(
     rows
 }
 
-/// The membership edges of the notebook, indexed once. Both are read from
+/// The membership edges of the notebook, indexed once. Each is read from
 /// one end and followed from the other, so answering them by scanning every
 /// record per hub would cost the notebook squared.
 pub(super) struct MembershipIndex<'a> {
@@ -438,6 +444,8 @@ pub(super) struct MembershipIndex<'a> {
     waits_on: BTreeMap<&'a str, Vec<&'a str>>,
     /// What was born inside each record, by the origin's id.
     born_inside: BTreeMap<&'a str, Vec<&'a str>>,
+    /// What links each record, by the target's id.
+    linked_by: BTreeMap<&'a str, Vec<&'a str>>,
     /// The ids of the Tasks that have closed.
     closed: BTreeSet<&'a str>,
 }
@@ -447,6 +455,7 @@ impl<'a> MembershipIndex<'a> {
         let mut index = MembershipIndex {
             waits_on: BTreeMap::new(),
             born_inside: BTreeMap::new(),
+            linked_by: BTreeMap::new(),
             closed: BTreeSet::new(),
         };
         // Live before archived, so the duplicate-id corruption an
@@ -466,6 +475,9 @@ impl<'a> MembershipIndex<'a> {
             if let Some(origin) = record.origin() {
                 index.born_inside.entry(origin).or_default().push(id);
             }
+            for (_, target) in record.linked_records() {
+                index.linked_by.entry(target).or_default().push(id);
+            }
             if record.state() == Some(TaskState::Closed.word()) {
                 index.closed.insert(id);
             }
@@ -476,7 +488,8 @@ impl<'a> MembershipIndex<'a> {
     fn edges_from(&self, id: &str) -> impl Iterator<Item = &'a str> + '_ {
         let waits_on = self.waits_on.get(id).map_or(&[][..], Vec::as_slice);
         let born_inside = self.born_inside.get(id).map_or(&[][..], Vec::as_slice);
-        waits_on.iter().chain(born_inside).copied()
+        let linked_by = self.linked_by.get(id).map_or(&[][..], Vec::as_slice);
+        waits_on.iter().chain(born_inside).chain(linked_by).copied()
     }
 
     /// An epic is a hub Task, distinguished by its edges: it is blocked by
@@ -505,16 +518,19 @@ impl<'a> MembershipIndex<'a> {
     }
 
     /// Every record inside `hub`'s scope, the hub among them: what the epic
-    /// waits on, and what was born inside it, each followed as far as it
-    /// goes.
+    /// waits on, what was born inside it, and what links it, each followed
+    /// as far as it goes.
     ///
-    /// Both edges mean membership, written from opposite ends, and both
-    /// carry through depth. A blocker of a child must close before the
-    /// child, which must close before the hub, so it is work this epic
-    /// waits on however far down it sits — and following it only to the
-    /// first tier would blind the queue to a hub whose children were
-    /// themselves assembled from the hub side, which is how an epic older
-    /// than the edit surface is built.
+    /// Every edge means membership, each written from the end that
+    /// carries it, and every one carries through depth. A blocker of a
+    /// child must close before the child, which must close before the hub,
+    /// so it is work this epic waits on however far down it sits — and
+    /// following it only to the first tier would blind the queue to a hub
+    /// whose children were themselves assembled from the hub side, which
+    /// is how an epic older than the edit surface is built. A link is
+    /// followed from the record that declares it into what it names, so a
+    /// hub reaches the documents that declare it their schema or their
+    /// rule without any of them repeating the id in prose.
     pub(super) fn scope_of(&self, hub: &'a str) -> BTreeSet<&'a str> {
         let mut scope = BTreeSet::from([hub]);
         let mut frontier = vec![hub];
@@ -620,17 +636,18 @@ pub(super) fn held_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<
     .collect()
 }
 
-/// The records with the reader's own leading, and `within` ordering each
-/// tier, so a notebook several people work in opens on the reader's work
-/// wherever the section. A host that knows nobody has nothing to lead
-/// with, and the order is `within` alone.
+/// The records with the reader's own leading — what they hold, what they
+/// wrote, and what waits on them — and `within` ordering each tier, so a
+/// notebook several people work in opens on the reader's work wherever
+/// the section. A host that knows nobody has nothing to lead with, and
+/// the order is `within` alone.
 fn own_first<'a>(
     records: impl Iterator<Item = &'a Record>,
     identity: Option<&str>,
     within: impl Fn(&Record, &Record) -> std::cmp::Ordering,
 ) -> Vec<(&'a Record, Attribution)> {
     let mut ranked: Vec<&Record> = records.collect();
-    let others_first = |record: &Record| identity.is_none() || record.belongs_to() != identity;
+    let others_first = |record: &Record| !identity.is_some_and(|me| record.concerns(me));
     ranked.sort_by(|left, right| {
         others_first(left)
             .cmp(&others_first(right))
@@ -684,8 +701,8 @@ pub(super) fn last_log_line(record: &Record) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The Tasks waiting on a human for acceptance, the reader's own first and
-/// then by id.
+/// The Tasks waiting for acceptance, the reader's own first — held by
+/// them or waiting on them — and then by id.
 pub(super) fn review_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<ReviewTask> {
     let waiting = live_valid.iter().copied().filter(|record| {
         record.record_type() == Some(RecordType::Task) && record.state() == Some("review")

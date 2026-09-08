@@ -165,6 +165,87 @@ mod narrowed_by_identity {
         assert_eq!(queued, ["task.given-away"]);
     }
 
+    /// What waits on a person is theirs too: the Question put to them and
+    /// the review handed to them, whoever holds or wrote it. An open Task
+    /// whose addressee is set ahead of its submit waits on nobody yet and
+    /// is not theirs; `to` alone reaches every record addressed to them.
+    #[test]
+    fn a_listing_narrowed_to_one_identity_keeps_what_waits_on_them() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.her-review.md",
+                &record_file(
+                    "task.her-review",
+                    "task",
+                    "review",
+                    &["taken-by: Grace", "to: Ada"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.her-plan.md",
+                &record_file(
+                    "task.her-plan",
+                    "task",
+                    "open",
+                    &["taken-by: Grace", "to: Ada"],
+                    "",
+                ),
+            ),
+            (
+                "questions/question.put-to-ada.md",
+                &record_file(
+                    "question.put-to-ada",
+                    "question",
+                    "open",
+                    &["by: Grace", "to: Ada"],
+                    "",
+                ),
+            ),
+            (
+                "questions/question.put-to-grace.md",
+                &record_file(
+                    "question.put-to-grace",
+                    "question",
+                    "open",
+                    &["by: Ada", "to: Grace"],
+                    "",
+                ),
+            ),
+        ]);
+        let notebook = Notebook::new(&mut storage);
+        let ids = |filter: &Filter| -> Vec<String> {
+            notebook
+                .list(filter)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect()
+        };
+        assert_eq!(
+            ids(&by("Ada")),
+            [
+                "task.her-review",
+                "question.put-to-ada",
+                "question.put-to-grace"
+            ]
+        );
+        assert_eq!(
+            ids(&Filter {
+                to: Some("Ada".to_owned()),
+                ..Filter::default()
+            }),
+            ["task.her-plan", "task.her-review", "question.put-to-ada"]
+        );
+        let row = notebook
+            .list(&by("Ada"))
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == "task.her-review")
+            .unwrap();
+        assert_eq!(row.attribution.to.as_deref(), Some("Ada"));
+    }
+
     /// The pool is the Tasks nobody holds, whoever wrote them: the work
     /// anyone may take. A Decision nobody signed is not in it, since only
     /// work is taken.
@@ -206,6 +287,7 @@ mod narrowed_by_identity {
             anb_core::Attribution {
                 by: Some("Grace".to_owned()),
                 taken_by: Some("Ada".to_owned()),
+                to: None,
             }
         );
     }
@@ -293,6 +375,80 @@ mod narrowed_by_identity {
 }
 
 /// The listing narrowed to the records whose text holds `needle`.
+/// A schema Note and the documents that declare it theirs through a
+/// `link` line, beside one that only names it in prose, one that links a
+/// path and one filed away: the smallest notebook that tells a link edge
+/// from a mention.
+fn a_schema_and_its_documents() -> crate::MemoryStorage {
+    let note = |id: &str, extra: &[&str], body: &str| {
+        crate::record_file(id, "note", "active", extra, body)
+    };
+    crate::storage_with(&[
+        (
+            "notes/note.schema.md",
+            &note(
+                "note.schema",
+                &["kind: spec"],
+                "Every primitive has an owner.\n",
+            ),
+        ),
+        (
+            "notes/note.credits.md",
+            &note(
+                "note.credits",
+                &["kind: term", "link: schema note.schema"],
+                "```yaml\nschema: note.schema\n```\n",
+            ),
+        ),
+        (
+            "notes/note.tenancy.md",
+            &note(
+                "note.tenancy",
+                &["kind: term", "link: schema note.schema"],
+                "",
+            ),
+        ),
+        (
+            "notes/note.sample.md",
+            &note(
+                "note.sample",
+                &[
+                    "kind: fact",
+                    "link: example note.schema",
+                    "link: doc docs/schema.md",
+                ],
+                "",
+            ),
+        ),
+        (
+            "notes/note.prose.md",
+            &note(
+                "note.prose",
+                &["kind: fact"],
+                "Reads note.schema for the shape.\n",
+            ),
+        ),
+        (
+            "notes/note.glossary.md",
+            &note(
+                "note.glossary",
+                &["kind: term", "link: within note.credits"],
+                "",
+            ),
+        ),
+        (
+            "archive/notes/note.old.md",
+            &crate::record_file(
+                "note.old",
+                "note",
+                "retired",
+                &["kind: term", "link: schema note.schema"],
+                "",
+            ),
+        ),
+    ])
+}
+
 fn holding(needle: &str) -> anb_core::Filter {
     anb_core::Filter {
         text: Some(needle.to_owned()),
@@ -489,6 +645,7 @@ mod narrowed_by_kind_tag_and_type {
 }
 
 mod record_view {
+    use super::a_schema_and_its_documents;
     use crate::*;
 
     #[test]
@@ -592,6 +749,26 @@ mod record_view {
         ]);
         let view = Notebook::new(&mut storage).view("task.demo").unwrap();
         assert_eq!(view.mentioned_by, Vec::<String>::new());
+    }
+
+    /// A link whose target is a record id relates the two records, and
+    /// the target can read the relation back: each carrier under the kind
+    /// its line gives, kind by kind so one relation's members stand
+    /// together. A mention in prose stays a mention, a link to a path
+    /// relates no record, and a carrier filed away is history.
+    #[test]
+    fn linked_by_lists_the_live_records_whose_link_lines_name_it_by_kind() {
+        let mut storage = a_schema_and_its_documents();
+        let view = Notebook::new(&mut storage).view("note.schema").unwrap();
+        assert_eq!(
+            view.linked_by,
+            vec![
+                ("example".to_owned(), "note.sample".to_owned()),
+                ("schema".to_owned(), "note.credits".to_owned()),
+                ("schema".to_owned(), "note.tenancy".to_owned()),
+            ]
+        );
+        assert_eq!(view.mentioned_by, vec!["note.prose"]);
     }
 
     #[test]
@@ -742,6 +919,7 @@ mod narrowed_by_text {
 
 /// The map: every Task a slice reaches, with the edges it draws.
 mod task_map {
+    use super::a_schema_and_its_documents;
     use crate::*;
     use anb_core::{EdgeKind, Focus, GraphSlice};
 
@@ -1018,6 +1196,114 @@ mod task_map {
             .collect();
         assert!(drawn.contains(&("task.open", "task.hub", EdgeKind::BlockedBy)));
         assert!(drawn.contains(&("task.hub", "task.open", EdgeKind::Origin)));
+    }
+
+    /// A link to a record is an edge in the notebook's own vocabulary: it
+    /// carries the link's kind and runs the way it was written, out of the
+    /// record that declares it. A body naming the same record is the same
+    /// relation stated twice, and the declared word survives.
+    #[test]
+    fn a_link_to_a_record_is_an_edge_carrying_the_links_own_kind() {
+        let mut storage = a_schema_and_its_documents();
+        let graph = Notebook::new(&mut storage).graph(&whole()).unwrap();
+        let drawn: Vec<(&str, &str, EdgeKind)> = graph
+            .edges()
+            .iter()
+            .map(|edge| (edge.from, edge.to, edge.kind))
+            .collect();
+        assert!(drawn.contains(&("note.credits", "note.schema", EdgeKind::Link("schema"))));
+        assert!(drawn.contains(&("note.sample", "note.schema", EdgeKind::Link("example"))));
+        assert!(drawn.contains(&("note.prose", "note.schema", EdgeKind::Mentions)));
+        assert!(
+            !drawn.contains(&("note.credits", "note.schema", EdgeKind::Mentions)),
+            "a quoted id in the body is no mention, and a bare one would be the same pair"
+        );
+        assert_eq!(EdgeKind::Link("schema").word(), "schema");
+    }
+
+    /// A link's kind is the notebook's own word, never one of the three the
+    /// graph draws itself, since the edge would then read as that relation;
+    /// and a relation has two ends, so a record cannot link itself, and a
+    /// hand-written self-link draws no edge.
+    #[test]
+    fn a_link_spelled_like_a_drawn_relation_or_pointing_at_itself_is_no_edge() {
+        let mut storage = storage_with(&[
+            ("tasks/task.first.md", &task("task.first", "open", &[], "")),
+            (
+                "notes/note.self.md",
+                &record_file(
+                    "note.self",
+                    "note",
+                    "active",
+                    &["link: schema note.self"],
+                    "",
+                ),
+            ),
+        ]);
+        for word in ["waits", "born", "mentions"] {
+            let refused = Notebook::new(&mut storage).edit(
+                "task.first",
+                &Edit {
+                    add_links: vec![Link {
+                        kind: word.to_owned(),
+                        target: "note.self".to_owned(),
+                    }],
+                    ..Edit::default()
+                },
+                TODAY,
+            );
+            assert!(
+                matches!(refused, Err(NotebookError::InvalidArgument { .. })),
+                "{word}: {refused:?}"
+            );
+        }
+        let refused = Notebook::new(&mut storage).edit(
+            "task.first",
+            &Edit {
+                add_links: vec![Link {
+                    kind: "schema".to_owned(),
+                    target: "task.first".to_owned(),
+                }],
+                ..Edit::default()
+            },
+            TODAY,
+        );
+        assert!(matches!(
+            refused,
+            Err(NotebookError::InvalidArgument { .. })
+        ));
+        let graph = Notebook::new(&mut storage).graph(&whole()).unwrap();
+        assert!(graph.edges().is_empty(), "{:?}", graph.edges());
+        assert_eq!(graph.degrees().get("note.self"), Some(&0));
+    }
+
+    /// A record's scope reaches what links it, as far as the links go:
+    /// the schema's documents, and what declares itself part of one of
+    /// them. The focus walks the same edge.
+    #[test]
+    fn a_scope_and_a_focus_reach_the_records_that_link_the_record() {
+        let mut storage = a_schema_and_its_documents();
+        assert_eq!(
+            map_of(&mut storage, &inside("note.schema")),
+            vec![
+                "note.credits",
+                "note.glossary",
+                "note.sample",
+                "note.schema",
+                "note.tenancy"
+            ]
+        );
+        assert_eq!(
+            map_of(&mut storage, &around("note.schema", 1)),
+            vec!["note.credits", "note.sample", "note.schema", "note.tenancy"]
+        );
+        let listed: Vec<String> = Notebook::new(&mut storage)
+            .list(&within("note.credits"))
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(listed, vec!["note.credits", "note.glossary"]);
     }
 
     /// A web reads by weight, and weight is how much of the slice meets at

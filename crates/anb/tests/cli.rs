@@ -174,6 +174,47 @@ fn many_open_tasks(count: usize) -> MemoryStorage {
 mod task_cycle_replies {
     use super::*;
 
+    /// A review is handed to a named person and a doubt is put to one; the
+    /// name lands in the envelope, and the listing narrowed to that person
+    /// reaches both, its hint carrying the flag.
+    #[test]
+    fn a_review_and_a_question_are_addressed_to_a_person() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        ok(&mut storage, &["start", "task.demo"]);
+        assert_snapshot!(
+            ok(&mut storage, &["submit", "task.demo", "--to", "Grace"]),
+            @"ok: submit task.demo — active→review"
+        );
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .contains("\ntaken-by: Maks\nto: Grace\n")
+        );
+        ok(
+            &mut storage,
+            &["add", "question", "Do fences nest?", "--to", "Grace"],
+        );
+        assert!(
+            storage
+                .read("questions/question.do-fences-nest.md")
+                .unwrap()
+                .contains("\nby: Maks\nto: Grace\n")
+        );
+        let payload = ok(&mut storage, &["--json", "list", "--to", "Grace"]);
+        let listed: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(listed["count"], 2);
+        assert_eq!(listed["records"][0]["to"], "Grace");
+        assert_eq!(listed["records"][1]["to"], "Grace");
+        assert_snapshot!(
+            refused(&mut storage, &["add", "decision", "Addressed", "--to", "Grace"]),
+            @r#"
+        error[invalid-argument]: to: applies only to a task or a question
+        try: anb add decision "<title>"
+        "#
+        );
+    }
+
     /// The report is read from the shell's world, so a read that fails on its
     /// encoding is a refused argument the caller retypes — not the notebook's
     /// fault, and not a close.
@@ -1487,6 +1528,53 @@ mod single_record {
         );
     }
 
+    /// The records that declare a relation to this one through a `link`
+    /// line stand in a block of their own, each with the link's kind, so a
+    /// schema lists its documents without any of them naming it in prose.
+    #[test]
+    fn show_lists_the_records_linking_it_with_the_links_kind() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.schema.md".to_owned(),
+                record_file(
+                    "note.schema",
+                    "note",
+                    "active",
+                    "The schema",
+                    &["kind: spec"],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.credits.md".to_owned(),
+                record_file(
+                    "note.credits",
+                    "note",
+                    "active",
+                    "Credits",
+                    &["kind: term", "link: schema note.schema"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_snapshot!(ok(&mut storage, &["show", "note.schema"]), @r"
+        id: note.schema
+        type: note
+        state: active
+        title: The schema
+        kind: spec
+        created: 2026-08-24
+        updated: 2026-08-25
+        linked-by[1]: note.credits (schema)
+        ");
+        let payload = ok(&mut storage, &["--json", "show", "note.schema"]);
+        let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(
+            parsed["linked-by"],
+            serde_json::json!({"count": 1, "rows": [{"id": "note.credits", "kind": "schema"}]})
+        );
+    }
+
     /// A Task's log grows for as long as the work does, and `show` is how a
     /// session resumes it, so the reply must not grow with the trail.
     #[test]
@@ -1663,6 +1751,68 @@ mod session_status {
         );
     }
 
+    /// A review handed to the reader and a doubt put to them are the
+    /// reader's turn: a narrowed dashboard opens on them, each row naming
+    /// whom it waits on, on both renderings; what waits on somebody else
+    /// stays out.
+    #[test]
+    fn what_waits_on_the_reader_opens_their_narrowed_dashboard() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hers-for-me.md".to_owned(),
+                record_file(
+                    "task.hers-for-me",
+                    "task",
+                    "review",
+                    "Her record",
+                    &["taken-by: Grace", "to: Maks"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.hers-for-her.md".to_owned(),
+                record_file(
+                    "task.hers-for-her",
+                    "task",
+                    "review",
+                    "Her other record",
+                    &["taken-by: Grace", "to: Grace"],
+                    "",
+                ),
+            ),
+            (
+                "questions/question.for-me.md".to_owned(),
+                record_file(
+                    "question.for-me",
+                    "question",
+                    "open",
+                    "Which gate opens first?",
+                    &["by: Grace", "to: Maks"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_snapshot!(
+            ok(&mut storage, &["status", "--mine", "--budget", "0"]),
+            @r#"
+        ok: notebook — 2 tasks, 0 decisions, 0 notes, 1 question
+        by: Maks — anb status --team
+        review[1]{id,taken-by,to}:
+          task.hers-for-me,Grace,Maks
+        questions[1]{id,age,by,to,title}:
+          question.for-me,4d,Grace,Maks,Which gate opens first?
+        budget: ~78 tokens (no ceiling)
+        "#
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json", "--mine"])).unwrap();
+        assert_eq!(
+            value["review"]["rows"],
+            serde_json::json!([{"id": "task.hers-for-me", "taken-by": "Grace", "to": "Maks"}])
+        );
+        assert_eq!(value["questions"]["rows"][0]["to"], "Maks");
+    }
+
     /// The dashboard is the work: an open Question is on it with who asked,
     /// a rule is not, and the hook carries the same text.
     #[test]
@@ -1695,9 +1845,9 @@ mod session_status {
             ok(&mut storage, &["status", "--budget", "0"]),
             @r#"
         ok: notebook — 0 tasks, 1 decision, 0 notes, 1 question
-        questions[1]{id,age,by,title}:
-          question.gates,4d,Grace,Which gate opens first?
-        budget: ~50 tokens (no ceiling)
+        questions[1]{id,age,by,to,title}:
+          question.gates,4d,Grace,-,Which gate opens first?
+        budget: ~52 tokens (no ceiling)
         "#
         );
         let payload: serde_json::Value =
@@ -2507,27 +2657,23 @@ mod maintenance_replies {
         assert_snapshot!(ok(&mut storage, &["check"]), @"count: 0");
     }
 
-    /// Only a Task is taken; on any other record `taken-by` is an orphan
-    /// `edit` erases, and the finding names that eraser.
+    /// Only a Task is taken, and only work or a doubt waits on anyone; on
+    /// any other record the line is an orphan `edit` erases, and the
+    /// finding names that eraser.
     #[test]
-    fn taken_by_on_another_type_names_its_eraser() {
-        let mut storage = storage_with(&[(
-            "notes/note.stray.md".to_owned(),
-            record_file(
-                "note.stray",
-                "note",
-                "active",
-                "A demo record",
-                &["taken-by: Grace"],
-                "",
-            ),
-        )]);
-        assert_eq!(
-            first_repair(&mut storage).as_deref(),
-            Some("anb edit note.stray --clear taken-by")
-        );
-        ok(&mut storage, &["edit", "note.stray", "--clear", "taken-by"]);
-        assert_snapshot!(ok(&mut storage, &["check"]), @"count: 0");
+    fn a_person_named_on_another_type_names_its_eraser() {
+        for (field, line) in [("taken-by", "taken-by: Grace"), ("to", "to: Grace")] {
+            let mut storage = storage_with(&[(
+                "notes/note.stray.md".to_owned(),
+                record_file("note.stray", "note", "active", "A demo record", &[line], ""),
+            )]);
+            assert_eq!(
+                first_repair(&mut storage).as_deref(),
+                Some(format!("anb edit note.stray --clear {field}").as_str())
+            );
+            ok(&mut storage, &["edit", "note.stray", "--clear", field]);
+            assert_eq!(ok(&mut storage, &["check"]), "count: 0\n");
+        }
     }
 
     /// A repair is a command that runs. A line only a Task verb erases,
@@ -2947,7 +3093,7 @@ mod maintenance_replies {
         assert_snapshot!(
             refused(&mut storage, &["edit", "task.demo", "--clear", "state"]),
             @r#"
-        error[invalid-argument]: clear: `state` is not an erasable field; from, priority, review-by, taken-by
+        error[invalid-argument]: clear: `state` is not an erasable field; from, priority, review-by, taken-by, to
         try: anb edit task.demo --title "<title>"
         "#
         );
@@ -3143,7 +3289,7 @@ mod maintenance_replies {
         assert_snapshot!(
             refused(&mut storage, &["edit", "task.demo"]),
             @r#"
-        error[invalid-argument]: edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, --taken-by, or --clear
+        error[invalid-argument]: edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, --taken-by, --to, or --clear
         try: anb edit task.demo --title "<title>"
         "#
         );
@@ -3457,6 +3603,33 @@ mod task_graph {
         ");
     }
 
+    /// A link between two records is drawn under the link's own word, out
+    /// of the record that declares it, on both surfaces.
+    #[test]
+    fn a_link_between_records_is_an_edge_under_the_links_own_word() {
+        let mut storage = storage_with(&[
+            open_task("task.first", "The blocker", &[]),
+            open_task(
+                "task.second",
+                "The waiter",
+                &["link: spec task.first", "link: pr https://example.com/2"],
+            ),
+        ]);
+        assert_snapshot!(ok(&mut storage, &["graph"]), @r"
+        nodes[2]{id,type,state,ready,archived,degree,priority,created,epic,title}:
+          task.first,task,open,yes,no,1,-,2026-08-24,-,The blocker
+          task.second,task,open,yes,no,1,-,2026-08-24,-,The waiter
+        edges[1]{from,to,kind}:
+          task.second,task.first,spec
+        ");
+        let payload = ok(&mut storage, &["--json", "graph"]);
+        let parsed: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(
+            parsed["edges"]["rows"],
+            serde_json::json!([{"from": "task.second", "to": "task.first", "kind": "spec"}])
+        );
+    }
+
     /// A caller builds against a shape, so the document says which shape it
     /// is and which slice it answers.
     #[test]
@@ -3468,7 +3641,7 @@ mod task_graph {
         let parsed: serde_json::Value =
             serde_json::from_str(&payload).unwrap_or_else(|_| panic!("not JSON: {payload}"));
 
-        assert_eq!(parsed["v"], 3);
+        assert_eq!(parsed["v"], 4);
         assert_eq!(parsed["slice"]["match"], "blocker");
         assert_eq!(parsed["slice"]["tag"], serde_json::json!(["parser"]));
         assert_eq!(parsed["slice"]["archive"], false);

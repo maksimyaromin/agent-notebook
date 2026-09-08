@@ -374,6 +374,7 @@ mod status_dashboard {
             anb_core::Attribution {
                 by: Some("Grace".to_owned()),
                 taken_by: Some("Ada".to_owned()),
+                to: None,
             }
         );
     }
@@ -415,7 +416,7 @@ mod status_dashboard {
         ]);
         let text = status_by(&mut storage, "Ada", None);
         assert!(
-            text.contains("review[2]: task.mine, task.hers (Grace) — waiting on a human\n"),
+            text.contains("review[2]{id,taken-by,to}:\n  task.mine,Ada,-\n  task.hers,Grace,-\n"),
             "{text}"
         );
         assert!(
@@ -423,6 +424,74 @@ mod status_dashboard {
                 "held[2]{id,reason,until,taken-by}:\n  task.my-hold,waits on the vendor,-,Ada\n  task.her-hold,waits on legal,-,Grace\n"
             ),
             "{text}"
+        );
+    }
+
+    /// What waits on the reader is the reader's turn: a review handed to
+    /// them and a doubt put to them lead their sections on the team's
+    /// dashboard, each row naming whom it waits on, and a narrowed
+    /// dashboard holds them beside the reader's own while what waits on
+    /// somebody else stays out.
+    #[test]
+    fn what_waits_on_the_reader_leads_and_is_theirs_on_a_narrowed_dashboard() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hers.md",
+                &record_file("task.hers", "task", "review", &["taken-by: Grace"], ""),
+            ),
+            (
+                "tasks/task.hers-for-ada.md",
+                &record_file(
+                    "task.hers-for-ada",
+                    "task",
+                    "review",
+                    &["taken-by: Grace", "to: Ada"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.hers-for-grace.md",
+                &record_file(
+                    "task.hers-for-grace",
+                    "task",
+                    "review",
+                    &["taken-by: Grace", "to: Grace"],
+                    "",
+                ),
+            ),
+            (
+                "questions/question.old.md",
+                &question_file("question.old", &[])
+                    .replace("created: 2026-08-24", "created: 2026-08-10"),
+            ),
+            (
+                "questions/question.put-to-ada.md",
+                &question_file("question.put-to-ada", &["by: Grace", "to: Ada"]),
+            ),
+        ]);
+        let team = status_by(&mut storage, "Ada", None);
+        assert!(
+            team.contains(
+                "review[3]{id,taken-by,to}:\n  task.hers-for-ada,Grace,Ada\n  task.hers,Grace,-\n  task.hers-for-grace,Grace,Grace\n"
+            ),
+            "{team}"
+        );
+        assert!(
+            team.contains(
+                "questions[2]{id,age,by,to,title}:\n  question.put-to-ada,3d,Grace,Ada,A demo record\n  question.old,17d,-,-,A demo record\n"
+            ),
+            "{team}"
+        );
+        let mine = status_by(&mut storage, "Ada", Some("Ada"));
+        assert!(
+            mine.contains("review[1]{id,taken-by,to}:\n  task.hers-for-ada,Grace,Ada\n"),
+            "{mine}"
+        );
+        assert!(
+            mine.contains(
+                "questions[1]{id,age,by,to,title}:\n  question.put-to-ada,3d,Grace,Ada,A demo record\n"
+            ),
+            "{mine}"
         );
     }
 
@@ -486,7 +555,7 @@ mod status_dashboard {
         let text = status_by(&mut storage, "Ada", None);
         assert!(
             text.contains(
-                "questions[3]{id,age,by,title}:\n  question.mine,3d,Ada,A demo record\n  question.old,17d,-,A demo record\n  question.hers,7d,Grace,A demo record\n"
+                "questions[3]{id,age,by,to,title}:\n  question.mine,3d,Ada,-,A demo record\n  question.old,17d,-,-,A demo record\n  question.hers,7d,Grace,-,A demo record\n"
             ),
             "{text}"
         );
@@ -502,7 +571,9 @@ mod status_dashboard {
             .unwrap();
         assert!(!status.quiet, "{}", status.text);
         assert!(
-            status.text.contains("review[1]: task.demo"),
+            status
+                .text
+                .contains("review[1]{id,taken-by,to}:\n  task.demo,-,-\n"),
             "{}",
             status.text
         );
@@ -537,9 +608,9 @@ mod status_dashboard {
             .unwrap();
         assert!(!status.quiet, "{}", status.text);
         assert!(
-            status
-                .text
-                .contains("questions[1]{id,age,by,title}:\n  question.demo,3d,-,A demo record\n"),
+            status.text.contains(
+                "questions[1]{id,age,by,to,title}:\n  question.demo,3d,-,-,A demo record\n"
+            ),
             "{}",
             status.text
         );
@@ -664,7 +735,9 @@ mod status_dashboard {
             "{text}"
         );
         assert!(
-            text.contains("questions[1]{id,age,by,title}:\n  question.mine,3d,Ada,A demo record\n"),
+            text.contains(
+                "questions[1]{id,age,by,to,title}:\n  question.mine,3d,Ada,-,A demo record\n"
+            ),
             "{text}"
         );
         assert_eq!(status.by.as_deref(), Some("Ada"));

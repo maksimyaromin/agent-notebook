@@ -13,11 +13,12 @@ A read answers with the records its narrowing admits. Each flag is a predicate o
 
 | Flag | Meaning |
 |---|---|
-| `--by <NAME>` | Only this identity's work: the tasks it holds and the records it wrote |
+| `--by <NAME>` | Only this identity's work: the tasks it holds, the records it wrote and the records waiting on it |
 | `--mine` | Only your own: `--by` with the identity the writers sign with |
 | `--team` | Everyone's, whatever the notebook's `scope` key says |
 | `--untaken` | Only the tasks nobody holds, the pool anyone may take, whatever the notebook's `scope` key says |
-| `--for <ID>` | Only records inside this record's scope: an epic, what it waits on and what was born inside it |
+| `--to <NAME>` | Only the records addressed to this person |
+| `--for <ID>` | Only records inside this record's scope: what it waits on, what was born inside it and what links it, as far as each goes |
 | `--tag <TAG>` | Only records carrying this tag; repeated, carrying every one |
 | `--match <TEXT>` | Only records whose id, title, tags, people or body hold this text, whatever its case |
 | `--type <TYPE>` | Only records of these types, comma-separated or repeated. Every type by default, including one whose own `type` field no notebook word matches |
@@ -42,6 +43,7 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 | `--via <VIA>` | The acting agent tool |
 | `--taken-by <NAME>` | Who will do the task: hands it over as it is written. Omitted, the task is nobody's until someone starts it |
 | `--mine` | Take the task for yourself: `--taken-by` with the identity the writers sign with |
+| `--to <NAME>` | Whom the record waits on: the person a question is put to, or the one a task's review will be handed to. Omitted, it waits on nobody in particular |
 | `--priority <PRIORITY>` | A task's urgency, 0 to 4, 0 the most urgent |
 | `--kind <KIND>` | A decision's rule, shape, or drift; a note's fact, term, guide, idea, model, or spec |
 | `--supersedes <SUPERSEDES>` | The Decision or Note this one replaces; it flips in the same move |
@@ -54,9 +56,13 @@ Arguments: `<ID>`
 
 ### anb submit
 
-active → review: hand the work to a human for acceptance
+active → review: hand the work over for acceptance, to a named person or to a human in general
 
 Arguments: `<ID>`
+
+| Flag | Meaning |
+|---|---|
+| `--to <NAME>` | Whom the review waits on; their Status shows it. Omitted, the task keeps the addressee it carries, or waits on a human in general |
 
 ### anb close
 
@@ -133,7 +139,7 @@ The dispatch queue: open, unblocked, unheld Tasks, most urgent first, each namin
 |---|---|
 | `--all` | Every row; the listing is bounded by default |
 
-Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--for`, `--tag`, `--match`.
+Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--to`, `--for`, `--tag`, `--match`.
 
 ### anb list
 
@@ -143,7 +149,7 @@ The records, ids and titles out: every live one by default, or the ones the narr
 |---|---|
 | `--all` | Every row; the listing is bounded by default |
 
-Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--for`, `--tag`, `--match`, `--type`, `--kind`, `--archive`.
+Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--to`, `--for`, `--tag`, `--match`, `--type`, `--kind`, `--archive`.
 
 ### anb show
 
@@ -219,7 +225,8 @@ Arguments: `<ID>`
 | `--priority <PRIORITY>` | 0 to 4, 0 the most urgent |
 | `--review-by <DATE>` | The explicit resurfacing date |
 | `--taken-by <NAME>` | Who holds the task: the hand-over that lets another identity start it |
-| `--clear <FIELD>` | The optional field to erase: `from`, `priority`, `review-by`, or `taken-by`; repeatable |
+| `--to <NAME>` | Whom the task or question waits on |
+| `--clear <FIELD>` | The optional field to erase: `from`, `priority`, `review-by`, `taken-by`, or `to`; repeatable |
 
 ### anb graph
 
@@ -232,7 +239,7 @@ The notebook as records and the edges between them: `list` with edges
 | `--full` | Each record's envelope and body as well |
 | `--all` | Every row the plain text bounds. JSON is never bounded: a graph missing edges is not a smaller graph, it is a wrong one |
 
-Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--for`, `--tag`, `--match`, `--type`, `--kind`, `--archive`.
+Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--to`, `--for`, `--tag`, `--match`, `--type`, `--kind`, `--archive`.
 
 ### anb setup
 

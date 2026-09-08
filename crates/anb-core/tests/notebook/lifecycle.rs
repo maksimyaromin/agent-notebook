@@ -194,7 +194,7 @@ mod task_cycle {
     fn an_invalid_move_names_the_moves_the_state_allows() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let error = Notebook::new(&mut storage)
-            .submit("task.demo", TODAY)
+            .submit("task.demo", None, TODAY)
             .unwrap_err();
         assert_eq!(
             error,
@@ -664,14 +664,14 @@ mod task_cycle {
         {
             let mut notebook = Notebook::new(&mut storage);
             assert_eq!(
-                notebook.submit("task.demo", TODAY).unwrap(),
+                notebook.submit("task.demo", None, TODAY).unwrap(),
                 moved("task.demo", "active", "review")
             );
             assert_eq!(
                 notebook.start("task.demo", TODAY).unwrap(),
                 moved("task.demo", "review", "active")
             );
-            notebook.submit("task.demo", TODAY).unwrap();
+            notebook.submit("task.demo", None, TODAY).unwrap();
             assert_eq!(
                 notebook
                     .close("task.demo", &Proof::Waived, TODAY)
@@ -680,6 +680,37 @@ mod task_cycle {
                 moved("task.demo", "review", "closed")
             );
         }
+    }
+
+    /// A review handed to someone waits on them, and the name stays with
+    /// the Task through the loop: taken back and submitted again without
+    /// a name, it waits on the same person; a replay changes no byte.
+    #[test]
+    fn submit_names_whom_the_review_waits_on_and_the_name_outlives_the_loop() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let mut notebook = Notebook::new(&mut storage);
+        notebook.submit("task.demo", Some("Grace"), TODAY).unwrap();
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .contains("\nto: Grace\n")
+        );
+        let mut notebook = Notebook::new(&mut storage);
+        notebook.start("task.demo", TODAY).unwrap();
+        notebook.submit("task.demo", None, TODAY).unwrap();
+        let handed = storage.read("tasks/task.demo.md").unwrap();
+        assert!(handed.contains("\nto: Grace\n"), "{handed}");
+
+        let replay = Notebook::new(&mut storage)
+            .submit("task.demo", Some("Ada"), TODAY)
+            .unwrap();
+        assert!(replay.already);
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), handed);
+        assert!(matches!(
+            Notebook::new(&mut storage).submit("task.demo", Some(" "), TODAY),
+            Err(NotebookError::InvalidArgument { .. })
+        ));
     }
 
     #[test]

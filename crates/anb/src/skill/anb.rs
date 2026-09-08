@@ -97,7 +97,7 @@ Use this method when capturing a request, shaping an idea, maintaining domain kn
 
 Start a new change with an `idea` Note, or resume the existing idea. Keep the source, intended improvement, constraints, agreement status and next uncertainty in its body. Link the source with `--link "doc <path-or-url>"`; record missing evidence explicitly. Capturing a request does not authorize implementation or changes to its source.
 
-Keep the idea when Tasks emerge: one proposal can lead to several deliveries. Create records `--from` what produced them, cite supporting records by bare id, and use `block` for execution prerequisites. An origin answers why a record exists; a mention supplies context; a dependency controls readiness.
+Keep the idea when Tasks emerge: one proposal can lead to several deliveries. Create records `--from` what produced them, cite supporting records by bare id, and use `block` for execution prerequisites. An origin answers why a record exists; a mention supplies context; a dependency controls readiness; a `--link "<kind> <id>"` declares a relation of your own, such as the schema a document follows, and `show`, `graph` and `--for` walk it back from the record it names.
 
 For an agreed small change, the idea and one Task are enough:
 
@@ -135,7 +135,7 @@ Read `anb status` unless the hook supplied it. Status is the work: the active Ta
 
 Every listing narrows the same way: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine`, `--team` and `--untaken` compose on `list`, `ready` and `graph`, and `--type`, `--kind` and `--archive` on `list` and `graph`, each answering with the records every flag admits. `list --type note --tag domain-model` is the domain language; `ready --tag parser` is one area's queue; `anb debt` is the Debt that Status counts.
 
-Several people can share one notebook, and a Task belongs to whoever holds it: `taken-by` names the holder, `by` the author, and a Task nobody holds is nobody's, whoever wrote it. `start` takes an untaken Task for the user and refuses one another person holds. A planner hands a Task over as it is written with `add task --taken-by <name>`, or later with `edit <id> --taken-by <name>`, both decided by the user, never by the agent; `add task --mine` takes a Task for the user, for a follow-up the user will do. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names each Task's holder, and `ready --untaken` is the pool, the Tasks anyone may take. A notebook whose config sets `scope: mine` answers every read with the Tasks the user holds and the records the user wrote; Status then counts the pool on its `untaken:` line, and `--team` widens one call to the whole project.
+Several people can share one notebook, and a Task belongs to whoever holds it: `taken-by` names the holder, `by` the author, and a Task nobody holds is nobody's, whoever wrote it. `start` takes an untaken Task for the user and refuses one another person holds. A planner hands a Task over as it is written with `add task --taken-by <name>`, or later with `edit <id> --taken-by <name>`, both decided by the user, never by the agent; `add task --mine` takes a Task for the user, for a follow-up the user will do. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names each Task's holder, and `ready --untaken` is the pool, the Tasks anyone may take. A Question put to a person with `add question --to <name>` and a review handed to one with `submit --to <name>` wait on that person, and their Status shows them beside their own; the `to` column of the review and questions tables says whom each waits on. A notebook whose config sets `scope: mine` answers every read with the Tasks the user holds, the records the user wrote and the records waiting on the user; Status then counts the pool on its `untaken:` line, and `--team` widens one call to the whole project.
 
 ### Shape the idea
 
@@ -462,12 +462,12 @@ const SESSION: &[Step] = &[
     Step::Run(&["ready", "--untaken"]),
     Step::Run(&["ready", "--for", "task.ship-the-parser"]),
     Step::Say(
-        "Narrowed to the user's own, with `--mine` or the config key `scope: mine`, a dashboard holds the Tasks the user holds and the records the user wrote; Ada holds nothing yet, so it counts the pool where her next work is:",
+        "Narrowed to the user's own, with `--mine` or the config key `scope: mine`, a dashboard holds the Tasks the user holds, the records the user wrote and the records waiting on the user; Ada holds nothing yet, so it counts the pool where her next work is:",
     ),
     Step::Run(&["status", "--mine", "--budget", "0"]),
     Step::Head("A session at work"),
     Step::Say(
-        "A session takes the top of the pool, which records who holds it as `taken-by`, logs as it goes with the entry signed `by/via`, and parks a doubt without widening its scope:",
+        "A session takes the top of the pool, which records who holds it as `taken-by`, logs as it goes with the entry signed `by/via`, and parks a doubt without widening its scope, put to the colleague who can settle it:",
     ),
     Step::Run(&["start", "task.grammar-parser-accepts-fences"]),
     Step::Run(&[
@@ -483,6 +483,8 @@ const SESSION: &[Step] = &[
         "Do fences nest?",
         "--from",
         "task.grammar-parser-accepts-fences",
+        "--to",
+        "Grace",
     ]),
     Step::Head("Decisions and Notes"),
     Step::Say(
@@ -531,13 +533,24 @@ const SESSION: &[Step] = &[
     Step::Run(&["list", "--type", "decision", "--kind", "rule"]),
     Step::Head("Status"),
     Step::Say(
-        "Status opens the session with the work: the active Task and its last log line, the queue with who holds each Task, and the open Questions; an active Task another person holds would carry their name after its title:",
+        "Status opens the session with the work: the active Task and its last log line, the queue with who holds each Task, and the open Questions with who asked and whom; an active Task another person holds would carry their name after its title:",
     ),
     Step::Run(&["status", "--budget", "0"]),
     Step::Say(
         "Narrowed to the user's own, it says whose it is and how to widen it, and a colleague's Task is not in it:",
     ),
     Step::Run(&["status", "--mine", "--budget", "0"]),
+    Step::Head("Handing the work over for review"),
+    Step::Say(
+        "The work is handed to Grace for acceptance, and her narrowed Status opens on what waits on her, the review and the doubt, beside the Task planned for her:",
+    ),
+    Step::Run(&[
+        "submit",
+        "task.grammar-parser-accepts-fences",
+        "--to",
+        "Grace",
+    ]),
+    Step::Run(&["status", "--by", "Grace", "--budget", "0"]),
     Step::Head("Closing a Question"),
     Step::Say("The doubt closes into the record that settled it, and is archived right after:"),
     Step::Run(&[
@@ -549,7 +562,7 @@ const SESSION: &[Step] = &[
     Step::Run(&["archive", "question.do-fences-nest"]),
     Step::Head("Closing a Task"),
     Step::Say(
-        "The work closes with its report as a Note, and is archived right after; the reply names what the close unblocked:",
+        "Accepted, the work closes with its report as a Note, and is archived right after; the reply names what the close unblocked:",
     ),
     Step::Report(
         "report.md",

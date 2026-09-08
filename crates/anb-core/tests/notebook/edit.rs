@@ -533,6 +533,60 @@ mod edit_verb {
         );
     }
 
+    /// Whom a record waits on is corrected like who holds it: set,
+    /// replaced and erased through `edit`, on a Task or a Question and on
+    /// nothing else.
+    #[test]
+    fn whom_a_record_waits_on_is_set_replaced_and_cleared_by_edit() {
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task_file("review", &["to: Grace"])),
+            (
+                "notes/note.demo.md",
+                &record_file("note.demo", "note", "active", &[], ""),
+            ),
+        ]);
+        let replaced = Notebook::new(&mut storage)
+            .edit(
+                "task.demo",
+                &Edit {
+                    to: Some("Ada".to_owned()),
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(replaced.changed, vec!["to"]);
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .contains("\nto: Ada\n")
+        );
+        let cleared = Notebook::new(&mut storage)
+            .edit(
+                "task.demo",
+                &Edit {
+                    clear: vec!["to".to_owned()],
+                    ..edit()
+                },
+                TODAY,
+            )
+            .unwrap();
+        assert_eq!(cleared.changed, vec!["to"]);
+        assert!(!storage.read("tasks/task.demo.md").unwrap().contains("to:"));
+        assert!(matches!(
+            Notebook::new(&mut storage).edit(
+                "note.demo",
+                &Edit {
+                    to: Some("Grace".to_owned()),
+                    ..edit()
+                },
+                TODAY,
+            ),
+            Err(NotebookError::InvalidArgument { .. })
+        ));
+    }
+
     #[test]
     fn taken_by_on_a_record_that_is_not_a_task_is_refused() {
         let text = record_file("decision.demo", "decision", "active", &[], "");

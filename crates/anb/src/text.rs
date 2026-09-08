@@ -14,8 +14,8 @@ use anb_core::date;
 use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
 use anb_core::{
-    DebtSignal, EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, ListedRecord, NotebookError,
-    ReadyTask, RecordType, View, counted, encode,
+    DebtSignal, FileFinding, Graph, GraphEdge, GraphNode, ListedRecord, NotebookError, ReadyTask,
+    RecordType, View, counted, encode,
 };
 use std::fmt::Write as _;
 
@@ -373,12 +373,7 @@ fn edges_block(out: &mut String, edges: &[GraphEdge<'_>], all: bool, restore: &s
     let shown = shown(edges.len(), all);
     let _ = writeln!(out, "edges[{}]{{from,to,kind}}:", edges.len());
     for edge in &edges[..shown] {
-        let word = match edge.kind {
-            EdgeKind::BlockedBy => "waits",
-            EdgeKind::Origin => "born",
-            EdgeKind::Mentions => "mentions",
-        };
-        let _ = writeln!(out, "  {},{},{word}", edge.from, edge.to);
+        let _ = writeln!(out, "  {},{},{}", edge.from, edge.to, edge.kind.word());
     }
     truncation_hint(out, edges.len(), shown, restore);
 }
@@ -485,15 +480,21 @@ fn single_record(view: &View, all: bool) -> String {
             None => indented(&mut out, &view.body),
         }
     }
-    for (label, ids) in [
+    let linked_by: Vec<String> = view
+        .linked_by
+        .iter()
+        .map(|(kind, id)| format!("{id} ({kind})"))
+        .collect();
+    for (label, items) in [
         ("mentions", &view.mentions),
         ("mentioned-by", &view.mentioned_by),
+        ("linked-by", &linked_by),
     ] {
         named_line(
             &mut out,
             label,
-            ids,
-            shown(ids.len(), all),
+            items,
+            shown(items.len(), all),
             Some(&format!("anb show {} --all", view.id)),
         );
     }

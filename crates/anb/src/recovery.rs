@@ -29,7 +29,7 @@ pub fn subject(command: &Command) -> Subject {
             };
         }
         Command::Start { id } => ("start", Some(id)),
-        Command::Submit { id } => ("submit", Some(id)),
+        Command::Submit { id, .. } => ("submit", Some(id)),
         Command::Close(args) => ("close", Some(&args.id)),
         Command::Reopen { id } => ("reopen", Some(id)),
         Command::Hold { id, .. } => ("hold", Some(id)),

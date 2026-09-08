@@ -2,14 +2,16 @@
 //! records.
 //!
 //! Its subject is the work: the active Tasks with the last log line of the
-//! one the session resumes, the Tasks waiting on a human, the held ones
+//! one the session resumes, the Tasks waiting for acceptance, the held ones
 //! with their reasons, the ready top rows, the open Questions, and one line
 //! counting Debt. Knowledge is read by a listing, never pushed into a
 //! session's opening. The gate keeps a quiet notebook to one line.
 //!
 //! Whose work it is follows the `by` narrowing every listing takes: the
 //! whole team's, the reader's own first and every other line naming its
-//! person, or one identity's alone. A dashboard narrowed to one identity
+//! person, or one identity's alone — what they hold, what they wrote, and
+//! what waits on them, so a reviewer with nothing of their own still opens
+//! on the review that waits on them. A dashboard narrowed to one identity
 //! hides the pool, the ready Tasks nobody holds, so it counts the pool on
 //! a line of its own: a session whose own queue is empty is not a session
 //! with nothing to do.
@@ -71,7 +73,8 @@ pub struct ActiveTask {
     pub log: Option<String>,
 }
 
-/// A Task waiting on a human for acceptance.
+/// A Task waiting for acceptance: who holds it, and whom it waits on
+/// when it names someone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewTask {
     pub id: String,
@@ -141,7 +144,7 @@ pub(crate) struct StatusInputs {
 }
 
 impl StatusInputs {
-    /// The gate: signal is work in motion, work waiting on a human,
+    /// The gate: signal is work in motion, work waiting for acceptance,
     /// dispatchable work, the reader's own or anyone's, an open doubt, or
     /// decay. Review counts deliberately: a Task parked at acceptance is
     /// not a quiet notebook. A hold does not count: it is a pause somebody
@@ -350,7 +353,7 @@ fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> Str
     if ladder.reached(Collapse::Floor) {
         return out;
     }
-    render_review(&mut out, &inputs.review, inputs.identity.as_deref(), ladder);
+    render_review(&mut out, &inputs.review, ladder);
     render_held(&mut out, &inputs.held, ladder);
     render_ready(
         &mut out,
@@ -452,7 +455,10 @@ pub fn epic_line(epic: &Epic) -> String {
     }
 }
 
-fn render_review(out: &mut String, review: &[ReviewTask], identity: Option<&str>, ladder: Ladder) {
+/// What waits for acceptance, each with who holds it and whom it waits
+/// on, so the person a Task waits on finds it on their own dashboard and
+/// a reader sees whose turn it is.
+fn render_review(out: &mut String, review: &[ReviewTask], ladder: Ladder) {
     if review.is_empty() {
         return;
     }
@@ -460,22 +466,17 @@ fn render_review(out: &mut String, review: &[ReviewTask], identity: Option<&str>
         let _ = writeln!(out, "review: {}", review.len());
         return;
     }
-    let named: Vec<String> = review
-        .iter()
-        .map(|task| {
-            format!(
-                "{}{}",
-                task.id,
-                mark(&task.attribution, identity).unwrap_or_default()
-            )
-        })
-        .collect();
-    let _ = writeln!(
-        out,
-        "review[{}]: {} — waiting on a human",
-        review.len(),
-        encode::id_list(&named, SECTION_ROWS)
-    );
+    let _ = writeln!(out, "review[{}]{{id,taken-by,to}}:", review.len());
+    for task in review.iter().take(SECTION_ROWS) {
+        let _ = writeln!(
+            out,
+            "  {},{},{}",
+            task.id,
+            encode::absent_or(task.attribution.taken_by.as_deref()),
+            encode::absent_or(task.attribution.to.as_deref())
+        );
+    }
+    section_hint(out, review.len(), SECTION_ROWS);
 }
 
 /// What waits on purpose, each with the reason it waits for, so a session
@@ -565,18 +566,19 @@ fn render_questions(
 impl OpenQuestion {
     /// The questions table — header and the first `shown` rows, ages derived
     /// from `today_day`. The caller owns its own truncation hint. The row
-    /// carries who asked, because a doubt is answered by going to whoever
-    /// raised it.
+    /// carries who asked and whom, because a doubt is answered by going to
+    /// whoever raised it, or by whoever it was put to.
     #[must_use]
     pub fn table(rows: &[OpenQuestion], shown: usize, today_day: i64) -> String {
-        let mut out = format!("questions[{}]{{id,age,by,title}}:\n", rows.len());
+        let mut out = format!("questions[{}]{{id,age,by,to,title}}:\n", rows.len());
         for row in rows.iter().take(shown) {
             let _ = writeln!(
                 out,
-                "  {},{}d,{},{}",
+                "  {},{}d,{},{},{}",
                 row.id,
                 crate::reply::age_days(&row.created, today_day),
                 encode::absent_or(row.attribution.by.as_deref()),
+                encode::absent_or(row.attribution.to.as_deref()),
                 encode::quoted_if_delimited(&row.title)
             );
         }

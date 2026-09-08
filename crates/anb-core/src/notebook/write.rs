@@ -7,7 +7,10 @@ use crate::date;
 use crate::encode;
 use crate::grammar::{self, RecordFile};
 use crate::record::{Record, RecordType};
-use crate::request::{CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, Proof, REVIEW_BY, TAKEN_BY};
+use crate::reply::EdgeKind;
+use crate::request::{
+    CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, Proof, REVIEW_BY, TAKEN_BY, TO,
+};
 use crate::resolve::{path_stem, record_path, type_of};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -59,6 +62,9 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     if let Some(taken_by) = &draft.taken_by {
         guard_taken_by(draft.record_type, taken_by)?;
     }
+    if let Some(to) = &draft.to {
+        guard_addressee(draft.record_type, to)?;
+    }
     if draft.supersedes.is_some()
         && !matches!(draft.record_type, RecordType::Decision | RecordType::Note)
     {
@@ -96,12 +102,40 @@ fn guard_taken_by(record_type: RecordType, taken_by: &str) -> Result<(), Noteboo
     Ok(())
 }
 
+/// Whom a record waits on is one non-empty line, and only a Task or a
+/// Question waits on anyone; the eraser is `--clear`, not an empty name.
+pub(super) fn guard_addressee(record_type: RecordType, to: &str) -> Result<(), NotebookError> {
+    if !matches!(record_type, RecordType::Task | RecordType::Question) {
+        return Err(NotebookError::InvalidArgument {
+            reason: "to: applies only to a task or a question".to_owned(),
+        });
+    }
+    guard_single_line(TO, to)?;
+    if to.trim().is_empty() {
+        return Err(NotebookError::InvalidArgument {
+            reason: "to: must not be empty; --clear to erases it".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// A link is `<kind> <target>`, and its kind is a word of the notebook's
+/// own choosing — any but the ones the graph draws itself, which would
+/// make a declared relation read as a dependency, an origin or a mention.
 fn guard_link(link: &Link) -> Result<(), NotebookError> {
     guard_single_line("link", &link.target)?;
     if !grammar::is_link(&link.kind, &link.target) {
         let given = format!("{} {}", link.kind, link.target);
         return Err(NotebookError::InvalidArgument {
             reason: format!("link: `{}` is not `<kind> <target>`", given.trim_end()),
+        });
+    }
+    if EdgeKind::DRAWN_WORDS.contains(&link.kind.as_str()) {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!(
+                "link: `{}` is a relation the graph draws itself; choose another kind",
+                link.kind
+            ),
         });
     }
     Ok(())
@@ -122,7 +156,7 @@ pub(super) fn validate_edit(
 
     if edit.changes_nothing() {
         return invalid(
-            "edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, --taken-by, or --clear"
+            "edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, --taken-by, --to, or --clear"
                 .to_owned(),
         );
     }
@@ -156,6 +190,9 @@ pub(super) fn validate_edit(
     }
     if let Some(taken_by) = &edit.taken_by {
         guard_taken_by(record_type, taken_by)?;
+    }
+    if let Some(to) = &edit.to {
+        guard_addressee(record_type, to)?;
     }
     let mut cleared = Vec::new();
     for field in &edit.clear {
@@ -431,6 +468,7 @@ fn edited_fields(edit: &Edit, cleared: &[&'static str]) -> Vec<(&'static str, Op
             TAKEN_BY,
             edit.taken_by.as_deref().map(str::trim).map(str::to_owned),
         ),
+        (TO, edit.to.as_deref().map(str::trim).map(str::to_owned)),
     ]
     .into_iter()
     .filter_map(|(key, value)| value.map(|value| (key, Some(value))))
@@ -525,6 +563,7 @@ pub(super) fn render_draft(draft: &Draft, id: &str, by: Option<&str>, today: &st
         ("kind", &draft.kind),
         ("via", &draft.via),
         (TAKEN_BY, &draft.taken_by),
+        (TO, &draft.to),
         ("from", &draft.from),
         ("supersedes", &draft.supersedes),
     ] {

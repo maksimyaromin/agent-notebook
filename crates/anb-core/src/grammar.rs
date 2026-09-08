@@ -122,6 +122,7 @@ const FIELD_TABLE: &[FieldSpec] = &[
     optional("by", Form::Text),
     optional("via", Form::Text),
     optional("taken-by", Form::NonEmptyText),
+    optional("to", Form::NonEmptyText),
     optional("from", Form::Id),
     optional("tags", Form::TagList),
     repeatable("link", Form::Link),
