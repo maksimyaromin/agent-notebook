@@ -9,7 +9,7 @@ The [Release workflow](https://github.com/maksimyaromin/agent-notebook/blob/main
 
 The npm package `@supolka/agent-notebook` supplies a launcher that selects a native binary from an optional platform dependency. The packages cover macOS and Linux on x64 and arm64, and Windows on x64. npm downloads the packages during installation; no postinstall script fetches a binary.
 
-[GitHub releases](https://github.com/maksimyaromin/agent-notebook/releases) provide the binaries directly, one archive per platform, with `SHA256SUMS`. These do not require Node.js. The package and source versions agree, while a release tag names a day. The day's first release is `vYYYY.MM.DD`; each further release that day appends `.N`, counting from 1. So `v2026.09.06` shipped package version `0.1.1`, and `v2026.09.06.1`, the second release of that day, ships `0.2.0`.
+[GitHub releases](https://github.com/maksimyaromin/agent-notebook/releases) provide the binaries directly, one archive per platform, with `SHA256SUMS`. These do not require Node.js. The package and source versions agree and move by [semantic versioning](https://semver.org/): the patch number moves for a fix that changes no documented reply shape, flag or field; the minor number for anything added, a flag, a field, a line in a reply, a finding, or a changed default; the major number for a removal, a rename or a changed meaning of a command, a flag, a field, a state word or a reply shape, and only the maintainer moves it. A release tag names a day. The day's first release is `vYYYY.MM.DD`; each further release that day appends `.N`, counting from 1. So `v2026.09.06` shipped package version `0.1.1`, and `v2026.09.06.1`, the second release of that day, ships `0.2.0`.
 
 ## Prepare the release
 

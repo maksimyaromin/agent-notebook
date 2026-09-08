@@ -1318,14 +1318,17 @@ mod flat_lists {
         ));
         let mut storage = storage_with(&files);
         let mine = ok(&mut storage, &["ready", "--mine"]);
-        assert!(mine.starts_with("ready[22]{"), "{mine}");
+        assert!(
+            mine.starts_with("by: Maks — anb ready --team\nready[22]{"),
+            "{mine}"
+        );
         assert!(!mine.contains("task.hers"), "{mine}");
         assert_eq!(
             mine.lines().last().unwrap(),
             "  \u{2026} 2 more: anb ready --by Maks --all"
         );
         let lifted = ok(&mut storage, &["ready", "--by", "Maks", "--all"]);
-        assert_eq!(lifted.lines().count(), 23, "{lifted}");
+        assert_eq!(lifted.lines().count(), 24, "{lifted}");
     }
 
     #[test]
@@ -3471,6 +3474,10 @@ mod narrowed_listings {
 
     /// `--team` widens one call past a notebook whose config narrows every
     /// read to the caller's own; `--mine` narrows one call under the team's.
+    /// A read narrowed to one identity says whose it is, flag or config key
+    /// alike, and how to widen it: the key narrows by nothing the caller
+    /// typed, and a `count: 0` under it would otherwise read as an empty
+    /// notebook.
     #[test]
     fn the_scope_key_narrows_every_read_and_team_widens_one_call() {
         let mut storage = storage_with(&[
@@ -3481,6 +3488,7 @@ mod narrowed_listings {
         assert_snapshot!(
             ok(&mut storage, &["ready"]),
             @r"
+        by: Maks — anb ready --team
         ready[1]{id,priority,age,taken-by,title}:
           task.mine,-,4d,Maks,My record
         "
@@ -3496,9 +3504,34 @@ mod narrowed_listings {
         assert_snapshot!(
             ok(&mut storage, &["list", "--by", "Grace"]),
             @r"
+        by: Grace — anb list --team
         records[1]{id,state,priority,title}:
           task.hers,open,-,Her record
         "
+        );
+        assert_snapshot!(
+            ok(&mut storage, &["list", "--type", "question", "--tag", "parser"]),
+            @r"
+        by: Maks — anb list --type question --tag parser --team
+        count: 0
+        "
+        );
+        assert_eq!(
+            ok(&mut storage, &["--json", "list", "--type", "question"]),
+            r#"{"by":"Maks","count":0,"records":[]}"#
+        );
+        assert!(
+            ok(&mut storage, &["graph"]).starts_with("by: Maks — anb graph --team\nnodes[1]"),
+            "the graph says whose it is too"
+        );
+        assert!(
+            ok(&mut storage, &["graph", "--focus", "task.mine", "--full"])
+                .starts_with("by: Maks — anb graph --focus task.mine --depth 1 --full --team\n"),
+            "the widening call draws the same graph, everyone's"
+        );
+        assert!(
+            !ok(&mut storage, &["--json", "list", "--team"]).contains("\"by\""),
+            "everyone's read names nobody"
         );
     }
 

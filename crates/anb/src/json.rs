@@ -45,20 +45,32 @@ pub fn render(reply: &Reply) -> String {
                 dangling_mentions(&commented.dangling_mentions),
             ),
         ])),
-        Reply::Ready { rows, all, .. } => json!({
-            "count": rows.len(),
-            "ready": rows[..shown(rows.len(), *all)]
-                .iter()
-                .map(ready_row)
-                .collect::<Vec<Value>>(),
-        }),
-        Reply::Listing { rows, all, .. } => json!({
-            "count": rows.len(),
-            "records": rows[..shown(rows.len(), *all)]
-                .iter()
-                .map(listed_row)
-                .collect::<Vec<Value>>(),
-        }),
+        Reply::Ready { rows, filter, all } => Value::Object(fields([
+            ("by", json!(filter.by)),
+            ("count", json!(rows.len())),
+            (
+                "ready",
+                json!(
+                    rows[..shown(rows.len(), *all)]
+                        .iter()
+                        .map(ready_row)
+                        .collect::<Vec<Value>>()
+                ),
+            ),
+        ])),
+        Reply::Listing { rows, filter, all } => Value::Object(fields([
+            ("by", json!(filter.by)),
+            ("count", json!(rows.len())),
+            (
+                "records",
+                json!(
+                    rows[..shown(rows.len(), *all)]
+                        .iter()
+                        .map(listed_row)
+                        .collect::<Vec<Value>>()
+                ),
+            ),
+        ])),
         Reply::Viewed { view, all } => view_value(view, *all),
         Reply::Status { status, hook } => {
             if *hook {

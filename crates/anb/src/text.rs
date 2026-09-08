@@ -9,7 +9,9 @@
 
 use crate::json;
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, lifted, repair_command, shown, slice_command};
+use crate::reply::{
+    Reply, lifted, repair_command, shown, slice_command, whose_line, whose_slice_line,
+};
 use anb_core::date;
 use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
@@ -57,14 +59,24 @@ pub fn render(reply: &Reply, today: &str) -> String {
             already_mark(edge.already)
         ),
         Reply::Commented(commented) => commented_lines(commented),
-        Reply::Ready { rows, filter, all } => ready_table(
-            rows,
-            shown(rows.len(), *all),
-            today,
-            &lifted("ready", filter),
-        ),
+        Reply::Ready { rows, filter, all } => {
+            let mut out = whose_line("ready", filter).unwrap_or_default();
+            out.push_str(&ready_table(
+                rows,
+                shown(rows.len(), *all),
+                today,
+                &lifted("ready", filter),
+            ));
+            out
+        }
         Reply::Listing { rows, filter, all } => {
-            listing_table(rows, shown(rows.len(), *all), &lifted("list", filter))
+            let mut out = whose_line("list", filter).unwrap_or_default();
+            out.push_str(&listing_table(
+                rows,
+                shown(rows.len(), *all),
+                &lifted("list", filter),
+            ));
+            out
         }
         Reply::Viewed { view, all } => single_record(view, *all),
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
@@ -319,7 +331,7 @@ fn findings_table(findings: &[FileFinding], shown: usize) -> String {
 /// envelope and body under them.
 fn graph_blocks(graph: &Graph, full: bool, all: bool) -> String {
     let restore = format!("{} --all", slice_command(&graph.slice, full));
-    let mut out = String::new();
+    let mut out = whose_slice_line(&graph.slice, full).unwrap_or_default();
     tiles_block(&mut out, graph, all, &restore);
     edges_block(&mut out, &graph.edges(), all, &restore);
     if full {
