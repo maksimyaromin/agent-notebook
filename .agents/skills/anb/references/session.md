@@ -279,6 +279,7 @@ records[5]{id,state,priority,title}:
 
 ```
 $ anb list --mine
+by: Ada — anb list --team
 records[2]{id,state,priority,title}:
   decision.a-fence-body-is-opaque,active,-,A fence body is opaque
   decision.fences-never-nest,active,-,Fences never nest

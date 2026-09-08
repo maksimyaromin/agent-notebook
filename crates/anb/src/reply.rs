@@ -6,7 +6,7 @@
 use crate::cli::{AddArgs, CloseArgs, Command, EditArgs, Extent, GraphArgs, Narrowing, Whose};
 use crate::setup::{self, SetUp};
 use crate::skill::{self, Drift};
-use anb_core::encode::{ROW_BOUND, shell_word};
+use anb_core::encode::{ROW_BOUND, quoted_if_delimited, shell_word};
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, DebtSignal, Deleted, Draft, Edged,
     Edit, Edited, FileFinding, Filter, Focus, Graph, GraphSlice, Held, Link, ListedRecord,
@@ -66,6 +66,48 @@ fn narrowing_flags(filter: &Filter) -> String {
         out.push_str(" --archive");
     }
     out
+}
+
+/// Whose a narrowed listing is, and the call that widens it: `by: <name>
+/// — anb <verb> … --team`, the line Status opens with. A read narrowed to
+/// one identity by the `scope` key was narrowed by nothing the caller
+/// typed, so the reply says so itself, or an empty listing would read
+/// exactly like an empty notebook. `None` when the read is everyone's.
+#[must_use]
+pub fn whose_line(verb: &str, filter: &Filter) -> Option<String> {
+    let (by, widened) = widened(filter)?;
+    Some(by_line(
+        by,
+        &format!("anb {verb}{}", narrowing_flags(&widened)),
+    ))
+}
+
+/// [`whose_line`] for a graph: the widening call carries the focus and
+/// `--full` as well, so it draws the same graph as everyone's.
+#[must_use]
+pub fn whose_slice_line(slice: &GraphSlice, full: bool) -> Option<String> {
+    let (by, filter) = widened(&slice.filter)?;
+    let widened = GraphSlice {
+        filter,
+        focus: slice.focus.clone(),
+    };
+    Some(by_line(by, &slice_command(&widened, full)))
+}
+
+/// The identity a filter is narrowed to, beside the filter without it.
+fn widened(filter: &Filter) -> Option<(&str, Filter)> {
+    let by = filter.by.as_deref()?;
+    Some((
+        by,
+        Filter {
+            by: None,
+            ..filter.clone()
+        },
+    ))
+}
+
+fn by_line(by: &str, widening: &str) -> String {
+    format!("by: {} — {widening} --team\n", quoted_if_delimited(by))
 }
 
 /// The repair a finding names, as the command that runs it. A finding is
