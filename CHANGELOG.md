@@ -1,5 +1,21 @@
 # Changelog
 
+## agent-notebook v2026.09.08.3
+
+A link is an edge, and a record names whom it waits on. A schema Note could not enumerate the documents that declared it theirs, and under `scope: mine` the person a Question or a review waited on never saw it; this release closes both, under one ruling: the notebook is working memory an agent reads, not a channel, so each relation is one line in the skill and nothing more. The packages move to 0.7.0: the graph document is at version 4, the review section of Status is a table and the questions table gains a column, so a script built on any of those reads the entries below first.
+
+### New
+
+- **A link to a record id is an edge.** A `link` line whose target is a record id relates the two records under the link's kind, out of the record carrying the line into the record it names. `show` lists the carriers as `linked-by[N]: <id> (<kind>), …` and `--json` as `linked-by: {count, rows: [{id, kind}]}`; `graph` draws the edge under the link's own word, so a schema and its documents, or a rule and the drift that departs from it, are one picture; `list --for <id>`, `graph --for <id>` and `--focus` reach what links a record, as far as the links go. A link kind may be any word but `waits`, `born` and `mentions`, which the graph draws itself, and a record cannot link itself. The graph document is at `v` 4. (#80)
+- **A record names whom it waits on.** A `to` field on a Task or a Question, written by `add --to <name>`, `submit --to <name>` and `edit --to <name>`, erased by `edit --clear to`. The record waits on that person only while it waits at all, an open Question or a Task in review, so a Task taken back and submitted again waits on the same reviewer, and `add task --to` names the reviewer ahead of the first submit. `list --to <name>` narrows any listing by addressee and composes with every other flag. (#80)
+
+### Improved
+
+- **A narrowed Status shows what waits on you.** `--mine`, `--by <name>` and `scope: mine` answer with what a person holds, wrote or is waited on for, so a reviewer with nothing of their own still opens on the review that waits on them. The review section is `review[N]{id,taken-by,to}`, a table like `held`; the questions table is `questions[N]{id,age,by,to,title}`; a `list`, `ready` or Status row carries `to` in `--json` beside `by` and `taken-by`. (#80)
+- **The skill mentions the relations.** One sentence each: a `--link "<kind> <id>"` declares a relation of your own and the tool walks it back, and a Question put to a person or a review handed to one waits on them. The worked session puts a doubt to a colleague, hands the review over and opens the colleague's narrowed Status on both. (#80)
+
+Packages in this release: `@supolka/agent-notebook@0.7.0` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.08.2
 
 A Task belongs to who holds it. A team in which one person plans and the others do asked for reads that answer with the work each person holds, not with what each person wrote; this release is that ruling and the reads a planner and a developer need beside it. The packages move to 0.6.0: `--mine`, `--by <name>` and `scope: mine` no longer admit a Task by its author, and Status and a listing's JSON filter gain a field, so a script built on either reads the entries below first.
