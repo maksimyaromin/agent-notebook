@@ -38,7 +38,8 @@ pub enum Command {
     /// Create a record: `add task|decision|note|question "<title>"`. The
     /// notebook appears on first write.
     Add(AddArgs),
-    /// open | review → active: take the Task into work, or back into it.
+    /// open | review → active: take the Task into work, or back into it;
+    /// the Task records who took it, and one taken by someone else is refused.
     Start { id: String },
     /// active → review: hand the work to a human for acceptance.
     Submit { id: String },
@@ -74,7 +75,8 @@ pub enum Command {
         /// The Task no longer waited on.
         on: String,
     },
-    /// Append one entry to a Task's log, where the next session resumes.
+    /// Append one entry to a Task's log, where the next session resumes;
+    /// the entry is signed by the identity, `/` the tool when `--via` names one.
     Comment {
         id: String,
         text: String,
@@ -84,11 +86,18 @@ pub enum Command {
     },
     /// active → retired: end a Decision or Note that has no successor.
     Retire { id: String },
-    /// The dispatch queue: open, unblocked, unheld Tasks, most urgent first.
+    /// The dispatch queue: open, unblocked, unheld Tasks, most urgent first,
+    /// each naming who took it when someone did.
     Ready {
         /// Only work this record's scope reaches: an epic's own queue.
         #[arg(long = "for", value_name = "ID")]
         scope: Option<String>,
+        /// Only Tasks this identity created or took.
+        #[arg(long, value_name = "NAME", conflicts_with = "mine")]
+        by: Option<String>,
+        /// Only your own: `--by` with the identity the writers sign with.
+        #[arg(long)]
+        mine: bool,
         /// Every row; the listing is bounded by default.
         #[arg(long)]
         all: bool,
@@ -98,6 +107,12 @@ pub enum Command {
         /// Only records this one's scope reaches: an epic and its work.
         #[arg(long = "for", value_name = "ID")]
         scope: Option<String>,
+        /// Only records this identity created or took.
+        #[arg(long, value_name = "NAME", conflicts_with = "mine")]
+        by: Option<String>,
+        /// Only your own: `--by` with the identity the writers sign with.
+        #[arg(long)]
+        mine: bool,
         /// Every row; the listing is bounded by default.
         #[arg(long)]
         all: bool,
@@ -133,7 +148,8 @@ pub enum Command {
     Delete { id: String },
     /// Correct a live record's own fields; state stays a command's move.
     Edit(EditArgs),
-    /// Find records by substring, the archive included.
+    /// Find records by substring over id, title, tags, people and body, the
+    /// archive included.
     Search {
         query: String,
         /// Every row; the listing is bounded by default.
@@ -203,7 +219,7 @@ pub struct AddArgs {
     /// input. Refused beside --body.
     #[arg(long = "body-file", value_name = "PATH", conflicts_with = "body")]
     pub body_file: Option<String>,
-    /// The accountable identity; omitted, git identity fills it.
+    /// The accountable identity; omitted, `ANB_BY` or the git identity fills it.
     #[arg(long)]
     pub by: Option<String>,
     /// The acting agent tool.
@@ -256,8 +272,11 @@ pub struct EditArgs {
     /// The explicit resurfacing date.
     #[arg(long, value_name = "DATE")]
     pub review_by: Option<String>,
-    /// The optional field to erase: `from`, `priority`, or `review-by`;
-    /// repeatable.
+    /// Who took the task: the hand-over that lets another identity start it.
+    #[arg(long = "taken-by", value_name = "NAME")]
+    pub taken_by: Option<String>,
+    /// The optional field to erase: `from`, `priority`, `review-by`, or
+    /// `taken-by`; repeatable.
     #[arg(long = "clear", value_name = "FIELD")]
     pub clear: Vec<String>,
 }

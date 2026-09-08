@@ -10,16 +10,16 @@ description: 'How Status is assembled under its budget, what each section carrie
 Sections print in this order when present:
 
 1. `ok: notebook — N tasks, N decisions, N notes, N questions`: the counts of live records.
-2. `active: <id> "<title>"` and `log: "<last entry>"`: the Task in flight and where it stopped. A held Task is not in flight and never prints here.
+2. `active: <id> "<title>"` and `log: "<last entry>"`: the Tasks in flight and where the first stopped. Your own come first, by the identity `ANB_BY` or the git `user.name` names; a Task someone else took carries that name after its title, as `active: <id> "<title>" (Grace)`, and a Task nobody is named on carries nothing. A held Task is not in flight and never prints here.
 3. `review[N]`: ids of Tasks awaiting human acceptance.
 4. `held[N]{id,reason,until}`: paused Tasks with their reasons.
 5. `rules[N]`: live Decisions of kind `rule`, id and title.
-6. `ready[N]{id,priority,age,title}`: the dispatch queue.
+6. `ready[N]{id,priority,age,taken-by,title}`: the dispatch queue, `taken-by` naming who took a Task already taken.
 7. `epics[N]`: each hub as `<id>: closed/total closed — <next>`, the next Task being the top of its own ready queue, or `nothing ready`.
 8. `debt[N]`: the aging signals below.
 9. `budget: ~N/M tokens` with what was cut, or `(no ceiling)`.
 
-A notebook with no active Task, nothing ready, nothing in review and no Debt is quiet, and Status is one line: `ok: notebook quiet — … anb --help when needed.` A hold alone does not trigger the full summary. A stale hold does, through Debt.
+A notebook with no active Task, nothing ready, nothing in review, no Debt and no standing rule is quiet, and Status is one line: `ok: notebook quiet — … anb --help when needed.` A rule alone opens the full summary, since a session must respect it before any work, and a team that agreed how to work has not always filed its first Task. A hold alone does not trigger the full summary. A stale hold does, through Debt.
 
 ## The budget
 
@@ -57,4 +57,4 @@ External proof checks use the filesystem for report paths and git for commit pro
 
 ## JSON
 
-`anb --json status` carries the same sections as objects: `quiet`, `counts`, `active`, `review`, `held`, `rules`, `ready`, `epics`, `debt`, each list as `{count, rows}`. A Debt row carries `code`, the fields the table above names for its class, and `line`, the text the plain rendering prints. A cited record is `{id, by, via}`, with `by` and `via` absent when the record carries none; the `pair` of a `may-conflict` row lists the two in the order the line prints them.
+`anb --json status` carries the same sections as objects: `quiet`, `counts`, `active`, `review`, `held`, `rules`, `ready`, `epics`, `debt`, each list as `{count, rows}`. An `active` or `ready` row carries `by` and `taken-by` when the record has them; the order of `active` is the text's. A Debt row carries `code`, the fields the table above names for its class, and `line`, the text the plain rendering prints. A cited record is `{id, by, via}`, with `by` and `via` absent when the record carries none; the `pair` of a `may-conflict` row lists the two in the order the line prints them.

@@ -9,7 +9,7 @@
 
 use crate::json;
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, lifted, repair_command, shown, slice_command};
+use crate::reply::{Reply, lifted, repair_command, shell_quoted, shown, slice_command};
 use anb_core::date;
 use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
@@ -57,17 +57,17 @@ pub fn render(reply: &Reply, today: &str) -> String {
             already_mark(edge.already)
         ),
         Reply::Commented(commented) => commented_lines(commented),
-        Reply::Ready { rows, scope, all } => ready_table(
+        Reply::Ready { rows, filter, all } => ready_table(
             rows,
             shown(rows.len(), *all),
             today,
-            &lifted("ready", scope.as_deref()),
+            &lifted("ready", filter),
         ),
-        Reply::Listing { rows, scope, all } => listing_table(
+        Reply::Listing { rows, filter, all } => listing_table(
             rows,
             shown(rows.len(), *all),
             "records",
-            &lifted("list", scope.as_deref()),
+            &lifted("list", filter),
         ),
         Reply::Viewed { view, all } => single_record(view, *all),
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
@@ -461,19 +461,6 @@ fn overview_page(overview: &Overview, all: bool) -> String {
         let _ = writeln!(out, "archive: {}", counts_phrase(archived));
     }
     out
-}
-
-/// The query as one shell word, single-quoted so every character stays
-/// literal and the truncation hint stays executable.
-fn shell_quoted(query: &str) -> String {
-    let bare = query
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    if bare && !query.is_empty() {
-        query.to_owned()
-    } else {
-        format!("'{}'", query.replace('\'', "'\\''"))
-    }
 }
 
 fn truncation_hint(out: &mut String, total: usize, shown: usize, restore: &str) {

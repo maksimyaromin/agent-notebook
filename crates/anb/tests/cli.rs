@@ -12,7 +12,7 @@ use insta::assert_snapshot;
 use std::fmt::Write as _;
 
 const TODAY: &str = "2026-08-28";
-const GIT_IDENTITY: &str = "Maks";
+const IDENTITY: &str = "Maks";
 
 /// Parse and run one command line; `Ok` is stdout, `Err` is the payload a
 /// failure prints.
@@ -64,7 +64,7 @@ fn run_behind(
     let subject = anb::recovery::subject(&cli.command);
     let wants_json = cli.json;
     let host = Host {
-        git_by: || Some(GIT_IDENTITY.to_owned()),
+        identity: || Some(IDENTITY.to_owned()),
         read_file,
         lost_proofs: &nothing_lost,
         user_notebook,
@@ -89,12 +89,24 @@ fn run_behind(
 /// vary.
 fn undated_host() -> Host<'static> {
     Host {
-        git_by: || None,
+        identity: || None,
         read_file: &missing_report,
         lost_proofs: &nothing_lost,
         user_notebook: None,
         project_dir: std::path::Path::new("."),
         today: "not-a-date",
+    }
+}
+
+/// The host of a shell that knows nobody: no `ANB_BY`, no git identity.
+fn anonymous_host() -> Host<'static> {
+    Host {
+        identity: || None,
+        read_file: &missing_report,
+        lost_proofs: &nothing_lost,
+        user_notebook: None,
+        project_dir: std::path::Path::new("."),
+        today: TODAY,
     }
 }
 
@@ -628,13 +640,36 @@ mod task_cycle_replies {
         );
         let written = anb_core::Storage::read(&storage, "tasks/task.demo.md").unwrap();
         assert!(
-            written.ends_with("- 2026-08-28 claude-code: parser done, tests next\n"),
+            written.ends_with("- 2026-08-28 Maks/claude-code: parser done, tests next\n"),
             "{written}"
         );
     }
 
+    /// The refusal names who took the Task and offers the hand-over as a
+    /// template: it is decided by a person, never filled in.
     #[test]
-    fn a_comment_without_via_signs_as_the_git_identity() {
+    fn starting_another_persons_task_is_a_recovery_payload() {
+        let mut storage = storage_with(&[open_task(
+            "task.demo",
+            "A demo record",
+            &["taken-by: Grace"],
+        )]);
+        assert_snapshot!(
+            refused(&mut storage, &["start", "task.demo"]),
+            @r#"
+        error[taken]: `task.demo` is taken by Grace
+        try: anb edit task.demo --taken-by "<name>"
+        try: anb show task.demo
+        "#
+        );
+        assert_eq!(
+            refused(&mut storage, &["start", "task.demo", "--json"]),
+            r#"{"error":"taken","message":"`task.demo` is taken by Grace","try":["anb edit task.demo --taken-by \"<name>\"","anb show task.demo"]}"#
+        );
+    }
+
+    #[test]
+    fn a_comment_without_via_signs_as_the_identity() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         ok(&mut storage, &["comment", "task.demo", "stopped here"]);
         let written = anb_core::Storage::read(&storage, "tasks/task.demo.md").unwrap();
@@ -1141,11 +1176,88 @@ mod flat_lists {
         assert_snapshot!(
             ok(&mut worked_example(), &["ready"]),
             @r#"
-        ready[3]{id,priority,age,title}:
-          task.parser-fences,1,2d,Grammar parser accepts fenced envelopes
-          task.check-corpus,2,9d,Negative corpus wired into CI
-          task.status-budget,2,4d,"Status degrades sections, keeps Budget"
+        ready[3]{id,priority,age,taken-by,title}:
+          task.parser-fences,1,2d,-,Grammar parser accepts fenced envelopes
+          task.check-corpus,2,9d,-,Negative corpus wired into CI
+          task.status-budget,2,4d,-,"Status degrades sections, keeps Budget"
         "#
+        );
+    }
+
+    /// A reader picking work sees who a Task is taken before the
+    /// pick; a Task nobody holds shows `-`.
+    #[test]
+    fn the_queue_names_who_a_task_is_spoken_for() {
+        let mut storage = storage_with(&[
+            open_task("task.free", "Open to anyone", &[]),
+            open_task("task.hers", "Already taken", &["taken-by: Grace"]),
+        ]);
+        assert_snapshot!(
+            ok(&mut storage, &["ready"]),
+            @r"
+        ready[2]{id,priority,age,taken-by,title}:
+          task.free,-,4d,-,Open to anyone
+          task.hers,-,4d,Grace,Already taken
+        "
+        );
+    }
+
+    /// `--mine` is `--by` with the identity the writers sign with, so the
+    /// hint that lifts the bound spells the name out and stays runnable.
+    #[test]
+    fn mine_narrows_to_the_callers_own_and_the_hint_carries_the_name() {
+        let mut files: Vec<(String, String)> = (0..22)
+            .map(|n| open_task(&format!("task.m{n:02}"), "A demo record", &["by: Maks"]))
+            .collect();
+        files.push(open_task("task.hers", "Somebody else's", &["by: Grace"]));
+        let mut storage = storage_with(&files);
+        let mine = ok(&mut storage, &["ready", "--mine"]);
+        assert!(mine.starts_with("ready[22]{"), "{mine}");
+        assert!(!mine.contains("task.hers"), "{mine}");
+        assert_eq!(
+            mine.lines().last().unwrap(),
+            "  \u{2026} 2 more: anb ready --by Maks --all"
+        );
+        let lifted = ok(&mut storage, &["ready", "--by", "Maks", "--all"]);
+        assert_eq!(lifted.lines().count(), 23, "{lifted}");
+    }
+
+    #[test]
+    fn a_name_with_a_space_travels_in_the_hint_as_one_shell_word() {
+        let files: Vec<(String, String)> = (0..21)
+            .map(|n| {
+                open_task(
+                    &format!("task.g{n:02}"),
+                    "A demo record",
+                    &["by: Grace Hopper"],
+                )
+            })
+            .collect();
+        let mut storage = storage_with(&files);
+        let listed = ok(&mut storage, &["list", "--by", "Grace Hopper"]);
+        assert_eq!(
+            listed.lines().last().unwrap(),
+            "  \u{2026} 1 more: anb list --by 'Grace Hopper' --all"
+        );
+    }
+
+    /// An empty answer would read as "nothing is yours"; a host that knows
+    /// nobody has nothing to narrow by and says so.
+    #[test]
+    fn mine_without_an_identity_is_a_recovery_payload() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        let cli = Cli::try_parse_from(["anb", "list", "--mine"]).unwrap();
+        let error = execute(cli.command, &mut storage, anonymous_host()).unwrap_err();
+        assert_eq!(
+            text::render_error(
+                &error,
+                &anb::recovery::subject(
+                    &Cli::try_parse_from(["anb", "list", "--mine"])
+                        .unwrap()
+                        .command
+                )
+            ),
+            "error[invalid-argument]: mine: no identity to match; set git user.name or ANB_BY\n"
         );
     }
 
@@ -1438,6 +1550,86 @@ mod session_status {
         );
     }
 
+    /// The reader's own Task leads and carries the log line, whoever
+    /// touched what last; the other person's line says whose it is, on
+    /// both renderings.
+    #[test]
+    fn another_persons_active_line_carries_their_name_and_yields_the_lead() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hers.md".to_owned(),
+                record_file(
+                    "task.hers",
+                    "task",
+                    "active",
+                    "Her record",
+                    &["taken-by: Grace"],
+                    "- 2026-08-25 Grace: her stop\n",
+                )
+                .replace("updated: 2026-08-25", "updated: 2026-08-27"),
+            ),
+            (
+                "tasks/task.mine.md".to_owned(),
+                record_file(
+                    "task.mine",
+                    "task",
+                    "active",
+                    "My record",
+                    &["taken-by: Maks"],
+                    "- 2026-08-25 Maks: my stop\n",
+                ),
+            ),
+        ]);
+        assert_snapshot!(
+            ok(&mut storage, &["status", "--budget", "0"]),
+            @r#"
+        ok: notebook — 2 tasks, 0 decisions, 0 notes, 0 questions
+        active: task.mine "My record"
+        log: "- 2026-08-25 Maks: my stop"
+        active: task.hers "Her record" (Grace)
+        budget: ~57 tokens (no ceiling)
+        "#
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
+        assert_eq!(
+            value["active"]["rows"][1],
+            serde_json::json!({"id": "task.hers", "title": "Her record", "taken-by": "Grace"})
+        );
+    }
+
+    /// The hook is what an unattended session reads, so the law reaches it
+    /// with no Task in the notebook.
+    #[test]
+    fn a_rule_alone_reaches_the_dashboard_and_the_hook() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.gates.md".to_owned(),
+            record_file(
+                "decision.gates",
+                "decision",
+                "active",
+                "The developer opens each gate",
+                &["kind: rule"],
+                "",
+            ),
+        )]);
+        assert_snapshot!(
+            ok(&mut storage, &["status", "--budget", "0"]),
+            @r#"
+        ok: notebook — 0 tasks, 1 decision, 0 notes, 0 questions
+        rules[1]:
+          decision.gates: "The developer opens each gate"
+        budget: ~45 tokens (no ceiling)
+        "#
+        );
+        let payload: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--hook"])).unwrap();
+        let context = payload["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(context.contains("rules[1]:"), "{context}");
+    }
+
     #[test]
     fn a_quiet_notebook_is_one_line() {
         let mut storage = storage_with(&[(
@@ -1529,11 +1721,15 @@ mod json_surface {
     fn a_ready_row_names_its_fields_and_omits_what_is_unset() {
         let mut storage = storage_with(&[
             open_task("task.plain", "Untriaged work", &[]),
-            open_task("task.urgent", "Triaged work", &["priority: 1"]),
+            open_task(
+                "task.urgent",
+                "Triaged work",
+                &["by: Maks", "taken-by: Grace", "priority: 1"],
+            ),
         ]);
         assert_eq!(
             ok(&mut storage, &["ready", "--json"]),
-            r#"{"count":2,"ready":[{"id":"task.urgent","priority":1,"created":"2026-08-24","title":"Triaged work"},{"id":"task.plain","created":"2026-08-24","title":"Untriaged work"}]}"#
+            r#"{"count":2,"ready":[{"id":"task.urgent","priority":1,"created":"2026-08-24","by":"Maks","taken-by":"Grace","title":"Triaged work"},{"id":"task.plain","created":"2026-08-24","title":"Untriaged work"}]}"#
         );
     }
 
@@ -1952,6 +2148,17 @@ fn every_command_the_tool_offers_can_be_typed_back() {
             | anb_core::Repair::Restore => {}
         }
     }
+    let taken = anb::recovery::Recovery::new(
+        &anb_core::NotebookError::Taken {
+            id: "task.demo".to_owned(),
+            taken_by: "Grace".to_owned(),
+        },
+        &anb::recovery::Subject {
+            verb: "start",
+            id: Some("task.demo".to_owned()),
+            record_type: None,
+        },
+    );
     let command = Cli::command();
     let offered = command
         .get_subcommands()
@@ -1961,7 +2168,8 @@ fn every_command_the_tool_offers_can_be_typed_back() {
             repairs
                 .iter()
                 .map(|repair| anb::reply::repair_command(repair, "tasks/task.demo.md")),
-        );
+        )
+        .chain(taken.tries.iter().cloned());
 
     let mut checked = 0;
     for shape in offered {
@@ -2106,6 +2314,29 @@ mod maintenance_replies {
         assert_snapshot!(ok(&mut storage, &["check"]), @"count: 0");
     }
 
+    /// Only a Task is taken; on any other record `taken-by` is an orphan
+    /// `edit` erases, and the finding names that eraser.
+    #[test]
+    fn taken_by_on_another_type_names_its_eraser() {
+        let mut storage = storage_with(&[(
+            "notes/note.stray.md".to_owned(),
+            record_file(
+                "note.stray",
+                "note",
+                "active",
+                "A demo record",
+                &["taken-by: Grace"],
+                "",
+            ),
+        )]);
+        assert_eq!(
+            first_repair(&mut storage).as_deref(),
+            Some("anb edit note.stray --clear taken-by")
+        );
+        ok(&mut storage, &["edit", "note.stray", "--clear", "taken-by"]);
+        assert_snapshot!(ok(&mut storage, &["check"]), @"count: 0");
+    }
+
     /// A repair is a command that runs. A line only a Task verb erases,
     /// standing on a record of another type, names no repair — one that did
     /// would send an agent straight into a `wrong-type` refusal.
@@ -2210,7 +2441,7 @@ mod maintenance_replies {
             cli.command,
             &mut storage,
             Host {
-                git_by: || None,
+                identity: || None,
                 read_file: &missing_report,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
@@ -2240,7 +2471,7 @@ mod maintenance_replies {
             cli.command,
             &mut storage,
             Host {
-                git_by: || None,
+                identity: || None,
                 read_file: &missing_report,
                 lost_proofs: &nothing_lost,
                 user_notebook: None,
@@ -2512,8 +2743,8 @@ mod maintenance_replies {
         assert_snapshot!(
             ok(&mut storage, &["ready", "--for", "task.epic-auth"]),
             @r"
-        ready[1]{id,priority,age,title}:
-          task.auth-tokens,-,4d,Token rotation
+        ready[1]{id,priority,age,taken-by,title}:
+          task.auth-tokens,-,4d,-,Token rotation
         "
         );
     }
@@ -2598,7 +2829,7 @@ mod maintenance_replies {
         assert_snapshot!(
             refused(&mut storage, &["edit", "task.demo", "--clear", "state"]),
             @r#"
-        error[invalid-argument]: clear: `state` is not an erasable field; from, priority, review-by
+        error[invalid-argument]: clear: `state` is not an erasable field; from, priority, review-by, taken-by
         try: anb edit task.demo --title "<title>"
         "#
         );
@@ -2794,7 +3025,7 @@ mod maintenance_replies {
         assert_snapshot!(
             refused(&mut storage, &["edit", "task.demo"]),
             @r#"
-        error[invalid-argument]: edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, or --clear
+        error[invalid-argument]: edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, --taken-by, or --clear
         try: anb edit task.demo --title "<title>"
         "#
         );

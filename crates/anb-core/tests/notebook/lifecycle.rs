@@ -45,6 +45,107 @@ mod task_cycle {
         );
     }
 
+    /// Several people work one notebook, and `start` is the verb that
+    /// takes work: the name of who took it lands on the Task, so the next
+    /// reader of the file, the queue or the dashboard sees whose it is.
+    #[test]
+    fn start_records_who_took_the_task() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
+        let reply = Notebook::new(&mut storage)
+            .with_identity(Some("Ada"))
+            .start("task.demo", TODAY)
+            .unwrap();
+        assert_eq!(reply, moved("task.demo", "open", "active"));
+        assert_eq!(
+            storage.read("tasks/task.demo.md").unwrap(),
+            "---\nid: task.demo\ntype: task\nstate: active\ntitle: A demo record\ntaken-by: Ada\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\n"
+        );
+    }
+
+    /// An open Task that already names who took it — one reopened after a
+    /// close, or handed over with `edit` — is theirs to start again, and
+    /// the line stands as written.
+    #[test]
+    fn who_took_a_task_starts_it_again() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &task_file("open", &["taken-by: Grace"]),
+        )]);
+        let reply = Notebook::new(&mut storage)
+            .with_identity(Some("Grace"))
+            .start("task.demo", TODAY)
+            .unwrap();
+        assert_eq!(reply, moved("task.demo", "open", "active"));
+        assert!(
+            storage
+                .read("tasks/task.demo.md")
+                .unwrap()
+                .contains("\ntaken-by: Grace\n")
+        );
+    }
+
+    /// Two people cannot work one Task by accident: a Task someone took is
+    /// refused to everyone else, the anonymous included, and the refusal
+    /// names who took it. Handing it over is a correction made on purpose.
+    #[test]
+    fn a_task_someone_else_took_is_refused_to_start() {
+        let text = task_file("open", &["taken-by: Grace"]);
+        for identity in [Some("Ada"), None] {
+            let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
+            let error = Notebook::new(&mut storage)
+                .with_identity(identity)
+                .start("task.demo", TODAY)
+                .unwrap_err();
+            assert_eq!(
+                error,
+                NotebookError::Taken {
+                    id: "task.demo".to_owned(),
+                    taken_by: "Grace".to_owned(),
+                },
+                "{identity:?}"
+            );
+            assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+        }
+    }
+
+    /// A replay is safe only for the one who made the move. Another
+    /// identity starting an active Task is not repeating its own start,
+    /// and `already` would tell it the work is its own.
+    #[test]
+    fn a_start_against_another_persons_active_task_is_refused_not_replayed() {
+        let text = task_file("active", &["taken-by: Grace"]);
+        let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
+        let notebook = Notebook::new(&mut storage);
+        assert!(matches!(
+            notebook
+                .with_identity(Some("Ada"))
+                .start("task.demo", TODAY)
+                .unwrap_err(),
+            NotebookError::Taken { .. }
+        ));
+        let replay = Notebook::new(&mut storage)
+            .with_identity(Some("Grace"))
+            .start("task.demo", TODAY)
+            .unwrap();
+        assert!(replay.already);
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+    }
+
+    /// A Task nobody can start is refused for its state, whoever took it:
+    /// the name on it is not what stands in the way.
+    #[test]
+    fn a_settled_task_is_refused_for_its_state_before_who_took_it() {
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            &task_file("closed", &["taken-by: Grace"]),
+        )]);
+        let error = Notebook::new(&mut storage)
+            .with_identity(Some("Ada"))
+            .start("task.demo", TODAY)
+            .unwrap_err();
+        assert!(matches!(error, NotebookError::InvalidTransition { .. }));
+    }
+
     #[test]
     fn close_stamps_the_close_date_and_the_proof_link() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
@@ -244,7 +345,7 @@ mod task_cycle {
     fn a_close_with_a_report_lands_it_as_a_note_the_task_links() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let closed = Notebook::new(&mut storage)
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap();
 
         let note = closed.report_note.expect("the close ingested a report");
@@ -270,7 +371,7 @@ mod task_cycle {
     fn a_report_takes_its_id_from_the_task_id_not_its_title() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let closed = Notebook::new(&mut storage)
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap();
         assert_eq!(
             closed.report_note.as_deref(),
@@ -296,7 +397,7 @@ mod task_cycle {
             &record_file(id, "task", "active", &[], ""),
         )]);
         let closed = Notebook::new(&mut storage)
-            .close_with_report(id, REPORT, None, TODAY)
+            .close_with_report(id, REPORT, TODAY)
             .unwrap();
         assert_eq!(
             closed.report_note.as_deref(),
@@ -309,10 +410,10 @@ mod task_cycle {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let mut notebook = Notebook::new(&mut storage);
         notebook
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap();
         let replay = notebook
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap();
 
         assert!(replay.transition.already);
@@ -343,7 +444,7 @@ mod task_cycle {
             .id;
 
         let closed = Notebook::new(&mut storage)
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap();
         assert_eq!(closed.report_note.as_deref(), Some(orphan.as_str()));
         assert_eq!(
@@ -358,14 +459,14 @@ mod task_cycle {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let mut notebook = Notebook::new(&mut storage);
         let first = notebook
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap()
             .report_note
             .unwrap();
         notebook.reopen("task.demo", TODAY).unwrap();
         notebook.start("task.demo", TODAY).unwrap();
         let second = notebook
-            .close_with_report("task.demo", "# What shipped next\n", None, TODAY)
+            .close_with_report("task.demo", "# What shipped next\n", TODAY)
             .unwrap()
             .report_note
             .unwrap();
@@ -388,7 +489,7 @@ mod task_cycle {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let mut notebook = Notebook::new(&mut storage);
         let filed = notebook
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap()
             .report_note
             .unwrap();
@@ -398,7 +499,7 @@ mod task_cycle {
         notebook.start("task.demo", TODAY).unwrap();
 
         let again = notebook
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap()
             .report_note
             .unwrap();
@@ -414,7 +515,7 @@ mod task_cycle {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let before = storage.read("tasks/task.demo.md").unwrap();
         Notebook::new(&mut storage)
-            .close_with_report("task.demo", "  \n", None, TODAY)
+            .close_with_report("task.demo", "  \n", TODAY)
             .unwrap_err();
         assert_eq!(storage.list("notes").unwrap(), Vec::<String>::new());
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), before);
@@ -429,7 +530,7 @@ mod task_cycle {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let closed = Notebook::new(&mut storage)
             .with_user(Some(&user))
-            .close_with_report("task.demo", "follows note.practice\n", None, TODAY)
+            .close_with_report("task.demo", "follows note.practice\n", TODAY)
             .unwrap();
         assert_eq!(closed.dangling_mentions, Vec::<String>::new());
     }
@@ -438,12 +539,7 @@ mod task_cycle {
     fn a_report_citing_an_unwritten_id_carries_the_quotation_nudge() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
         let closed = Notebook::new(&mut storage)
-            .close_with_report(
-                "task.demo",
-                "follows from task.never-written\n",
-                None,
-                TODAY,
-            )
+            .close_with_report("task.demo", "follows from task.never-written\n", TODAY)
             .unwrap();
         assert_eq!(closed.dangling_mentions, vec!["task.never-written"]);
     }
@@ -468,7 +564,7 @@ mod task_cycle {
             ),
         ]);
         let closed = Notebook::new(&mut storage)
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap();
 
         assert_ne!(
@@ -493,7 +589,7 @@ mod task_cycle {
     fn a_report_close_on_a_task_that_cannot_close_writes_no_note() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         Notebook::new(&mut storage)
-            .close_with_report("task.demo", REPORT, None, TODAY)
+            .close_with_report("task.demo", REPORT, TODAY)
             .unwrap_err();
         assert_eq!(
             storage.list("notes").unwrap(),
@@ -803,7 +899,27 @@ mod task_log {
         assert!(!reply.already);
         assert_eq!(
             storage.read("tasks/task.demo.md").unwrap(),
-            "---\nid: task.demo\ntype: task\nstate: active\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\n- 2026-08-27 claude-code: parser done, tests next\n"
+            "---\nid: task.demo\ntype: task\nstate: active\ntitle: A demo record\ncreated: 2026-08-24\nupdated: 2026-08-27\n---\n- 2026-08-27 -/claude-code: parser done, tests next\n"
+        );
+    }
+
+    /// The trail names the person and the hand that wrote for them, in the
+    /// form a cited record is attributed in, so the human never disappears
+    /// behind the tool.
+    #[test]
+    fn an_entry_is_signed_by_the_identity_and_the_acting_hand() {
+        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("active", &[]))]);
+        let mut notebook = Notebook::new(&mut storage).with_identity(Some("Ada"));
+        notebook
+            .comment("task.demo", Some("claude-code"), "with a hand", TODAY)
+            .unwrap();
+        notebook
+            .comment("task.demo", None, "by hand", TODAY)
+            .unwrap();
+        assert!(
+            storage.read("tasks/task.demo.md").unwrap().ends_with(
+                "- 2026-08-27 Ada/claude-code: with a hand\n- 2026-08-27 Ada: by hand\n"
+            )
         );
     }
 

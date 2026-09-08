@@ -17,7 +17,7 @@
 use super::{Notebook, NotebookError, error, write};
 use crate::finding::Finding;
 use crate::grammar::RecordFile;
-use crate::record::{Record, RecordType, not_utf8_finding};
+use crate::record::{Record, RecordType, TaskState, not_utf8_finding};
 use crate::resolve::record_path;
 use crate::storage::StorageError;
 
@@ -195,6 +195,13 @@ impl LoadedLive {
     /// always has one.
     pub(super) fn state_word(&self) -> &str {
         self.record.state().expect("a clean record carries a state")
+    }
+
+    /// The state of a record loaded as a Task; a clean Task's state word is
+    /// always one of the enum's.
+    pub(super) fn task_state(&self) -> TaskState {
+        TaskState::from_word(self.state_word())
+            .expect("a clean task carries a state from the task enum")
     }
 }
 

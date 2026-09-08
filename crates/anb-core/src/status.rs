@@ -14,8 +14,8 @@
 //! carries the command that restores it.
 
 use crate::debt::DebtSignal;
-use crate::encode::{self, quoted_line_text};
-use crate::reply::{Counts, Epic, ReadyTask};
+use crate::encode::{self, quoted_if_delimited, quoted_line_text};
+use crate::reply::{Attribution, Counts, Epic, ReadyTask};
 use crate::tokens::estimate_tokens;
 use std::fmt::Write as _;
 
@@ -56,11 +56,12 @@ impl Budget {
 }
 
 /// An active Task on the dashboard: the `active:` line, plus the last
-/// log line for the one most recently touched.
+/// log line for the one the session resumes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveTask {
     pub id: String,
     pub title: String,
+    pub attribution: Attribution,
     pub log: Option<String>,
 }
 
@@ -102,6 +103,9 @@ pub struct Status {
 }
 
 pub(crate) struct StatusInputs {
+    /// Whose dashboard this is; an active line another identity took is
+    /// marked with that identity.
+    pub identity: Option<String>,
     pub counts: Counts,
     pub active: Vec<ActiveTask>,
     pub review: Vec<String>,
@@ -115,15 +119,19 @@ pub(crate) struct StatusInputs {
 
 impl StatusInputs {
     /// The gate: signal is work in motion, work waiting on a human,
-    /// dispatchable work, or decay. Review counts deliberately: a Task
-    /// parked at acceptance is not a quiet notebook. A hold does not count:
-    /// it is a pause somebody chose, and a hold gone stale is Debt's to
-    /// raise.
+    /// dispatchable work, decay, or a standing rule. Review counts
+    /// deliberately: a Task parked at acceptance is not a quiet notebook.
+    /// A rule counts because a session must respect it before it does any
+    /// work, and a notebook holding rules and no Task is a team that
+    /// agreed how to work before filing its first Task. A hold does not
+    /// count: it is a pause somebody chose, and a hold gone stale is
+    /// Debt's to raise.
     fn has_signal(&self) -> bool {
         !self.active.is_empty()
             || !self.review.is_empty()
             || !self.ready.is_empty()
             || !self.debt.is_empty()
+            || !self.rules.is_empty()
     }
 
     fn has_log(&self) -> bool {
@@ -324,7 +332,7 @@ fn budget_line(spent: u32, budget: Budget, cut: Option<&str>) -> String {
 
 fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> String {
     let mut out = format!("ok: notebook — {}\n", counts_phrase(&inputs.counts));
-    render_active(&mut out, &inputs.active, ladder);
+    render_active(&mut out, &inputs.active, inputs.identity.as_deref(), ladder);
     if ladder.reached(Collapse::Floor) {
         return out;
     }
@@ -344,8 +352,10 @@ fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> Str
 
 /// What is in motion, and where the first of it stopped. The floor keeps
 /// that one line — a session cannot resume without it — and counts the
-/// rest.
-fn render_active(out: &mut String, active: &[ActiveTask], ladder: Ladder) {
+/// rest. A line that is somebody else's says whose, so a reader never
+/// resumes another person's work by mistake; the reader's own lines, and
+/// lines nobody is named on, carry no mark.
+fn render_active(out: &mut String, active: &[ActiveTask], identity: Option<&str>, ladder: Ladder) {
     let shown = if ladder.reached(Collapse::Floor) {
         1
     } else {
@@ -353,7 +363,13 @@ fn render_active(out: &mut String, active: &[ActiveTask], ladder: Ladder) {
     }
     .min(active.len());
     for task in active.iter().take(shown) {
-        let _ = writeln!(out, "active: {} {}", task.id, quoted_line_text(&task.title));
+        let _ = write!(out, "active: {} {}", task.id, quoted_line_text(&task.title));
+        if let Some(whose) = task.attribution.name()
+            && Some(whose) != identity
+        {
+            let _ = write!(out, " ({})", quoted_if_delimited(whose));
+        }
+        out.push('\n');
         if !ladder.reached(Collapse::Log)
             && let Some(log) = &task.log
         {

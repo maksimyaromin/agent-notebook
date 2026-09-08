@@ -227,6 +227,8 @@ fn ready_row(row: &ReadyTask) -> Value {
         ("id", json!(row.id)),
         ("priority", json!(row.priority)),
         ("created", json!(row.created)),
+        ("by", json!(row.attribution.by)),
+        ("taken-by", json!(row.attribution.taken_by)),
         ("title", json!(row.title)),
     ]))
 }
@@ -236,6 +238,8 @@ fn listed_row(row: &ListedRecord) -> Value {
         ("id", json!(row.id)),
         ("state", json!(row.state)),
         ("priority", json!(row.priority)),
+        ("by", json!(row.attribution.by)),
+        ("taken-by", json!(row.attribution.taken_by)),
         ("title", json!(row.title)),
     ]))
 }
@@ -575,6 +579,8 @@ fn active_task_value(task: &anb_core::ActiveTask) -> Value {
     Value::Object(fields([
         ("id", json!(task.id)),
         ("title", json!(task.title)),
+        ("by", json!(task.attribution.by)),
+        ("taken-by", json!(task.attribution.taken_by)),
         ("log", json!(task.log)),
     ]))
 }

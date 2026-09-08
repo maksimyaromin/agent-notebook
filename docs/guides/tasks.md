@@ -19,7 +19,7 @@ stateDiagram-v2
     closed --> open: reopen
 ```
 
-`start` moves a Task into active work. Use `submit` when the result needs human acceptance, then `close` to accept it or `start` to continue work. Review is optional; you can close directly from active. `reopen` returns a closed Task to open and logs the transition. The CLI refuses an invalid move and lists valid alternatives:
+`start` moves a Task into active work and records who took it as `taken-by`. A Task someone else took is refused with `taken`; `anb edit <id> --taken-by <name>` hands it over. Use `submit` when the result needs human acceptance, then `close` to accept it or `start` to continue work. Review is optional; you can close directly from active. `reopen` returns a closed Task to open and logs the transition. The CLI refuses an invalid move and lists valid alternatives:
 
 ```
 $ anb submit task.ship-the-parser
@@ -91,6 +91,6 @@ Status reports how many of the hub's direct dependencies are closed and the next
 
 ## Correcting a record
 
-Use `anb edit <id>` to correct a title, body, tags, links, origin, priority or `review-by` date. `--clear` removes an optional field supported by that flag. Lifecycle commands change state. If the record has error findings, use the repair commands reported by `anb check`. A repair may leave other errors: it must remove some of the record's errors without introducing new ones. Run `check` again to see what remains. A `-` in the repair column means the CLI has no repair for that finding.
+Use `anb edit <id>` to correct a title, body, tags, links, origin, priority, `taken-by` or `review-by` date. `--clear` removes an optional field supported by that flag. Lifecycle commands change state. If the record has error findings, use the repair commands reported by `anb check`. A repair may leave other errors: it must remove some of the record's errors without introducing new ones. Run `check` again to see what remains. A `-` in the repair column means the CLI has no repair for that finding.
 
 To resume archived work, run `anb restore <id>` first, then `anb reopen <id>`. Restore changes where the file lives; reopen changes its state.

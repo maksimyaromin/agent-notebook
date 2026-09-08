@@ -44,10 +44,10 @@ pub use grammar::RecordFile;
 pub use notebook::{Notebook, NotebookError};
 pub use record::{ARCHIVE_DIR, Record, RecordType, TaskState};
 pub use reply::{
-    Archived, Blocker, Cited, CitedProof, Closed, Commented, Counts, Created, Deleted, EdgeKind,
-    Edged, Edited, Epic, FileFinding, Focus, Graph, GraphEdge, GraphNode, GraphSlice, Held,
-    ListedRecord, Overview, ReadyTask, Repair, Restored, Transitioned, TypeSection, View,
-    carriers_of,
+    Archived, Attribution, Blocker, Cited, CitedProof, Closed, Commented, Counts, Created, Deleted,
+    EdgeKind, Edged, Edited, Epic, FileFinding, Filter, Focus, Graph, GraphEdge, GraphNode,
+    GraphSlice, Held, ListedRecord, Overview, ReadyTask, Repair, Restored, Transitioned,
+    TypeSection, View, carriers_of,
 };
 pub use request::{Draft, Edit, Link, Proof};
 pub use resolve::path_stem;

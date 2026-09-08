@@ -106,6 +106,14 @@ impl Recovery {
             NotebookError::WrongType { id, .. } => {
                 recovery.tries.push(format!("anb show {id}"));
             }
+            // A hand-over is decided on purpose, so the name is left for the
+            // caller to fill rather than filled with their own.
+            NotebookError::Taken { id, .. } => {
+                recovery
+                    .tries
+                    .push(format!("anb edit {id} --taken-by \"<name>\""));
+                recovery.tries.push(format!("anb show {id}"));
+            }
             NotebookError::InvalidRecord { path, findings } => {
                 recovery.details = bounded(findings.iter().map(finding_line).collect());
                 recovery.tries.push(format!("anb show {}", path_stem(path)));

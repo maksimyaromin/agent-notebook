@@ -432,7 +432,7 @@ mod ready_queue {
 
     fn ready_ids(storage: &mut MemoryStorage) -> Vec<String> {
         Notebook::new(storage)
-            .ready()
+            .ready(&Filter::default())
             .unwrap()
             .into_iter()
             .map(|row| row.id)
@@ -669,7 +669,7 @@ mod epics {
             ),
         ]);
         let scoped: Vec<String> = Notebook::new(&mut storage)
-            .list_for("task.epic")
+            .list(&within("task.epic"))
             .unwrap()
             .into_iter()
             .map(|row| row.id)
@@ -792,7 +792,7 @@ mod epics {
     fn scope_reaches_what_was_born_inside_it_however_deep() {
         assert_eq!(
             ids(Notebook::new(&mut an_epic())
-                .list_for("task.epic-auth")
+                .list(&within("task.epic-auth"))
                 .unwrap()),
             // Notebook order: type-major, then by path.
             vec![
@@ -811,7 +811,7 @@ mod epics {
         let mut storage = an_epic();
         let notebook = Notebook::new(&mut storage);
         let scoped: Vec<String> = notebook
-            .ready_for("task.epic-auth")
+            .ready(&within("task.epic-auth"))
             .unwrap()
             .into_iter()
             .map(|row| row.id)
@@ -819,7 +819,7 @@ mod epics {
         assert_eq!(scoped, vec!["task.auth-audit", "task.auth-tokens"]);
         assert!(
             notebook
-                .ready()
+                .ready(&Filter::default())
                 .unwrap()
                 .iter()
                 .any(|row| row.id == "task.unrelated"),
@@ -868,7 +868,7 @@ mod epics {
         let mut storage = an_epic();
         assert_eq!(
             Notebook::new(&mut storage)
-                .ready_for("task.no-such-epic")
+                .ready(&within("task.no-such-epic"))
                 .unwrap_err(),
             NotebookError::UnknownId {
                 id: "task.no-such-epic".to_owned()
@@ -900,13 +900,13 @@ mod epics {
         ]);
         let notebook = Notebook::new(&mut storage);
         assert_eq!(
-            ids(notebook.list_for("task.epic").unwrap()),
+            ids(notebook.list(&within("task.epic")).unwrap()),
             vec!["task.child", "task.epic", "task.outside"],
             "it must close before the child, which must close before the hub"
         );
         assert_eq!(
             notebook
-                .ready_for("task.epic")
+                .ready(&within("task.epic"))
                 .unwrap()
                 .into_iter()
                 .map(|row| row.id)
@@ -953,7 +953,7 @@ mod epics {
         ]);
         let notebook = Notebook::new(&mut storage);
         let states: Vec<(String, String)> = notebook
-            .list_for("task.epic")
+            .list(&within("task.epic"))
             .unwrap()
             .into_iter()
             .map(|row| (row.id, row.state))
@@ -969,7 +969,7 @@ mod epics {
         );
         assert_eq!(
             notebook
-                .ready_for("task.epic")
+                .ready(&within("task.epic"))
                 .unwrap()
                 .into_iter()
                 .map(|row| row.id)
@@ -1020,7 +1020,7 @@ mod epics {
         let notebook = Notebook::new(&mut storage);
         assert_eq!(
             notebook
-                .ready_for("task.outer")
+                .ready(&within("task.outer"))
                 .unwrap()
                 .into_iter()
                 .map(|row| row.id)

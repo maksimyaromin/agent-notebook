@@ -90,10 +90,10 @@ These are alternatives at different points in review: `submit` requests acceptan
 
 ## Change how you organize work
 
-You can keep a flat queue, use the supplied epic pattern, or give each agent a separate active Task. For example, replace the one-Task rule with:
+You can keep a flat queue, use the supplied epic pattern, or run several agents on separate Tasks. For example, replace the one-Task rule with:
 
-> Before starting, read Status and select an unassigned ready Task. Keep each agent on a separate Task and record its assignment in the Task body. Log a handoff before another agent takes over.
+> Before starting, read Status and select a ready Task nobody took, or one you took. Keep each agent on a separate Task. Log a handoff before another agent takes over, and hand the Task over with `edit --taken-by`.
 
-The CLI allows multiple active Tasks. Its write lock protects notebook mutations, but does not assign work to agents or prevent them from editing the same source file. Your coordination rules need to cover that.
+The CLI allows multiple active Tasks. `start` records who took a Task as `taken-by` and refuses a Task someone else took; each agent's identity comes from `ANB_BY` or the git `user.name` of its checkout. The write lock protects notebook mutations, but does not prevent two agents from editing the same source file. Your coordination rules need to cover that.
 
 Tags can express your own categories. Automatic epic progress still follows the [hub relationships](tasks.md#hubs-and-epics): a hub depends on work created from it. A different tag alone does not change that calculation. You can change the convention agents follow while retaining those relationships when you want the built-in epic summary.

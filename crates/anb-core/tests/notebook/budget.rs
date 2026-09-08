@@ -142,12 +142,12 @@ mod budget_ladder {
              \x20 decision.rule2: \"A demo record\"\n\
              \x20 decision.rule3: \"A demo record\"\n\
              \x20 decision.rule4: \"A demo record\"\n  \u{2026} 3 more\n\
-             ready[8]{id,priority,age,title}:\n\
-             \x20 task.child0,-,3d,A demo record\n\
-             \x20 task.child1,-,3d,A demo record\n\
-             \x20 task.child2,-,3d,A demo record\n\
-             \x20 task.child3,-,3d,A demo record\n\
-             \x20 task.child4,-,3d,A demo record\n  \u{2026} 3 more: anb ready\n\
+             ready[8]{id,priority,age,taken-by,title}:\n\
+             \x20 task.child0,-,3d,-,A demo record\n\
+             \x20 task.child1,-,3d,-,A demo record\n\
+             \x20 task.child2,-,3d,-,A demo record\n\
+             \x20 task.child3,-,3d,-,A demo record\n\
+             \x20 task.child4,-,3d,-,A demo record\n  \u{2026} 3 more: anb ready\n\
              epics[8]:\n\
              \x20 task.hub0: 0/1 closed, next: task.child0\n\
              \x20 task.hub1: 0/1 closed, next: task.child1\n\
@@ -196,7 +196,7 @@ mod budget_ladder {
             "log: \"- 2026-08-25 claude: stopped at the ladder\"",
             "review[1]: task.waiting — waiting on a human",
             "rules[1]:",
-            "ready[7]{id,priority,age,title}:",
+            "ready[7]{id,priority,age,taken-by,title}:",
             "  … 2 more: anb ready",
             "debt[",
         ] {

@@ -305,6 +305,93 @@ mod status_dashboard {
         );
     }
 
+    /// Several people work one notebook, and each session opens on its own
+    /// person's work: the reader's Tasks lead, whatever was touched last,
+    /// and every other line says whose it is, so nobody resumes another
+    /// person's Task by mistake. A Task nobody is named on is nobody's to
+    /// mark.
+    #[test]
+    fn the_active_lines_lead_with_the_readers_own_and_mark_the_others() {
+        fn active(id: &str, updated: &str, extra: &[&str]) -> String {
+            record_file(id, "task", "active", extra, "").replace("updated: 2026-08-25", updated)
+        }
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hers.md",
+                &active("task.hers", "updated: 2026-08-27", &["taken-by: Grace"]),
+            ),
+            (
+                "tasks/task.mine.md",
+                &active(
+                    "task.mine",
+                    "updated: 2026-08-21",
+                    &["by: Grace", "taken-by: Ada"],
+                ),
+            ),
+            (
+                "tasks/task.legacy.md",
+                &active("task.legacy", "updated: 2026-08-26", &["by: Maks"]),
+            ),
+            (
+                "tasks/task.nobodys.md",
+                &active("task.nobodys", "updated: 2026-08-25", &[]),
+            ),
+        ]);
+        let status = Notebook::new(&mut storage)
+            .with_identity(Some("Ada"))
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .unwrap();
+        let active: Vec<&str> = status
+            .text
+            .lines()
+            .filter(|line| line.starts_with("active: "))
+            .collect();
+        assert_eq!(
+            active,
+            [
+                "active: task.mine \"A demo record\"",
+                "active: task.hers \"A demo record\" (Grace)",
+                "active: task.legacy \"A demo record\" (Maks)",
+                "active: task.nobodys \"A demo record\"",
+            ],
+            "{}",
+            status.text
+        );
+        assert_eq!(
+            status.active[0].attribution,
+            anb_core::Attribution {
+                by: Some("Grace".to_owned()),
+                taken_by: Some("Ada".to_owned()),
+            }
+        );
+    }
+
+    /// A host that knows nobody cannot call any line its own, so every
+    /// line that names a person carries the name, and the order is the
+    /// order of touch alone.
+    #[test]
+    fn without_an_identity_every_named_line_is_marked() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hers.md",
+                &record_file("task.hers", "task", "active", &["taken-by: Grace"], ""),
+            ),
+            (
+                "tasks/task.nobodys.md",
+                &record_file("task.nobodys", "task", "active", &[], ""),
+            ),
+        ]);
+        let text = status_text(&mut storage);
+        assert!(
+            text.contains("active: task.hers \"A demo record\" (Grace)\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("active: task.nobodys \"A demo record\"\n"),
+            "{text}"
+        );
+    }
+
     /// A Task parked at acceptance is a human's turn, and the session must
     /// open on it even when nothing else in the notebook stirs.
     #[test]
@@ -329,7 +416,9 @@ mod status_dashboard {
             .unwrap();
         assert!(!status.quiet);
         assert!(
-            status.text.contains("ready[1]{id,priority,age,title}:\n"),
+            status
+                .text
+                .contains("ready[1]{id,priority,age,taken-by,title}:\n"),
             "{}",
             status.text
         );
@@ -353,8 +442,11 @@ mod status_dashboard {
         );
     }
 
+    /// A team that agreed how to work before filing its first Task must
+    /// not start every session blind to the law: a standing rule opens the
+    /// dashboard on its own, and the unattended hook reads the same.
     #[test]
-    fn rules_alone_do_not_open_the_gate() {
+    fn a_standing_rule_alone_opens_the_gate() {
         let mut storage = storage_with(&[(
             "decisions/decision.demo.md",
             &record_file("decision.demo", "decision", "active", &["kind: rule"], ""),
@@ -362,11 +454,34 @@ mod status_dashboard {
         let status = Notebook::new(&mut storage)
             .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
+        assert!(!status.quiet, "{}", status.text);
         assert!(
-            status.quiet,
-            "a standing rule is not work in motion: {}",
+            status
+                .text
+                .contains("rules[1]:\n  decision.demo: \"A demo record\"\n"),
+            "{}",
             status.text
         );
+    }
+
+    /// A Decision that is not a rule binds nothing at session start, so it
+    /// is no signal: a notebook of shapes and Notes stays quiet.
+    #[test]
+    fn a_decision_that_is_not_a_rule_leaves_the_notebook_quiet() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.demo.md",
+                &record_file("decision.demo", "decision", "active", &["kind: shape"], ""),
+            ),
+            (
+                "notes/note.demo.md",
+                &record_file("note.demo", "note", "active", &["kind: fact"], ""),
+            ),
+        ]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .unwrap();
+        assert!(status.quiet, "{}", status.text);
     }
 
     #[test]
