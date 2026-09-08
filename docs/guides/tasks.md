@@ -87,7 +87,7 @@ A child Task should produce one independently reviewable result. Add dependencie
 
 You can use your own grouping convention; the automatic epic summary recognizes a hub by that pair of relationships: it depends on a Task whose origin points back to it. The `epic` tag helps you find the hub; it does not establish membership. If you missed an origin when creating a child, set it with `anb edit <id> --from <hub>`.
 
-Status reports how many of the hub's direct dependencies are closed and the next ready Task in its scope. `anb ready --for <hub>` and `anb list --for <hub>` follow that scope, including nested work. Once all dependencies close, the hub becomes ready for acceptance. Close and archive it when the overall result is complete.
+`anb ready --for <hub>` is the epic's own queue and `anb list --for <hub>` its live membership, nested work included; `--archive` adds the children already filed. A hub's node in `anb graph` carries how many of its direct dependencies are closed and the next ready Task in its scope. Once all dependencies close, the hub becomes ready for acceptance. Close and archive it when the overall result is complete.
 
 ## Correcting a record
 

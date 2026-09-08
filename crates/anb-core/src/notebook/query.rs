@@ -14,10 +14,72 @@ use crate::record::{REF_KEYS, Record, RecordType, TaskState, linked_record};
 use crate::reply::{
     Attribution, Blocker, Cited, CitedProof, Counts, Epic, GraphNode, ListedRecord, ReadyTask,
 };
-use crate::request::Draft;
+use crate::request::{Draft, Filter};
 use crate::resolve::{Resolver, is_archived, path_stem, type_of};
-use crate::status::{ActiveTask, HeldTask, StatusRule};
+use crate::status::{ActiveTask, HeldTask, OpenQuestion, ReviewTask};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A filter settled against one notebook: what it admits, record by
+/// record. Narrowing changes what is shown, never what is read, so a row
+/// is blocked, excluded and resolved against every record before this is
+/// asked of it.
+pub(super) struct Admission {
+    filter: Filter,
+    /// The ids inside the hub's scope, when the filter names a hub.
+    scope: Option<BTreeSet<String>>,
+    /// The text to find, lowered once rather than once per record.
+    needle: Option<String>,
+}
+
+impl Admission {
+    pub(super) fn of(filter: &Filter, scope: Option<BTreeSet<String>>) -> Admission {
+        Admission {
+            filter: filter.clone(),
+            scope,
+            needle: filter.text.as_ref().map(|text| text.trim().to_lowercase()),
+        }
+    }
+
+    /// Whether the record answers the filter: every narrowing it names
+    /// holds at once.
+    pub(super) fn admits(&self, record: &Record) -> bool {
+        let filter = &self.filter;
+        let file = record.file();
+        let id = path_stem(record.path());
+        (filter.types.is_empty()
+            || record
+                .record_type()
+                .is_some_and(|record_type| filter.types.contains(&record_type)))
+            && (filter.kinds.is_empty()
+                || file
+                    .field("kind")
+                    .is_some_and(|kind| filter.kinds.iter().any(|wanted| wanted == kind)))
+            && filter
+                .tags
+                .iter()
+                .all(|wanted| tags_of(record).any(|tag| tag == wanted))
+            && self.scope.as_ref().is_none_or(|scope| scope.contains(id))
+            && filter
+                .by
+                .as_deref()
+                .is_none_or(|by| Attribution::of(record).names(by))
+            && self
+                .needle
+                .as_deref()
+                .is_none_or(|needle| holds_text(record, needle))
+    }
+}
+
+/// The tags a record carries, as the envelope lists them.
+fn tags_of(record: &Record) -> impl Iterator<Item = &str> {
+    record
+        .file()
+        .field("tags")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+}
 
 /// Every proof these records cite that names something outside the
 /// notebook — a commit, or a file — so the host can ask git and the
@@ -260,9 +322,9 @@ pub(super) fn graph_node(
     }
 }
 
-/// Whether the record answers a search: the needle stands in its id, its
-/// title, its tags, its people, or its body.
-pub(super) fn matches_query(record: &Record, needle: &str) -> bool {
+/// Whether the record holds the text: in its id, its title, its tags, its
+/// people, or its body, case folded.
+fn holds_text(record: &Record, needle: &str) -> bool {
     let file = record.file();
     [
         Some(path_stem(record.path())),
@@ -285,11 +347,18 @@ pub(super) fn lives_in(record: &Record, record_type: RecordType) -> bool {
 }
 
 /// The dispatch queue's rows: live, open, valid, unblocked, unheld Tasks
-/// in ready order.
-pub(super) fn ready_rows(records: &[Record], resolvable: &Resolver<'_>) -> Vec<ReadyTask> {
+/// in ready order, the ones `admitted` keeps. Blocked is judged against
+/// every record before the narrowing is asked, so a filter cannot free a
+/// Task.
+pub(super) fn ready_rows(
+    records: &[Record],
+    resolvable: &Resolver<'_>,
+    admitted: impl Fn(&Record) -> bool,
+) -> Vec<ReadyTask> {
     let graph = task_graph(records);
-    let keep =
-        |record: &Record| record.hold().is_none() && !graph.is_blocked(path_stem(record.path()));
+    let keep = |record: &Record| {
+        record.hold().is_none() && !graph.is_blocked(path_stem(record.path())) && admitted(record)
+    };
     open_rows(records, resolvable, keep)
 }
 
@@ -452,13 +521,6 @@ impl<'a> MembershipIndex<'a> {
     }
 }
 
-/// Whether any live record is a hub: what decides whether an epic query
-/// has anything to ask the archive.
-pub(super) fn any_hub(live: &[Record], archived: &[Record], resolvable: &Resolver<'_>) -> bool {
-    let index = MembershipIndex::of(live, archived);
-    live.iter().any(|record| index.is_hub(record, resolvable))
-}
-
 /// The hubs and where each stands, in notebook order. Progress counts the
 /// hub's own `blocked-by` children, which are its statement of what it
 /// waits on, while `next` reads the whole scope, since anything the epic
@@ -527,69 +589,79 @@ pub(super) fn live_counts(records: &[Record]) -> Counts {
     }))
 }
 
-/// The live Tasks on hold, in id order: each with the reason it waits for
-/// and the day it resumes on, when one was set. A closed Task still
-/// carrying its hold line is settled work, not something that waits.
-pub(super) fn held_tasks(live_valid: &[&Record]) -> Vec<HeldTask> {
-    let mut held: Vec<&Record> = live_valid
-        .iter()
-        .copied()
-        .filter(|record| {
-            record.record_type() == Some(RecordType::Task)
-                && record.is_live()
-                && record.hold().is_some()
-        })
-        .collect();
-    held.sort_by(|left, right| path_stem(left.path()).cmp(path_stem(right.path())));
-    held.iter()
-        .map(|record| HeldTask {
-            id: path_stem(record.path()).to_owned(),
-            reason: encode::bounded_text(record.hold().unwrap_or_default().to_owned()),
-            until: record.hold_until().map(str::to_owned),
-        })
-        .collect()
+/// The live Tasks on hold, the reader's own first and then by id: each
+/// with the reason it waits for and the day it resumes on, when one was
+/// set. A closed Task still carrying its hold line is settled work, not
+/// something that waits.
+pub(super) fn held_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<HeldTask> {
+    let held = live_valid.iter().copied().filter(|record| {
+        record.record_type() == Some(RecordType::Task)
+            && record.is_live()
+            && record.hold().is_some()
+    });
+    own_first(held, identity, |left, right| {
+        path_stem(left.path()).cmp(path_stem(right.path()))
+    })
+    .into_iter()
+    .map(|(record, attribution)| HeldTask {
+        id: path_stem(record.path()).to_owned(),
+        reason: encode::bounded_text(record.hold().unwrap_or_default().to_owned()),
+        until: record.hold_until().map(str::to_owned),
+        attribution,
+    })
+    .collect()
 }
 
-/// The active Tasks not on hold: the dashboard's active lines, the first
-/// carrying the last log line — the mechanical "where I stopped". The
-/// caller's own come first, so a notebook several people work in opens on
-/// the reader's work; within a tier the most recently touched leads. A
-/// held one is paused on purpose and is not where a session resumes;
-/// [`held_tasks`] names it instead.
-pub(super) fn active_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<ActiveTask> {
-    let mut active: Vec<(&Record, Attribution)> = live_valid
-        .iter()
-        .copied()
-        .filter(|record| {
-            record.record_type() == Some(RecordType::Task)
-                && record.state() == Some("active")
-                && record.hold().is_none()
-        })
+/// The records with the reader's own leading, and `within` ordering each
+/// tier, so a notebook several people work in opens on the reader's work
+/// wherever the section. A host that knows nobody has nothing to lead
+/// with, and the order is `within` alone.
+fn own_first<'a>(
+    records: impl Iterator<Item = &'a Record>,
+    identity: Option<&str>,
+    within: impl Fn(&Record, &Record) -> std::cmp::Ordering,
+) -> Vec<(&'a Record, Attribution)> {
+    let mut ranked: Vec<(&Record, Attribution)> = records
         .map(|record| (record, Attribution::of(record)))
         .collect();
     let others_first =
         |attribution: &Attribution| identity.is_none() || attribution.name() != identity;
-    active.sort_by(|(left, left_of), (right, right_of)| {
+    ranked.sort_by(|(left, left_of), (right, right_of)| {
         others_first(left_of)
             .cmp(&others_first(right_of))
-            .then_with(|| touched(right).cmp(touched(left)))
-            .then_with(|| path_stem(left.path()).cmp(path_stem(right.path())))
+            .then_with(|| within(left, right))
     });
-    active
-        .into_iter()
-        .enumerate()
-        .map(|(position, (record, attribution))| ActiveTask {
-            id: path_stem(record.path()).to_owned(),
-            title: encode::bounded_text(
-                record.file().field("title").unwrap_or_default().to_owned(),
-            ),
-            attribution,
-            log: (position == 0)
-                .then(|| last_log_line(record))
-                .flatten()
-                .map(encode::bounded_text),
-        })
-        .collect()
+    ranked
+}
+
+/// The active Tasks not on hold: the dashboard's active lines, the first
+/// carrying the last log line — the mechanical "where I stopped". The
+/// caller's own come first; within a tier the most recently touched leads.
+/// A held one is paused on purpose and is not where a session resumes;
+/// [`held_tasks`] names it instead.
+pub(super) fn active_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<ActiveTask> {
+    let active = live_valid.iter().copied().filter(|record| {
+        record.record_type() == Some(RecordType::Task)
+            && record.state() == Some("active")
+            && record.hold().is_none()
+    });
+    own_first(active, identity, |left, right| {
+        touched(right)
+            .cmp(touched(left))
+            .then_with(|| path_stem(left.path()).cmp(path_stem(right.path())))
+    })
+    .into_iter()
+    .enumerate()
+    .map(|(position, (record, attribution))| ActiveTask {
+        id: path_stem(record.path()).to_owned(),
+        title: encode::bounded_text(record.file().field("title").unwrap_or_default().to_owned()),
+        attribution,
+        log: (position == 0)
+            .then(|| last_log_line(record))
+            .flatten()
+            .map(encode::bounded_text),
+    })
+    .collect()
 }
 
 /// The last non-empty body line; the log convention makes it meaningful,
@@ -604,17 +676,40 @@ pub(super) fn last_log_line(record: &Record) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The Tasks waiting on a human for acceptance.
-pub(super) fn review_tasks(live_valid: &[&Record]) -> Vec<String> {
-    let mut ids: Vec<String> = live_valid
-        .iter()
-        .filter(|record| {
-            record.record_type() == Some(RecordType::Task) && record.state() == Some("review")
+/// The Tasks waiting on a human for acceptance, the reader's own first and
+/// then by id.
+pub(super) fn review_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<ReviewTask> {
+    let waiting = live_valid.iter().copied().filter(|record| {
+        record.record_type() == Some(RecordType::Task) && record.state() == Some("review")
+    });
+    own_first(waiting, identity, |left, right| {
+        path_stem(left.path()).cmp(path_stem(right.path()))
+    })
+    .into_iter()
+    .map(|(record, attribution)| ReviewTask {
+        id: path_stem(record.path()).to_owned(),
+        attribution,
+    })
+    .collect()
+}
+
+/// The open Questions, the reader's own first and then oldest first: the
+/// doubts a session is about to work past.
+pub(super) fn open_questions(live_valid: &[&Record], identity: Option<&str>) -> Vec<OpenQuestion> {
+    let open = live_valid.iter().copied().filter(|record| {
+        record.record_type() == Some(RecordType::Question) && record.state() == Some("open")
+    });
+    own_first(open, identity, oldest_first)
+        .into_iter()
+        .map(|(record, attribution)| OpenQuestion {
+            id: path_stem(record.path()).to_owned(),
+            created: created(record).to_owned(),
+            attribution,
+            title: encode::bounded_text(
+                record.file().field("title").unwrap_or_default().to_owned(),
+            ),
         })
-        .map(|record| path_stem(record.path()).to_owned())
-        .collect();
-    ids.sort();
-    ids
+        .collect()
 }
 
 /// When the record last moved: `updated`, else `created` — the same proxy
@@ -624,30 +719,6 @@ fn touched(record: &Record) -> &str {
     file.field("updated")
         .or_else(|| file.field("created"))
         .unwrap_or_default()
-}
-
-/// The standing rules: live Decisions of kind `rule`, oldest first —
-/// the order they were laid down.
-pub(super) fn standing_rules(live_valid: &[&Record]) -> Vec<StatusRule> {
-    let mut rules: Vec<&Record> = live_valid
-        .iter()
-        .copied()
-        .filter(|record| {
-            record.record_type() == Some(RecordType::Decision)
-                && record.is_live()
-                && record.file().field("kind") == Some("rule")
-        })
-        .collect();
-    rules.sort_by(|left, right| oldest_first(left, right));
-    rules
-        .iter()
-        .map(|record| StatusRule {
-            id: path_stem(record.path()).to_owned(),
-            title: encode::bounded_text(
-                record.file().field("title").unwrap_or_default().to_owned(),
-            ),
-        })
-        .collect()
 }
 
 /// Every edge pointing at `target` from somewhere else, in file order.

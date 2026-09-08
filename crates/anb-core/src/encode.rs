@@ -134,6 +134,27 @@ pub fn author(by: Option<&str>, via: Option<&str>) -> String {
     }
 }
 
+/// A table cell for an optional value: `-` for none, the value quoted if
+/// it must be.
+#[must_use]
+pub fn absent_or(value: Option<&str>) -> String {
+    value.map_or_else(|| "-".to_owned(), quoted_if_delimited)
+}
+
+/// A value as one shell word, so a command a reply names stays typeable:
+/// single-quoted unless every character is one a shell reads as itself.
+#[must_use]
+pub fn shell_word(value: &str) -> String {
+    let bare = value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if bare && !value.is_empty() {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 /// A table value carrying the row delimiter, a quote, or a character a
 /// terminal acts on is JSON-quoted; everything else stays bare.
 ///

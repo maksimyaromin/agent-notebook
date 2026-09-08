@@ -89,6 +89,7 @@ mod listing {
 }
 
 mod narrowed_by_identity {
+    use super::holding;
     use crate::*;
 
     /// One person's records are the ones they created and the Tasks they
@@ -230,6 +231,7 @@ mod narrowed_by_identity {
             .ready(&Filter {
                 hub: Some("task.hub".to_owned()),
                 by: Some("Ada".to_owned()),
+                ..Filter::default()
             })
             .unwrap()
             .into_iter()
@@ -259,13 +261,209 @@ mod narrowed_by_identity {
         let notebook = Notebook::new(&mut storage);
         for needle in ["hopper", "codex", "ada"] {
             let ids: Vec<String> = notebook
-                .search(needle)
+                .list(&holding(needle))
                 .unwrap()
                 .into_iter()
                 .map(|row| row.id)
                 .collect();
             assert_eq!(ids, ["task.taken"], "{needle}");
         }
+    }
+}
+
+/// The listing narrowed to the records whose text holds `needle`.
+fn holding(needle: &str) -> anb_core::Filter {
+    anb_core::Filter {
+        text: Some(needle.to_owned()),
+        ..anb_core::Filter::default()
+    }
+}
+
+mod narrowed_by_kind_tag_and_type {
+    use crate::*;
+
+    fn ids(rows: Vec<anb_core::ListedRecord>) -> Vec<String> {
+        rows.into_iter().map(|row| row.id).collect()
+    }
+
+    /// Two rules, a shape and a term, each tagged for the parser or the
+    /// stack: the smallest notebook that tells the four narrowings apart.
+    fn a_knowledge_notebook() -> MemoryStorage {
+        storage_with(&[
+            (
+                "decisions/decision.nest.md",
+                &record_file(
+                    "decision.nest",
+                    "decision",
+                    "active",
+                    &["kind: rule", "tags: parser, grammar"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.rust.md",
+                &record_file(
+                    "decision.rust",
+                    "decision",
+                    "active",
+                    &["kind: rule", "tags: stack"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.shape.md",
+                &record_file(
+                    "decision.shape",
+                    "decision",
+                    "active",
+                    &["kind: shape", "tags: parser"],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.fence.md",
+                &record_file(
+                    "note.fence",
+                    "note",
+                    "active",
+                    &["kind: term", "tags: parser, grammar"],
+                    "",
+                ),
+            ),
+            ("tasks/task.demo.md", &task_file("open", &["tags: parser"])),
+        ])
+    }
+
+    #[test]
+    fn a_type_keeps_the_records_of_that_type_and_two_types_keep_both() {
+        let mut storage = a_knowledge_notebook();
+        let notebook = Notebook::new(&mut storage);
+        let notes = Filter {
+            types: vec![RecordType::Note],
+            ..Filter::default()
+        };
+        assert_eq!(ids(notebook.list(&notes).unwrap()), ["note.fence"]);
+        let work_and_notes = Filter {
+            types: vec![RecordType::Task, RecordType::Note],
+            ..Filter::default()
+        };
+        assert_eq!(
+            ids(notebook.list(&work_and_notes).unwrap()),
+            ["task.demo", "note.fence"]
+        );
+    }
+
+    /// Every standing rule is one narrowing: the kind alone, since only a
+    /// Decision carries it, and the type beside it when a reader spells the
+    /// question out.
+    #[test]
+    fn a_kind_keeps_the_records_of_that_kind() {
+        let mut storage = a_knowledge_notebook();
+        let notebook = Notebook::new(&mut storage);
+        let rules = Filter {
+            kinds: vec!["rule".to_owned()],
+            ..Filter::default()
+        };
+        assert_eq!(
+            ids(notebook.list(&rules).unwrap()),
+            ["decision.nest", "decision.rust"]
+        );
+        let rules_spelled_out = Filter {
+            types: vec![RecordType::Decision],
+            ..rules
+        };
+        assert_eq!(
+            ids(notebook.list(&rules_spelled_out).unwrap()),
+            ["decision.nest", "decision.rust"]
+        );
+    }
+
+    /// One tag keeps every record carrying it; two tags keep the records
+    /// carrying both, since every narrowing is an intersection.
+    #[test]
+    fn tags_narrow_to_the_records_carrying_every_one_of_them() {
+        let mut storage = a_knowledge_notebook();
+        let notebook = Notebook::new(&mut storage);
+        let parser = Filter {
+            tags: vec!["parser".to_owned()],
+            ..Filter::default()
+        };
+        assert_eq!(
+            ids(notebook.list(&parser).unwrap()),
+            ["task.demo", "decision.nest", "decision.shape", "note.fence"]
+        );
+        let parser_grammar = Filter {
+            tags: vec!["parser".to_owned(), "grammar".to_owned()],
+            ..Filter::default()
+        };
+        assert_eq!(
+            ids(notebook.list(&parser_grammar).unwrap()),
+            ["decision.nest", "note.fence"]
+        );
+    }
+
+    #[test]
+    fn the_narrowings_compose_as_one_intersection() {
+        let mut storage = a_knowledge_notebook();
+        let parser_rules = Filter {
+            types: vec![RecordType::Decision],
+            kinds: vec!["rule".to_owned()],
+            tags: vec!["parser".to_owned()],
+            ..Filter::default()
+        };
+        assert_eq!(
+            ids(Notebook::new(&mut storage).list(&parser_rules).unwrap()),
+            ["decision.nest"]
+        );
+    }
+
+    /// The queue takes the same narrowing: a tag reaches the Tasks
+    /// carrying it, and a kind reaches nothing, since no Task carries one.
+    #[test]
+    fn the_queue_narrows_by_the_same_filter() {
+        let mut storage = a_knowledge_notebook();
+        let notebook = Notebook::new(&mut storage);
+        let parser = Filter {
+            tags: vec!["parser".to_owned()],
+            ..Filter::default()
+        };
+        let queued: Vec<String> = notebook
+            .ready(&parser)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(queued, ["task.demo"]);
+        let rules = Filter {
+            kinds: vec!["rule".to_owned()],
+            ..Filter::default()
+        };
+        assert_eq!(notebook.ready(&rules).unwrap(), vec![]);
+    }
+
+    /// A word no type allows as a kind, and a tag the grammar rejects, can
+    /// match no record: an empty listing would read as a notebook holding
+    /// none, so the filter is refused with the vocabulary named.
+    #[test]
+    fn a_kind_no_type_allows_and_a_malformed_tag_are_refused() {
+        let mut storage = a_knowledge_notebook();
+        let notebook = Notebook::new(&mut storage);
+        let law = Filter {
+            kinds: vec!["law".to_owned()],
+            ..Filter::default()
+        };
+        let Err(NotebookError::InvalidArgument { reason }) = notebook.list(&law) else {
+            panic!("a kind no type allows must be refused");
+        };
+        assert!(reason.contains("rule, shape, drift, fact"), "{reason}");
+        let shouted = Filter {
+            tags: vec!["Parser".to_owned()],
+            ..Filter::default()
+        };
+        assert!(matches!(
+            notebook.ready(&shouted),
+            Err(NotebookError::InvalidArgument { .. })
+        ));
     }
 }
 
@@ -408,29 +606,24 @@ mod record_view {
                 "---\nid: task.real\ntype: task\nstate: open\ncreated: 2026-08-01\nupdated: 2026-08-01\ntitle: Real\n---\n\nB.\n",
             ),
         ]);
-        let overview = Notebook::new(&mut storage).overview().unwrap();
-
-        assert_eq!(overview.live.tasks, 2, "both files sit under tasks/");
-        assert_eq!(overview.live.notes, 0);
-        for section in &overview.sections {
-            let held = match section.record_type {
-                RecordType::Task => overview.live.tasks,
-                RecordType::Decision => overview.live.decisions,
-                RecordType::Note => overview.live.notes,
-                RecordType::Question => overview.live.questions,
-            };
-            assert_eq!(
-                section.rows.len(),
-                held,
-                "the {:?} section and the {:?} count disagree",
-                section.record_type,
-                section.record_type
-            );
-        }
+        let notebook = Notebook::new(&mut storage);
+        let counts = notebook
+            .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
+            .unwrap()
+            .counts;
+        assert_eq!(counts.tasks, 2, "both files sit under tasks/");
+        assert_eq!(counts.notes, 0);
+        let listed = notebook.list(&Filter::default()).unwrap();
+        assert_eq!(
+            listed.len(),
+            2,
+            "the listing shows every file the counts count: {listed:?}"
+        );
     }
 }
 
-mod search_query {
+mod narrowed_by_text {
+    use super::holding;
     use crate::*;
 
     fn demo_notebook() -> MemoryStorage {
@@ -451,54 +644,76 @@ mod search_query {
     }
 
     #[test]
-    fn a_query_matches_titles_case_insensitively() {
+    fn a_text_matches_titles_case_insensitively() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
-        let rows = Notebook::new(&mut storage).search("DEMO RECORD").unwrap();
+        let rows = Notebook::new(&mut storage)
+            .list(&holding("DEMO RECORD"))
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "task.demo");
     }
 
     #[test]
-    fn a_query_matches_bodies_ids_and_tags() {
+    fn a_text_matches_bodies_ids_and_tags() {
         let mut storage = demo_notebook();
         let notebook = Notebook::new(&mut storage);
         let ids = |rows: Vec<anb_core::ListedRecord>| {
             rows.into_iter().map(|row| row.id).collect::<Vec<_>>()
         };
         assert_eq!(
-            ids(notebook.search("grammar").unwrap()),
+            ids(notebook.list(&holding("grammar")).unwrap()),
             vec!["task.parser"],
-            "the body is a searched surface"
+            "the body is a matched surface"
         );
         assert_eq!(
-            ids(notebook.search("stack").unwrap()),
+            ids(notebook.list(&holding("stack")).unwrap()),
             vec!["decision.rust"],
-            "tags are a searched surface"
+            "tags are a matched surface"
         );
+        let history = Filter {
+            archive: true,
+            ..holding("task.spike")
+        };
         assert_eq!(
-            ids(notebook.search("task.spike").unwrap()),
+            ids(notebook.list(&history).unwrap()),
             vec!["task.spike"],
-            "the id is a searched surface"
+            "the id is a matched surface"
         );
     }
 
+    /// History is findable when asked for: the archive joins the listing
+    /// with `archive`, and live rows lead within a type.
     #[test]
-    fn the_archive_is_searched_too() {
+    fn the_archive_is_matched_when_asked_for() {
         let mut storage = demo_notebook();
-        let rows = Notebook::new(&mut storage).search("parser").unwrap();
-        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            vec!["task.parser", "task.spike"],
-            "history is findable; live rows lead within a type"
-        );
+        let notebook = Notebook::new(&mut storage);
+        let live: Vec<String> = notebook
+            .list(&holding("parser"))
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(live, ["task.parser"]);
+        let history = Filter {
+            archive: true,
+            ..holding("parser")
+        };
+        let ids: Vec<String> = notebook
+            .list(&history)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(ids, ["task.parser", "task.spike"]);
     }
 
     #[test]
-    fn an_empty_query_is_refused() {
+    fn an_empty_text_is_refused() {
         let mut storage = storage_with(&[]);
         assert!(matches!(
-            Notebook::new(&mut storage).search("  ").unwrap_err(),
+            Notebook::new(&mut storage)
+                .list(&holding("  "))
+                .unwrap_err(),
             NotebookError::InvalidArgument { .. }
         ));
     }
@@ -519,14 +734,17 @@ mod task_map {
 
     fn with_archive() -> GraphSlice {
         GraphSlice {
-            archive: true,
+            filter: Filter {
+                archive: true,
+                ..Filter::default()
+            },
             ..GraphSlice::default()
         }
     }
 
     fn inside(hub: &str) -> GraphSlice {
         GraphSlice {
-            hub: Some(hub.to_owned()),
+            filter: within(hub),
             ..GraphSlice::default()
         }
     }
@@ -567,7 +785,10 @@ mod task_map {
     #[test]
     fn a_type_asked_for_is_the_only_type_drawn() {
         let only_decisions = GraphSlice {
-            types: vec![RecordType::Decision],
+            filter: Filter {
+                types: vec![RecordType::Decision],
+                ..Filter::default()
+            },
             ..whole()
         };
 
@@ -672,8 +893,11 @@ mod task_map {
     fn the_epic_branch_holds_the_hub_its_children_and_the_closed_ones() {
         let mut storage = an_epic();
         let branch = GraphSlice {
-            hub: Some("task.hub".to_owned()),
-            ..with_archive()
+            filter: Filter {
+                archive: true,
+                ..within("task.hub")
+            },
+            ..GraphSlice::default()
         };
 
         let mut drawn = map_of(&mut storage, &branch);
@@ -716,30 +940,19 @@ mod task_map {
         );
     }
 
+    /// Every narrowing is a predicate over the same notebook, so asking for
+    /// two asks for the intersection: one person's work inside one epic.
     #[test]
-    fn the_ready_lens_holds_what_can_be_started_now() {
+    fn an_identity_narrows_inside_an_epic_branch() {
         let mut storage = an_epic();
-        let ready = GraphSlice {
-            ready_only: true,
+        let hers_inside = GraphSlice {
+            filter: Filter {
+                by: Some("Grace".to_owned()),
+                ..within("task.hub")
+            },
             ..GraphSlice::default()
         };
-        assert_eq!(
-            map_of(&mut storage, &ready),
-            vec!["task.open", "task.outside"],
-            "a hub waiting on a live child is not dispatchable, and a closed Task is done"
-        );
-    }
-
-    /// Every narrowing is a predicate over the same notebook, so asking for
-    /// two asks for the intersection.
-    #[test]
-    fn the_ready_lens_narrows_inside_an_epic_branch() {
-        let mut storage = an_epic();
-        let ready_inside = GraphSlice {
-            ready_only: true,
-            ..inside("task.hub")
-        };
-        assert_eq!(map_of(&mut storage, &ready_inside), vec!["task.open"]);
+        assert_eq!(map_of(&mut storage, &hers_inside), vec!["task.open"]);
     }
 
     /// A line has to land on a tile, so an edge whose far end the slice
@@ -747,15 +960,23 @@ mod task_map {
     #[test]
     fn an_edge_off_the_map_is_not_drawn() {
         let mut storage = an_epic();
-        let ready = GraphSlice {
-            ready_only: true,
+        let children_only = GraphSlice {
+            filter: Filter {
+                by: Some("Grace".to_owned()),
+                ..Filter::default()
+            },
             ..GraphSlice::default()
         };
-        let graph = Notebook::new(&mut storage).graph(&ready).unwrap();
+        let graph = Notebook::new(&mut storage).graph(&children_only).unwrap();
+        assert_eq!(
+            map_of(&mut storage, &children_only),
+            vec!["task.open", "task.outside"],
+            "the hub is nobody's"
+        );
         assert_eq!(
             graph.edges().len(),
             0,
-            "the ready lens holds only what waits on nothing live"
+            "the child's edges land on the hub, which is off the map"
         );
     }
 
@@ -836,18 +1057,22 @@ mod task_map {
         assert_eq!(map_of(&mut storage, &around("task.c", 0)), vec!["task.c"]);
     }
 
-    /// A focus and another narrowing are two predicates over one notebook.
+    /// A focus and another narrowing are two predicates over one notebook:
+    /// the neighbourhood is walked whole, and the text keeps one of it.
     #[test]
-    fn a_focus_narrows_with_the_lens_beside_it() {
+    fn a_focus_narrows_with_the_filter_beside_it() {
         let mut storage = a_chain();
-        let ready_around = GraphSlice {
-            ready_only: true,
+        let head_around = GraphSlice {
+            filter: Filter {
+                text: Some("task.a".to_owned()),
+                ..Filter::default()
+            },
             ..around("task.c", 2)
         };
         assert_eq!(
-            map_of(&mut storage, &ready_around),
+            map_of(&mut storage, &head_around),
             vec!["task.a"],
-            "only the head of the chain waits on nothing"
+            "only the head of the chain holds the text"
         );
     }
 
@@ -897,7 +1122,8 @@ mod task_map {
     }
 
     /// A hub with one child open and one closed and filed, plus a Task the
-    /// epic never reached.
+    /// epic never reached; the children and the stray are Grace's, the hub
+    /// nobody's.
     fn an_epic() -> MemoryStorage {
         storage_with(&[
             (
@@ -911,15 +1137,15 @@ mod task_map {
             ),
             (
                 "tasks/task.open.md",
-                &task("task.open", "open", &["from: task.hub"], ""),
+                &task("task.open", "open", &["from: task.hub", "by: Grace"], ""),
             ),
             (
                 "archive/tasks/task.done.md",
-                &task("task.done", "closed", &["from: task.hub"], ""),
+                &task("task.done", "closed", &["from: task.hub", "by: Grace"], ""),
             ),
             (
                 "tasks/task.outside.md",
-                &task("task.outside", "open", &[], ""),
+                &task("task.outside", "open", &["by: Grace"], ""),
             ),
         ])
     }

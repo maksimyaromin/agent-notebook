@@ -37,7 +37,7 @@ mod status;
 mod storage;
 mod tokens;
 
-pub use config::Config;
+pub use config::{Config, Scope};
 pub use debt::{DebtSignal, DebtThresholds};
 pub use finding::{Finding, FindingCode, Severity};
 pub use grammar::RecordFile;
@@ -45,15 +45,14 @@ pub use notebook::{Notebook, NotebookError};
 pub use record::{ARCHIVE_DIR, Record, RecordType, TaskState};
 pub use reply::{
     Archived, Attribution, Blocker, Cited, CitedProof, Closed, Commented, Counts, Created, Deleted,
-    EdgeKind, Edged, Edited, Epic, FileFinding, Filter, Focus, Graph, GraphEdge, GraphNode,
-    GraphSlice, Held, ListedRecord, Overview, ReadyTask, Repair, Restored, Transitioned,
-    TypeSection, View, carriers_of,
+    EdgeKind, Edged, Edited, Epic, FileFinding, Graph, GraphEdge, GraphNode, Held, ListedRecord,
+    ReadyTask, Repair, Restored, Transitioned, View, carriers_of,
 };
-pub use request::{Draft, Edit, Link, Proof};
+pub use request::{Draft, Edit, Filter, Focus, GraphSlice, Link, Proof};
 pub use resolve::path_stem;
 pub use status::{
-    ActiveTask, Budget, DebtClass, HeldTask, SECTION_ROWS, Status, StatusRule, counted,
-    counts_phrase, debt_classes, epic_line,
+    ActiveTask, Budget, HeldTask, OpenQuestion, ReviewTask, SECTION_ROWS, Status, counted,
+    counts_phrase, epic_line,
 };
 pub use storage::{MemoryStorage, Storage, StorageError};
 pub use tokens::estimate_tokens;

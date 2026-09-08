@@ -9,7 +9,7 @@ metadata:
 
 ## What the data carries
 
-`anb --json graph` answers with `v`, the format version; `slice`, every narrowing that made the document (`for`, `type`, `ready`, `focus`, `depth`, `archive`); and `nodes` and `edges`, each a `count` and its `rows`.
+`anb --json graph` answers with `v`, the format version; `slice`, every narrowing that made the document, each under the flag that names it (`type`, `kind`, `tag`, `for`, `by`, `match`, `archive`, `focus`, `depth`) and absent when it was not asked for; and `nodes` and `edges`, each a `count` and its `rows`.
 
 A node carries `id`, `type`, `state`, `ready`, `archived`, `degree`, `created` and `title`; `priority` appears only on a Task that has one. A hub also carries `epic` with `id`, `closed`, `total` and `next`, the record to work on next inside it. Under `--full` it carries `fields`, the envelope as ordered name and value pairs, and `body` as `lines` and `head`; with `--all` the head is the whole body, and without it the body is cut like every listing and a `tail` follows the gap. `ready` is three-valued: `true` or `false` for a live Task, and absent where the question does not arise (a Decision never queues, and filed work is done). It travels with the record because it follows from rules the page cannot see, such as which holds stand.
 

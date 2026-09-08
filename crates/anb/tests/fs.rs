@@ -617,41 +617,46 @@ mod the_users_notebook {
     }
 
     /// The pair the second root exists to make visible: a project rule
-    /// standing against one of the user's own, named in the project's own
-    /// Status with both sides and their authors.
+    /// standing against one of the user's own, counted on the project's
+    /// own Status and named in its Debt with both sides and their authors.
     #[test]
-    fn a_project_rule_standing_against_the_users_own_reaches_the_projects_status() {
+    fn a_project_rule_standing_against_the_users_own_reaches_the_projects_debt() {
         let home = TempDir::new().unwrap();
         let project = a_project();
         a_pair_across_the_scopes(&home, &project);
 
         let status = served(&home, project.path(), None, &["status"]);
-        let shadow = status
+        assert!(
+            status.contains("debt: 1 — anb debt\n"),
+            "the session opens on the count: {status}"
+        );
+        let debt = served(&home, project.path(), None, &["debt"]);
+        let shadow = debt
             .lines()
             .map(str::trim)
             .find(|line| line.starts_with("shadow:"))
-            .unwrap_or_else(|| panic!("no shadow line in: {status}"));
+            .unwrap_or_else(|| panic!("no shadow line in: {debt}"));
         assert_eq!(
             shadow, "shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)",
             "the project rule leads: it is the one this repository follows"
         );
         assert!(
-            !status.contains("dangling-mention"),
-            "and the citation names something, so nothing calls it missing: {status}"
+            !debt.contains("dangling-mention"),
+            "and the citation names something, so nothing calls it missing: {debt}"
         );
     }
 
-    /// An agent reads the dashboard as data, so the pair reaches it in
+    /// An agent reads the Debt as data, so the pair reaches it in
     /// whichever shape it asked for.
     #[test]
-    fn the_pair_reaches_the_json_dashboard_under_its_own_code() {
+    fn the_pair_reaches_the_json_debt_under_its_own_code() {
         let home = TempDir::new().unwrap();
         let project = a_project();
         a_pair_across_the_scopes(&home, &project);
 
-        let payload = served(&home, project.path(), None, &["--json", "status"]);
+        let payload = served(&home, project.path(), None, &["--json", "debt"]);
         let parsed: serde_json::Value = serde_json::from_str(payload.trim()).unwrap();
-        let rows = parsed["debt"]["rows"].as_array().expect("debt rows");
+        let rows = parsed["debt"].as_array().expect("debt rows");
         assert!(
             rows.iter().any(|row| {
                 row["code"] == "shadow"

@@ -3,9 +3,21 @@ mod status_dashboard {
 
     fn status_text(storage: &mut MemoryStorage) -> String {
         Notebook::new(storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
             .unwrap()
             .text
+    }
+
+    fn status_by(storage: &mut MemoryStorage, identity: &str, by: Option<&str>) -> String {
+        Notebook::new(storage)
+            .with_identity(Some(identity))
+            .status(TODAY, Budget::Unbounded, by, no_lost_proofs)
+            .unwrap()
+            .text
+    }
+
+    fn question_file(id: &str, extra: &[&str]) -> String {
+        record_file(id, "question", "open", extra, "")
     }
 
     /// A dashboard is derived, so its size is the dashboard's shape and
@@ -23,14 +35,14 @@ mod status_dashboard {
                 ),
             ),
             (
-                "decisions/decision.rule.md",
-                &record_file("decision.rule", "decision", "active", &["kind: rule"], "")
+                "questions/question.demo.md",
+                &question_file("question.demo", &[])
                     .replace("title: A demo record", &format!("title: {wall_of_words}")),
             ),
         ]);
         let text = status_text(&mut storage);
 
-        for prefix in ["active:", "log:", "  decision.rule:"] {
+        for prefix in ["active:", "log:", "  question.demo,"] {
             let line = text
                 .lines()
                 .find(|line| line.starts_with(prefix))
@@ -45,19 +57,18 @@ mod status_dashboard {
 
     /// The dashboard is a derived query like every other: a record whose
     /// findings put it outside `ready` and `list` cannot lead a session
-    /// from the active, review or rules line either. Each of the three
+    /// from the active, review or questions line either. Each of the three
     /// reads the notebook through its own fold, so each can lose the gate
     /// on its own.
     #[test]
     fn an_invalid_record_reaches_no_line_of_the_dashboard() {
-        for (case, path, id, type_word, state, extra) in [
+        for (case, path, id, type_word, state) in [
             (
                 "active",
                 "tasks/task.demo.md",
                 "task.demo",
                 "task",
                 "active",
-                &[][..],
             ),
             (
                 "review",
@@ -65,43 +76,39 @@ mod status_dashboard {
                 "task.demo",
                 "task",
                 "review",
-                &[][..],
             ),
             (
-                "rules",
-                "decisions/decision.demo.md",
-                "decision.demo",
-                "decision",
-                "active",
-                &["kind: rule"][..],
+                "questions",
+                "questions/question.demo.md",
+                "question.demo",
+                "question",
+                "open",
             ),
         ] {
-            let sound = record_file(id, type_word, state, extra, "");
+            let sound = record_file(id, type_word, state, &[], "");
             let mut storage = storage_with(&[(path, &sound)]);
             let seen = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, no_lost_proofs)
+                .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
                 .unwrap();
             let named: Vec<&str> = seen
                 .active
                 .iter()
                 .map(|task| task.id.as_str())
-                .chain(seen.review.iter().map(String::as_str))
-                .chain(seen.rules.iter().map(|rule| rule.id.as_str()))
+                .chain(seen.review.iter().map(|task| task.id.as_str()))
+                .chain(seen.questions.iter().map(|question| question.id.as_str()))
                 .collect();
             assert_eq!(named, vec![id], "{case}: a sound record is on its line");
 
             // A reference no record answers excludes the record, and its
             // state is untouched, so only the gate can drop the line.
-            let mut broken_lines = extra.to_vec();
-            broken_lines.push("from: task.ghost");
-            let broken = record_file(id, type_word, state, &broken_lines, "");
+            let broken = record_file(id, type_word, state, &["from: task.ghost"], "");
             let mut storage = storage_with(&[(path, &broken)]);
             let seen = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, no_lost_proofs)
+                .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
                 .unwrap();
             assert_eq!(seen.active, vec![], "{case}");
-            assert_eq!(seen.review, Vec::<String>::new(), "{case}");
-            assert_eq!(seen.rules, vec![], "{case}");
+            assert_eq!(seen.review, vec![], "{case}");
+            assert_eq!(seen.questions, vec![], "{case}");
         }
     }
 
@@ -125,7 +132,8 @@ mod status_dashboard {
 
     /// A hold is a pause somebody chose, so the paused Task is not the one
     /// a session resumes from: it waits in its own section, with the
-    /// reason it waits for, whatever state the hold froze it in.
+    /// reason it waits for and who took it, whatever state the hold froze
+    /// it in.
     #[test]
     fn a_held_task_is_not_active_but_waits_with_its_reason() {
         let mut storage = storage_with(&[
@@ -135,7 +143,11 @@ mod status_dashboard {
                     "task.parked",
                     "task",
                     "active",
-                    &["hold: waits for the API key", "hold-until: 2026-09-20"],
+                    &[
+                        "taken-by: Grace",
+                        "hold: waits for the API key",
+                        "hold-until: 2026-09-20",
+                    ],
                     "",
                 ),
             ),
@@ -162,7 +174,7 @@ mod status_dashboard {
         assert_eq!(active, ["active: task.working \"A demo record\""], "{text}");
         assert!(
             text.contains(
-                "held[2]{id,reason,until}:\n  task.parked,waits for the API key,2026-09-20\n  task.shelved,after the release,-\n"
+                "held[2]{id,reason,until,taken-by}:\n  task.parked,waits for the API key,2026-09-20,Grace\n  task.shelved,after the release,-,-\n"
             ),
             "{text}"
         );
@@ -214,7 +226,7 @@ mod status_dashboard {
         ]);
         let text = status_text(&mut storage);
         assert!(
-            text.contains("  task.parked,\"waiting on legal, still pending\",-\n"),
+            text.contains("  task.parked,\"waiting on legal, still pending\",-,-\n"),
             "{text}"
         );
     }
@@ -259,7 +271,7 @@ mod status_dashboard {
             ),
         ]);
         let floor = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1), no_lost_proofs)
+            .status(TODAY, Budget::Tokens(1), None, no_lost_proofs)
             .unwrap()
             .text;
         assert!(!floor.contains("held"), "{floor}");
@@ -339,7 +351,7 @@ mod status_dashboard {
         ]);
         let status = Notebook::new(&mut storage)
             .with_identity(Some("Ada"))
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
             .unwrap();
         let active: Vec<&str> = status
             .text
@@ -363,6 +375,54 @@ mod status_dashboard {
                 by: Some("Grace".to_owned()),
                 taken_by: Some("Ada".to_owned()),
             }
+        );
+    }
+
+    /// Work standing still is somebody's too: the review list and the held
+    /// table lead with the reader's own, and a line another person holds
+    /// says whose, the way the active lines do.
+    #[test]
+    fn review_and_held_lead_with_the_readers_own_and_name_the_others() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hers.md",
+                &record_file("task.hers", "task", "review", &["taken-by: Grace"], ""),
+            ),
+            (
+                "tasks/task.mine.md",
+                &record_file("task.mine", "task", "review", &["taken-by: Ada"], ""),
+            ),
+            (
+                "tasks/task.her-hold.md",
+                &record_file(
+                    "task.her-hold",
+                    "task",
+                    "open",
+                    &["taken-by: Grace", "hold: waits on legal"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.my-hold.md",
+                &record_file(
+                    "task.my-hold",
+                    "task",
+                    "open",
+                    &["taken-by: Ada", "hold: waits on the vendor"],
+                    "",
+                ),
+            ),
+        ]);
+        let text = status_by(&mut storage, "Ada", None);
+        assert!(
+            text.contains("review[2]: task.mine, task.hers (Grace) — waiting on a human\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "held[2]{id,reason,until,taken-by}:\n  task.my-hold,waits on the vendor,-,Ada\n  task.her-hold,waits on legal,-,Grace\n"
+            ),
+            "{text}"
         );
     }
 
@@ -392,13 +452,53 @@ mod status_dashboard {
         );
     }
 
+    /// An open doubt is what a session is about to work past, so the
+    /// dashboard names it with who asked it: the reader's own first, then
+    /// oldest first, since the oldest doubt has waited longest.
+    #[test]
+    fn open_questions_lead_with_the_readers_own_and_then_the_oldest() {
+        let mut storage = storage_with(&[
+            (
+                "questions/question.hers.md",
+                &question_file("question.hers", &["by: Grace"])
+                    .replace("created: 2026-08-24", "created: 2026-08-20"),
+            ),
+            (
+                "questions/question.mine.md",
+                &question_file("question.mine", &["by: Ada"]),
+            ),
+            (
+                "questions/question.old.md",
+                &question_file("question.old", &[])
+                    .replace("created: 2026-08-24", "created: 2026-08-10"),
+            ),
+            (
+                "questions/question.settled.md",
+                &record_file(
+                    "question.settled",
+                    "question",
+                    "closed",
+                    &["reason: moot", "closed: 2026-08-25"],
+                    "",
+                ),
+            ),
+        ]);
+        let text = status_by(&mut storage, "Ada", None);
+        assert!(
+            text.contains(
+                "questions[3]{id,age,by,title}:\n  question.mine,3d,Ada,A demo record\n  question.old,17d,-,A demo record\n  question.hers,7d,Grace,A demo record\n"
+            ),
+            "{text}"
+        );
+    }
+
     /// A Task parked at acceptance is a human's turn, and the session must
     /// open on it even when nothing else in the notebook stirs.
     #[test]
     fn the_dashboard_opens_on_a_task_waiting_for_a_human_alone() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("review", &[]))]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
             .unwrap();
         assert!(!status.quiet, "{}", status.text);
         assert!(
@@ -412,7 +512,7 @@ mod status_dashboard {
     fn the_dashboard_opens_on_ready_work_alone() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
             .unwrap();
         assert!(!status.quiet);
         assert!(
@@ -424,68 +524,59 @@ mod status_dashboard {
         );
     }
 
+    /// A doubt nobody has answered is a signal on its own: the session
+    /// opens on it before it works past it.
     #[test]
-    fn the_dashboard_opens_on_debt_alone() {
-        // A resolved question is settled; the open one aged past fourteen days.
+    fn the_dashboard_opens_on_an_open_question_alone() {
         let mut storage = storage_with(&[(
             "questions/question.demo.md",
-            "---\nid: question.demo\ntype: question\nstate: open\ntitle: A demo record\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n",
+            &question_file("question.demo", &[]),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
-            .unwrap();
-        assert!(!status.quiet);
-        assert!(
-            status.text.contains("question-age: question.demo (26d)"),
-            "{}",
-            status.text
-        );
-    }
-
-    /// A team that agreed how to work before filing its first Task must
-    /// not start every session blind to the law: a standing rule opens the
-    /// dashboard on its own, and the unattended hook reads the same.
-    #[test]
-    fn a_standing_rule_alone_opens_the_gate() {
-        let mut storage = storage_with(&[(
-            "decisions/decision.demo.md",
-            &record_file("decision.demo", "decision", "active", &["kind: rule"], ""),
-        )]);
-        let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
             .unwrap();
         assert!(!status.quiet, "{}", status.text);
         assert!(
             status
                 .text
-                .contains("rules[1]:\n  decision.demo: \"A demo record\"\n"),
+                .contains("questions[1]{id,age,by,title}:\n  question.demo,3d,-,A demo record\n"),
             "{}",
             status.text
         );
     }
 
-    /// A Decision that is not a rule binds nothing at session start, so it
-    /// is no signal: a notebook of shapes and Notes stays quiet.
+    /// Decay opens the dashboard, and is answered with a count and the
+    /// read that itemises it: the signals are the notebook's worst day, and
+    /// a session's opening is not where to spend it.
     #[test]
-    fn a_decision_that_is_not_a_rule_leaves_the_notebook_quiet() {
-        let mut storage = storage_with(&[
-            (
-                "decisions/decision.demo.md",
-                &record_file("decision.demo", "decision", "active", &["kind: shape"], ""),
-            ),
-            (
-                "notes/note.demo.md",
-                &record_file("note.demo", "note", "active", &["kind: fact"], ""),
-            ),
-        ]);
+    fn the_dashboard_opens_on_debt_alone_and_counts_it() {
+        // A stale hold: work standing still is not a signal, its decay is.
+        let mut storage = storage_with(&[(
+            "tasks/task.demo.md",
+            "---\nid: task.demo\ntype: task\nstate: open\ntitle: A demo record\nhold: waits\ncreated: 2026-08-01\nupdated: 2026-08-01\n---\n",
+        )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
             .unwrap();
-        assert!(status.quiet, "{}", status.text);
+        assert!(!status.quiet);
+        assert_eq!(status.debt, 1);
+        assert!(
+            status.text.contains("debt: 1 — anb debt\n"),
+            "{}",
+            status.text
+        );
+        assert!(
+            !status.text.contains("hold-stale"),
+            "the signal itself is the listing's: {}",
+            status.text
+        );
     }
 
+    /// Knowledge binds nothing at session start: a rule is read before the
+    /// work it governs, by a listing, and a notebook of rules, shapes and
+    /// facts with no work in it stays quiet.
     #[test]
-    fn standing_rules_list_live_rule_decisions_only() {
+    fn knowledge_alone_leaves_the_notebook_quiet() {
         let mut storage = storage_with(&[
             (
                 "decisions/decision.rule.md",
@@ -496,36 +587,136 @@ mod status_dashboard {
                 &record_file("decision.shape", "decision", "active", &["kind: shape"], ""),
             ),
             (
-                "decisions/decision.dead.md",
-                &record_file("decision.dead", "decision", "retired", &["kind: rule"], ""),
+                "notes/note.demo.md",
+                &record_file("note.demo", "note", "active", &["kind: fact"], ""),
             ),
-            ("tasks/task.demo.md", &task_file("open", &[])),
         ]);
-        let text = status_text(&mut storage);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded, None, no_lost_proofs)
+            .unwrap();
+        assert!(status.quiet, "{}", status.text);
+        assert!(!status.text.contains("decision.rule"), "{}", status.text);
+    }
+
+    /// A dashboard narrowed to one identity holds that person's work and
+    /// nothing else, says whose it is, and points every hint at the same
+    /// narrowing, so a reader who follows one lands on the same rows.
+    #[test]
+    fn a_dashboard_narrowed_to_one_identity_holds_their_work_and_says_so() {
+        let mut files = vec![
+            (
+                "tasks/task.mine.md".to_owned(),
+                record_file("task.mine", "task", "active", &["taken-by: Ada"], ""),
+            ),
+            (
+                "tasks/task.hers.md".to_owned(),
+                record_file("task.hers", "task", "active", &["taken-by: Grace"], ""),
+            ),
+            (
+                "tasks/task.her-review.md".to_owned(),
+                record_file(
+                    "task.her-review",
+                    "task",
+                    "review",
+                    &["taken-by: Grace"],
+                    "",
+                ),
+            ),
+            (
+                "questions/question.hers.md".to_owned(),
+                question_file("question.hers", &["by: Grace"]),
+            ),
+            (
+                "questions/question.mine.md".to_owned(),
+                question_file("question.mine", &["by: Ada"]),
+            ),
+        ];
+        for index in 0..7 {
+            files.push((
+                format!("tasks/task.r{index}.md"),
+                record_file(&format!("task.r{index}"), "task", "open", &["by: Ada"], ""),
+            ));
+        }
+        let mut storage = MemoryStorage::from_files(files);
+        let status = Notebook::new(&mut storage)
+            .with_identity(Some("Ada"))
+            .status(TODAY, Budget::Unbounded, Some("Ada"), no_lost_proofs)
+            .unwrap();
+        let text = &status.text;
         assert!(
-            text.contains("rules[1]:\n  decision.rule: \"A demo record\"\n"),
+            text.starts_with(
+                "ok: notebook — 10 tasks, 0 decisions, 0 notes, 2 questions\nby: Ada — anb status --team\nactive: task.mine \"A demo record\"\n"
+            ),
             "{text}"
         );
-        assert!(!text.contains("decision.shape"), "{text}");
-        assert!(!text.contains("decision.dead"), "{text}");
+        assert!(!text.contains("task.hers"), "{text}");
+        assert!(!text.contains("review"), "{text}");
+        assert!(!text.contains("question.hers"), "{text}");
+        assert!(
+            text.contains("  \u{2026} 2 more: anb ready --by Ada\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("questions[1]{id,age,by,title}:\n  question.mine,3d,Ada,A demo record\n"),
+            "{text}"
+        );
+        assert_eq!(status.by.as_deref(), Some("Ada"));
+    }
+
+    /// A narrowed dashboard with nothing of that person's in it is quiet
+    /// for them, and still says so: the team may be at work.
+    #[test]
+    fn a_narrowed_dashboard_with_nothing_of_theirs_is_quiet_and_points_at_the_team() {
+        let mut storage = storage_with(&[(
+            "tasks/task.hers.md",
+            &record_file("task.hers", "task", "active", &["taken-by: Grace"], ""),
+        )]);
+        let status = Notebook::new(&mut storage)
+            .with_identity(Some("Ada"))
+            .status(TODAY, Budget::Unbounded, Some("Ada"), no_lost_proofs)
+            .unwrap();
+        assert!(status.quiet, "{}", status.text);
+        assert_eq!(
+            status.text,
+            "ok: notebook quiet — 1 task, 0 decisions, 0 notes, 0 questions. anb --help when needed.\nby: Ada — anb status --team\n"
+        );
+    }
+
+    /// A narrowing shows fewer rows and never changes a verdict: a Task
+    /// waiting on somebody else's stays blocked when that person's work is
+    /// left out.
+    #[test]
+    fn a_narrowing_by_identity_does_not_free_a_blocked_task() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.mine.md",
+                &record_file(
+                    "task.mine",
+                    "task",
+                    "open",
+                    &["by: Ada", "blocked-by: task.hers"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.hers.md",
+                &record_file("task.hers", "task", "open", &["by: Grace"], ""),
+            ),
+        ]);
+        let text = status_by(&mut storage, "Ada", Some("Ada"));
+        assert!(!text.contains("task.mine"), "{text}");
     }
 
     /// A dashboard line built from a record's own text is quoted, so a hand
     /// that writes `ESC[2K\r` into a title or a log entry cannot erase the
     /// line above it and put its own words there.
     #[test]
-    fn a_terminal_escape_in_a_rule_or_a_log_cannot_forge_the_line_above() {
+    fn a_terminal_escape_in_a_question_or_a_log_cannot_forge_the_line_above() {
         let forged = "Harmless\u{1b}[2K\rclosed: every task";
         let mut storage = storage_with(&[
             (
-                "decisions/decision.rule.md",
-                &record_file(
-                    "decision.rule",
-                    "decision",
-                    "active",
-                    &["kind: rule", &format!("title: {forged}")],
-                    "",
-                ),
+                "questions/question.demo.md",
+                &question_file("question.demo", &[&format!("title: {forged}")]),
             ),
             (
                 "tasks/task.demo.md",
@@ -619,9 +810,8 @@ mod debt_signals {
     fn debt_behind(storage: &mut MemoryStorage, user: Option<&MemoryStorage>) -> Vec<DebtSignal> {
         Notebook::new(storage)
             .with_user(user.map(|user| user as &dyn Storage))
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .debt(TODAY, no_lost_proofs)
             .unwrap()
-            .debt
     }
 
     fn debt_lines(storage: &mut MemoryStorage, user: Option<&MemoryStorage>) -> Vec<String> {
@@ -633,9 +823,8 @@ mod debt_signals {
         lines_of(
             &Notebook::new(storage)
                 .with_user(Some(user))
-                .status(TODAY, Budget::Unbounded, no_lost_proofs)
-                .unwrap()
-                .debt,
+                .debt(TODAY, no_lost_proofs)
+                .unwrap(),
         )
     }
 
@@ -1009,22 +1198,17 @@ mod debt_signals {
                 "The fix waits on task.gone.\n",
             ),
         )]);
-        let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
-            .unwrap();
+        let debt = debt_of(&mut storage);
         assert_eq!(
-            status.debt,
+            debt,
             vec![DebtSignal::DanglingMention {
                 id: "note.demo".into(),
                 target: "task.gone".into()
             }]
         );
-        assert!(
-            status
-                .text
-                .contains("  dangling-mention: note.demo -> task.gone\n"),
-            "{}",
-            status.text
+        assert_eq!(
+            lines_of(&debt),
+            ["dangling-mention: note.demo -> task.gone"]
         );
     }
 
@@ -1073,21 +1257,18 @@ mod debt_signals {
                 ),
             ),
         ]);
-        let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
-            .unwrap();
-        let pairs: Vec<&DebtSignal> = status
-            .debt
+        let debt = debt_of(&mut storage);
+        let pairs: Vec<&DebtSignal> = debt
             .iter()
             .filter(|signal| matches!(signal, DebtSignal::MayConflict { .. }))
             .collect();
         assert_eq!(pairs.len(), 1, "both directions of citation are one pair");
         assert!(
-            status.text.contains(
-                "  may-conflict: decision.a (supolka) <-> decision.b (supolka/claude-code)\n"
+            lines_of(&debt).contains(
+                &"may-conflict: decision.a (supolka) <-> decision.b (supolka/claude-code)"
+                    .to_owned()
             ),
-            "{}",
-            status.text
+            "{debt:?}"
         );
     }
 
@@ -1293,26 +1474,6 @@ mod debt_signals {
     }
 
     #[test]
-    fn six_dangling_mentions_render_five_lines_and_a_hint() {
-        let body = "task.gone0 task.gone1 task.gone2 task.gone3 task.gone4 task.gone5";
-        let mut storage = storage_with(&[(
-            "notes/note.demo.md",
-            &record_file("note.demo", "note", "active", &[], &format!("{body}\n")),
-        )]);
-        let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, no_lost_proofs)
-            .unwrap();
-        assert_eq!(status.debt.len(), 6, "the model keeps every signal");
-        assert_eq!(
-            status.text.matches("dangling-mention:").count(),
-            5,
-            "{}",
-            status.text
-        );
-        assert!(status.text.contains("  … 1 more\n"), "{}", status.text);
-    }
-
-    #[test]
     fn the_proofs_offered_for_the_world_to_settle_are_the_live_records_claims() {
         let mut storage = storage_with(&[
             (
@@ -1341,7 +1502,7 @@ mod debt_signals {
         ]);
         let mut offered = Vec::new();
         Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, |cited| {
+            .debt(TODAY, |cited| {
                 offered = cited.to_vec();
                 Vec::new()
             })
@@ -1378,23 +1539,20 @@ mod debt_signals {
                 "",
             ),
         )]);
-        let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Unbounded, <[CitedProof]>::to_vec)
+        let debt = Notebook::new(&mut storage)
+            .debt(TODAY, <[CitedProof]>::to_vec)
             .unwrap();
         assert_eq!(
-            status.debt,
+            debt,
             vec![DebtSignal::LostProof {
                 id: "task.shipped".to_owned(),
                 proof: "sha f00dfeed".to_owned(),
             }],
             "a claim the world cannot answer for is the record's while it is live"
         );
-        assert!(
-            status
-                .text
-                .contains("  lost-proof: task.shipped -> sha f00dfeed\n"),
-            "{}",
-            status.text
+        assert_eq!(
+            lines_of(&debt),
+            ["lost-proof: task.shipped -> sha f00dfeed"]
         );
     }
 
@@ -1417,9 +1575,8 @@ mod debt_signals {
         }];
         assert!(
             Notebook::new(&mut storage)
-                .status(TODAY, Budget::Unbounded, |_| lost.clone())
+                .debt(TODAY, |_| lost.clone())
                 .unwrap()
-                .debt
                 .iter()
                 .all(|signal| !matches!(signal, DebtSignal::LostProof { .. })),
             "one broken file, one signal — the invalid line already names it"
@@ -1799,6 +1956,35 @@ mod notebook_config {
         let mut storage = storage_with(&[("config", "budget: 400\n")]);
         let config = Notebook::new(&mut storage).config().unwrap();
         assert_eq!(config.budget(), Budget::Tokens(400));
+    }
+
+    /// The `scope` key is the one word-valued key: `mine` makes every read
+    /// answer with the caller's own by default, and a word the key has no
+    /// meaning for keeps the team's, named by check.
+    #[test]
+    fn the_scope_key_reads_mine_or_team_and_a_bad_word_keeps_the_team() {
+        let mut storage = storage_with(&[("config", "scope: mine\n")]);
+        assert_eq!(
+            Notebook::new(&mut storage).config().unwrap().scope(),
+            anb_core::Scope::Mine
+        );
+        let mut storage = storage_with(&[("config", "scope: ours\n")]);
+        let notebook = Notebook::new(&mut storage);
+        assert_eq!(notebook.config().unwrap().scope(), anb_core::Scope::Team);
+        let findings = notebook.check().unwrap();
+        assert!(
+            findings.iter().any(|located| located.path == "config"
+                && located.finding.code == FindingCode::BadValue
+                && located.finding.message.contains("team, mine")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn an_absent_config_is_the_teams_scope() {
+        let mut storage = MemoryStorage::new();
+        let config = Notebook::new(&mut storage).config().unwrap();
+        assert_eq!(config.scope(), anb_core::Scope::Team);
     }
 
     #[test]

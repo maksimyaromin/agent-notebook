@@ -29,11 +29,11 @@ One command is the whole input. Slice flags compose, and every one narrows both 
 |---|---|
 | The whole notebook, archive included | `anb --json graph --archive --full --all` |
 | One epic's branch | `anb --json graph --for <hub> --full --all` |
-| What can start now | `anb --json graph --ready --full --all` |
+| One person's work | `anb --json graph --mine --full --all` |
 | Around one record | `anb --json graph --focus <id> --depth 2 --full --all` |
 | One record type | `anb --json graph --type task --full --all` |
 
-The node and edge arrays in `--json` are never bounded, because a drawing made from some of the edges is a picture of a notebook that does not exist. `--full` carries each record's envelope and body, so the page can open a record without a second call. The document names in `slice` every narrowing that made it, and the page shows that slice: a graph that does not say what it left out reads as a notebook that holds nothing else.
+The flags are the ones `list` takes: `--for`, `--tag`, `--match`, `--by`, `--mine`, `--team`, `--type`, `--kind` and `--archive`, and they compose. What can start now is read off each node's `ready`, never asked for as a slice: a ready Task waits on nothing live, so a slice of ready Tasks alone is a listing drawn as tiles. The node and edge arrays in `--json` are never bounded, because a drawing made from some of the edges is a picture of a notebook that does not exist. `--full` carries each record's envelope and body, so the page can open a record without a second call. The document names in `slice` every narrowing that made it, and the page shows that slice: a graph that does not say what it left out reads as a notebook that holds nothing else.
 
 Before writing the page, open [drawing](references/drawing.md): what the data carries, how each fact is encoded, the layout rules and the five lessons that cost the most. **REQUIRED SUB-SKILL:** Use `anb` before applying the reader's decisions; its rules for record choice, active work, provenance and closure apply here too. Before collecting those decisions, open [the intent loop](references/intent-loop.md): how comments are addressed, how they come back and how they become commands.
 

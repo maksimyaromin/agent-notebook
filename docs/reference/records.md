@@ -120,6 +120,7 @@ Ids use `<type>.<slug>`, with a slug matching `[a-z0-9-]+`. `add` derives one fr
 |---|---|---|
 | `format` | `1` | the version of the format the notebook is written in |
 | `budget` | `1500` | the estimated Status token budget; `0` disables budget-driven cuts; [limits](status.md#the-budget) still apply |
+| `scope` | `team` | whose records a read answers with when the call names nobody: `team` for everyone's, `mine` for the ones the identity created or took; `--team`, `--mine` and `--by` outrank it for one call |
 | `debt-task-stale` | `7` | days an active Task may go without a log entry |
 | `debt-question-age` | `14` | days a free-standing Question may stay open |
 | `debt-question-age-task-born` | `7` | the same for a Question born from a Task |

@@ -6,6 +6,47 @@
 
 use crate::record::RecordType;
 
+/// Which records a read answers with. Every narrowing is a predicate over
+/// the same notebook, so asking for two asks for the intersection; the
+/// default is every live record.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Filter {
+    /// Only these types; empty is every type.
+    pub types: Vec<RecordType>,
+    /// Only these kinds; empty is every record, the ones carrying no kind
+    /// included.
+    pub kinds: Vec<String>,
+    /// Only records carrying every one of these tags.
+    pub tags: Vec<String>,
+    /// One epic's scope: the hub, what it waits on, and what was born
+    /// inside it.
+    pub hub: Option<String>,
+    /// One identity's records: the ones it created or took.
+    pub by: Option<String>,
+    /// Only records whose id, title, tags, people or body hold this text,
+    /// matched without regard to case.
+    pub text: Option<String>,
+    /// The archive too. Most of what a long-lived notebook holds is
+    /// finished, and reading all of it buries the work in flight, so the
+    /// archive stays closed until it is asked for.
+    pub archive: bool,
+}
+
+/// Which records a graph is asked for: the filter every listing takes, and
+/// one record with the graph around it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GraphSlice {
+    pub filter: Filter,
+    pub focus: Option<Focus>,
+}
+
+/// A record and how far around it the graph reaches, counted in edges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Focus {
+    pub id: String,
+    pub depth: usize,
+}
+
 /// A record to be created; `id: None` mints one from the title, `by: None`
 /// signs it with the notebook's identity.
 #[derive(Debug)]

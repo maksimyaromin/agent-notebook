@@ -3,15 +3,15 @@
 //! how many rows a bounded list shows, and how a command line is spelled
 //! when a reply names one.
 
-use crate::cli::{AddArgs, CloseArgs, Command, EditArgs, GraphArgs, SliceArgs};
+use crate::cli::{AddArgs, CloseArgs, Command, EditArgs, Extent, GraphArgs, Narrowing, Whose};
 use crate::setup::{self, SetUp};
 use crate::skill::{self, Drift};
-use anb_core::encode::ROW_BOUND;
+use anb_core::encode::{ROW_BOUND, shell_word};
 use anb_core::{
-    Archived, Budget, CitedProof, Closed, Commented, Created, Deleted, Draft, Edged, Edit, Edited,
-    FileFinding, Filter, Focus, Graph, GraphSlice, Held, Link, ListedRecord, Notebook,
-    NotebookError, Overview, Proof, ReadyTask, RecordType, Repair, Restored, Status, Storage,
-    StorageError, Transitioned, View, path_stem,
+    Archived, Budget, CitedProof, Closed, Commented, Created, DebtSignal, Deleted, Draft, Edged,
+    Edit, Edited, FileFinding, Filter, Focus, Graph, GraphSlice, Held, Link, ListedRecord,
+    Notebook, NotebookError, Proof, ReadyTask, RecordType, Repair, Restored, Scope, Status,
+    Storage, StorageError, Transitioned, View, path_stem,
 };
 use std::fmt::Write as _;
 use std::path::Path;
@@ -28,29 +28,38 @@ pub fn shown(total: usize, all: bool) -> usize {
 /// bare verb, so every narrowing travels with the hint.
 #[must_use]
 pub fn lifted(verb: &str, filter: &Filter) -> String {
-    let mut out = format!("anb {verb}");
+    format!("anb {verb}{} --all", narrowing_flags(filter))
+}
+
+/// A filter as the flags that spell it, each with a leading space; a
+/// narrowing left out of a hint lifts a different listing than the one the
+/// reader is looking at. `--mine` is spelled as the `--by` it stands for,
+/// so the hint runs the same for whoever types it.
+fn narrowing_flags(filter: &Filter) -> String {
+    let mut out = String::new();
+    if !filter.types.is_empty() {
+        let words: Vec<&str> = filter.types.iter().copied().map(RecordType::word).collect();
+        let _ = write!(out, " --type {}", words.join(","));
+    }
+    if !filter.kinds.is_empty() {
+        let _ = write!(out, " --kind {}", filter.kinds.join(","));
+    }
+    for tag in &filter.tags {
+        let _ = write!(out, " --tag {tag}");
+    }
     if let Some(hub) = &filter.hub {
         let _ = write!(out, " --for {hub}");
     }
     if let Some(by) = &filter.by {
-        let _ = write!(out, " --by {}", shell_quoted(by));
+        let _ = write!(out, " --by {}", shell_word(by));
     }
-    out.push_str(" --all");
+    if let Some(text) = &filter.text {
+        let _ = write!(out, " --match {}", shell_word(text));
+    }
+    if filter.archive {
+        out.push_str(" --archive");
+    }
     out
-}
-
-/// A value as one shell word, single-quoted so every character stays
-/// literal and a hint carrying it stays executable.
-#[must_use]
-pub fn shell_quoted(value: &str) -> String {
-    let bare = value
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    if bare && !value.is_empty() {
-        value.to_owned()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
 }
 
 /// The repair a finding names, as the command that runs it. A finding is
@@ -109,6 +118,10 @@ pub enum Reply {
         findings: Vec<FileFinding>,
         all: bool,
     },
+    Debt {
+        signals: Vec<DebtSignal>,
+        all: bool,
+    },
     Archived(Archived),
     Restored(Restored),
     Deleted(Deleted),
@@ -117,15 +130,6 @@ pub enum Reply {
     /// against a committed copy.
     Skill(SkillReply),
     Edited(Edited),
-    Searched {
-        query: String,
-        rows: Vec<ListedRecord>,
-        all: bool,
-    },
-    Overviewed {
-        overview: Overview,
-        all: bool,
-    },
     /// The graph itself: the records and the edges between them.
     Graphed {
         graph: Graph,
@@ -276,18 +280,12 @@ pub fn execute(
             &text,
             today,
         )?)),
-        Command::Ready {
-            scope,
-            by,
-            mine,
-            all,
-        } => queued(&notebook, identity.as_deref(), scope, by, mine, all),
+        Command::Ready { narrowing, all } => queued(&notebook, identity.as_deref(), narrowing, all),
         Command::List {
-            scope,
-            by,
-            mine,
+            narrowing,
+            extent,
             all,
-        } => listed(&notebook, identity.as_deref(), scope, by, mine, all),
+        } => listed(&notebook, identity.as_deref(), narrowing, extent, all),
         Command::Show { id, all } => Ok(Reply::Viewed {
             view: notebook.view(&id)?,
             all,
@@ -296,27 +294,32 @@ pub fn execute(
             findings: notebook.check()?,
             all,
         }),
+        Command::Debt { all } => Ok(Reply::Debt {
+            signals: notebook.debt(today, lost_proofs)?,
+            all,
+        }),
         Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id, today)?)),
         Command::Restore { id } => Ok(Reply::Restored(notebook.restore(&id)?)),
         Command::Delete { id } => Ok(Reply::Deleted(notebook.delete(&id)?)),
         Command::Edit(args) => edited(&mut notebook, args, read_file, today),
-        Command::Search { query, all } => Ok(Reply::Searched {
-            rows: notebook.search(&query)?,
-            query,
-            all,
-        }),
-        Command::Overview { all } => Ok(Reply::Overviewed {
-            overview: notebook.overview()?,
-            all,
-        }),
-        Command::Graph(args) => graphed(&notebook, args),
+        Command::Graph(args) => graphed(&notebook, identity.as_deref(), args),
         Command::Setup { agents, remove } => {
             Ok(Reply::SetUp(setup::apply(project_dir, remove, &agents)?))
         }
         Command::Skill { dir, check } => Ok(Reply::Skill(skilled(dir.as_deref(), check)?)),
-        Command::Status { budget, hook } => {
-            status_reply(&notebook, budget, hook, lost_proofs, today)
-        }
+        Command::Status {
+            budget,
+            hook,
+            whose,
+        } => status_reply(
+            &notebook,
+            identity.as_deref(),
+            budget,
+            whose,
+            hook,
+            lost_proofs,
+            today,
+        ),
     }
 }
 
@@ -342,24 +345,28 @@ const FOCUS_DEPTH: usize = 1;
 /// them. Drawing is nobody's business here: a reader who wants a picture
 /// has an agent that builds one, and it can only do that from a graph that
 /// arrived whole.
-fn graphed(notebook: &Notebook<'_>, args: GraphArgs) -> Result<Reply, NotebookError> {
-    let GraphArgs { slice, full, all } = args;
-    let graph = notebook.graph(&asked_for(slice))?;
-    Ok(Reply::Graphed { graph, full, all })
-}
-
-/// The command line's slice as the Core reads it.
-fn asked_for(args: SliceArgs) -> GraphSlice {
-    GraphSlice {
-        types: args.types,
-        hub: args.scope,
-        ready_only: args.ready,
-        focus: args.focus.map(|id| Focus {
+fn graphed(
+    notebook: &Notebook<'_>,
+    identity: Option<&str>,
+    args: GraphArgs,
+) -> Result<Reply, NotebookError> {
+    let GraphArgs {
+        focus,
+        depth,
+        full,
+        all,
+        narrowing,
+        extent,
+    } = args;
+    let slice = GraphSlice {
+        filter: filter(narrowing, extent, notebook, identity)?,
+        focus: focus.map(|id| Focus {
             id,
-            depth: args.depth.unwrap_or(FOCUS_DEPTH),
+            depth: depth.unwrap_or(FOCUS_DEPTH),
         }),
-        archive: args.archive,
-    }
+    };
+    let graph = notebook.graph(&slice)?;
+    Ok(Reply::Graphed { graph, full, all })
 }
 
 /// The `graph` call that answers a slice, as the caller would type it
@@ -367,22 +374,9 @@ fn asked_for(args: SliceArgs) -> GraphSlice {
 /// a different graph.
 #[must_use]
 pub fn slice_command(slice: &GraphSlice, full: bool) -> String {
-    let mut out = "anb graph".to_owned();
-    if !slice.types.is_empty() {
-        let words: Vec<&str> = slice.types.iter().copied().map(RecordType::word).collect();
-        let _ = write!(out, " --type {}", words.join(","));
-    }
-    if let Some(hub) = &slice.hub {
-        let _ = write!(out, " --for {hub}");
-    }
-    if slice.ready_only {
-        out.push_str(" --ready");
-    }
+    let mut out = format!("anb graph{}", narrowing_flags(&slice.filter));
     if let Some(focus) = &slice.focus {
         let _ = write!(out, " --focus {} --depth {}", focus.id, focus.depth);
-    }
-    if slice.archive {
-        out.push_str(" --archive");
     }
     if full {
         out.push_str(" --full");
@@ -402,32 +396,40 @@ fn moved(command: &'static str, transition: Transitioned) -> Reply {
 /// blocked session.
 fn status_reply(
     notebook: &Notebook<'_>,
+    identity: Option<&str>,
     budget: Option<u32>,
+    whose: Whose,
     hook: bool,
     lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
     today: &str,
 ) -> Result<Reply, NotebookError> {
     // Every failure here — reading the notebook to find the proofs
     // included — passes through the one funnel the hook's fail-soft needs.
-    match (budgeted_status(notebook, budget, lost_proofs, today), hook) {
+    let status = configured_status(notebook, identity, budget, whose, lost_proofs, today);
+    match (status, hook) {
         (Ok(status), hook) => Ok(Reply::Status { status, hook }),
         (Err(_), true) => Ok(Reply::Silence),
         (Err(error), false) => Err(error),
     }
 }
 
-/// The Status under the resolved ceiling: the flag outranks the config key.
-fn budgeted_status(
+/// The Status under the resolved ceiling and scope: a flag outranks the
+/// config key for each.
+fn configured_status(
     notebook: &Notebook<'_>,
+    identity: Option<&str>,
     budget: Option<u32>,
+    whose: Whose,
     lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
     today: &str,
 ) -> Result<Status, NotebookError> {
+    let config = notebook.config()?;
     let ceiling = match budget {
         Some(ceiling) => Budget::from_ceiling(ceiling),
-        None => notebook.config()?.budget(),
+        None => config.budget(),
     };
-    notebook.status(today, ceiling, lost_proofs)
+    let by = named(whose, config.scope(), identity)?;
+    notebook.status(today, ceiling, by.as_deref(), lost_proofs)
 }
 
 fn edited(
@@ -509,16 +511,15 @@ fn parsed_link(raw: &str) -> Link {
     }
 }
 
-/// The dispatch queue, narrowed as the caller asked.
+/// The dispatch queue, narrowed as the caller asked; a queue reaches
+/// live open Tasks alone, so it has no extent to widen.
 fn queued(
     notebook: &Notebook<'_>,
     identity: Option<&str>,
-    scope: Option<String>,
-    by: Option<String>,
-    mine: bool,
+    narrowing: Narrowing,
     all: bool,
 ) -> Result<Reply, NotebookError> {
-    let filter = narrowing(scope, by, mine, identity)?;
+    let filter = filter(narrowing, Extent::default(), notebook, identity)?;
     Ok(Reply::Ready {
         rows: notebook.ready(&filter)?,
         filter,
@@ -526,16 +527,15 @@ fn queued(
     })
 }
 
-/// The live listing, narrowed as the caller asked.
+/// The listing, narrowed as the caller asked.
 fn listed(
     notebook: &Notebook<'_>,
     identity: Option<&str>,
-    scope: Option<String>,
-    by: Option<String>,
-    mine: bool,
+    narrowing: Narrowing,
+    extent: Extent,
     all: bool,
 ) -> Result<Reply, NotebookError> {
-    let filter = narrowing(scope, by, mine, identity)?;
+    let filter = filter(narrowing, extent, notebook, identity)?;
     Ok(Reply::Listing {
         rows: notebook.list(&filter)?,
         filter,
@@ -543,32 +543,70 @@ fn listed(
     })
 }
 
-/// The narrowing a listing was asked with. `--mine` is `--by` with the
-/// identity the host acts as, so a host that knows nobody has nothing to
-/// narrow by and says so, rather than answering an empty list that reads
-/// as "nothing is yours".
-fn narrowing(
-    scope: Option<String>,
-    by: Option<String>,
-    mine: bool,
+/// The command line's narrowing as the Core reads it, whose records it
+/// answers with settled against the notebook's `scope` key.
+fn filter(
+    narrowing: Narrowing,
+    extent: Extent,
+    notebook: &Notebook<'_>,
     identity: Option<&str>,
 ) -> Result<Filter, NotebookError> {
-    let by = match (by, mine) {
-        (by, false) => by,
-        (_, true) => {
-            Some(
-                identity
-                    .map(str::to_owned)
-                    .ok_or_else(|| NotebookError::InvalidArgument {
-                        reason: format!(
-                            "mine: no identity to match; set git user.name or {}",
-                            crate::identity::IDENTITY_ENV
-                        ),
-                    })?,
-            )
-        }
+    let Narrowing {
+        whose,
+        scope,
+        tags,
+        text,
+    } = narrowing;
+    let Extent {
+        types,
+        kinds,
+        archive,
+    } = extent;
+    Ok(Filter {
+        types,
+        kinds,
+        tags,
+        hub: scope,
+        by: named(whose, notebook.config()?.scope(), identity)?,
+        text,
+        archive,
+    })
+}
+
+/// The one identity a read is narrowed to, or nobody. A flag outranks the
+/// config key; `--mine`, and a `scope: mine` the call does not widen, is
+/// `--by` with the identity the host acts as, so a host that knows nobody
+/// has nothing to narrow by and says so, rather than answering an empty
+/// list that reads as "nothing is yours".
+fn named(
+    whose: Whose,
+    scope: Scope,
+    identity: Option<&str>,
+) -> Result<Option<String>, NotebookError> {
+    let Whose { by, mine, team } = whose;
+    let own = |lacking: &str| {
+        identity
+            .map(str::to_owned)
+            .ok_or_else(|| NotebookError::InvalidArgument {
+                reason: format!(
+                    "{lacking}; set git user.name or {}, or pass --team",
+                    crate::identity::IDENTITY_ENV
+                ),
+            })
     };
-    Ok(Filter { hub: scope, by })
+    if let Some(by) = by {
+        return Ok(Some(by));
+    }
+    if mine {
+        return own("mine: no identity to match").map(Some);
+    }
+    if team {
+        return Ok(None);
+    }
+    match scope {
+        Scope::Team => Ok(None),
+        Scope::Mine => own("scope: mine needs an identity").map(Some),
+    }
 }
 
 /// The one way a close was told to end the record. `--note` names a file

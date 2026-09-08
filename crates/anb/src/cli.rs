@@ -89,33 +89,22 @@ pub enum Command {
     /// The dispatch queue: open, unblocked, unheld Tasks, most urgent first,
     /// each naming who took it when someone did.
     Ready {
-        /// Only work this record's scope reaches: an epic's own queue.
-        #[arg(long = "for", value_name = "ID")]
-        scope: Option<String>,
-        /// Only Tasks this identity created or took.
-        #[arg(long, value_name = "NAME", conflicts_with = "mine")]
-        by: Option<String>,
-        /// Only your own: `--by` with the identity the writers sign with.
-        #[arg(long)]
-        mine: bool,
         /// Every row; the listing is bounded by default.
         #[arg(long)]
         all: bool,
+        #[command(flatten)]
+        narrowing: Narrowing,
     },
-    /// Every live record.
+    /// The records, ids and titles out: every live one by default, or the
+    /// ones the narrowing admits.
     List {
-        /// Only records this one's scope reaches: an epic and its work.
-        #[arg(long = "for", value_name = "ID")]
-        scope: Option<String>,
-        /// Only records this identity created or took.
-        #[arg(long, value_name = "NAME", conflicts_with = "mine")]
-        by: Option<String>,
-        /// Only your own: `--by` with the identity the writers sign with.
-        #[arg(long)]
-        mine: bool,
         /// Every row; the listing is bounded by default.
         #[arg(long)]
         all: bool,
+        #[command(flatten)]
+        narrowing: Narrowing,
+        #[command(flatten)]
+        extent: Extent,
     },
     /// One record: envelope, body, and its mention blocks.
     Show {
@@ -125,7 +114,8 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// The session Status: one quiet line, or the budgeted composite.
+    /// The session Status: the work, one quiet line when there is none, or
+    /// the budgeted composite.
     Status {
         /// Token ceiling for this call, outranking the config key; 0 = no ceiling.
         #[arg(long)]
@@ -133,9 +123,17 @@ pub enum Command {
         /// The session-start payload for an agent hook; fails soft.
         #[arg(long)]
         hook: bool,
+        #[command(flatten)]
+        whose: Whose,
     },
     /// Verify every file: each finding names where it is, why, and what repairs it.
     Check {
+        /// Every row; the listing is bounded by default.
+        #[arg(long)]
+        all: bool,
+    },
+    /// The Debt: every sign of decay Status counts, each on its own line.
+    Debt {
         /// Every row; the listing is bounded by default.
         #[arg(long)]
         all: bool,
@@ -148,22 +146,9 @@ pub enum Command {
     Delete { id: String },
     /// Correct a live record's own fields; state stays a command's move.
     Edit(EditArgs),
-    /// Find records by substring over id, title, tags, people and body, the
-    /// archive included.
-    Search {
-        query: String,
-        /// Every row; the listing is bounded by default.
-        #[arg(long)]
-        all: bool,
-    },
-    /// The notebook as records and the edges between them.
+    /// The notebook as records and the edges between them: `list` with
+    /// edges.
     Graph(GraphArgs),
-    /// The whole notebook as one page, grouped by type.
-    Overview {
-        /// Every row; each section is bounded by default.
-        #[arg(long)]
-        all: bool,
-    },
     /// Wire the named agents to the notebook, in this directory: the
     /// one-line snippet in the instruction file each reads, the
     /// `SessionStart` hook where its host runs one, and the anb skills
@@ -313,8 +298,12 @@ pub struct CloseArgs {
 
 #[derive(Args)]
 pub struct GraphArgs {
-    #[command(flatten)]
-    pub slice: SliceArgs,
+    /// Only this record and the graph around it.
+    #[arg(long, value_name = "ID")]
+    pub focus: Option<String>,
+    /// How many edges out from `--focus` the graph reaches; 1 by default.
+    #[arg(long, value_name = "N", requires = "focus")]
+    pub depth: Option<usize>,
     /// Each record's envelope and body as well.
     #[arg(long)]
     pub full: bool,
@@ -322,29 +311,70 @@ pub struct GraphArgs {
     /// missing edges is not a smaller graph, it is a wrong one.
     #[arg(long)]
     pub all: bool,
+    #[command(flatten)]
+    pub narrowing: Narrowing,
+    #[command(flatten)]
+    pub extent: Extent,
 }
 
-/// Which Tasks the graph holds. They travel together because a narrowing
-/// honoured while printing and dropped while drawing hands the reader a
-/// picture of another notebook.
+/// The heading the narrowing flags print under, so `--help` and the
+/// reference teach them once for every verb that takes them.
+pub const NARROWING: &str = "Narrowing";
+
+/// Whose records a read answers with. Without any of the three, the
+/// notebook's `scope` key decides.
 #[derive(Args)]
-pub struct SliceArgs {
-    /// Only the work this record's scope reaches: one epic's branch.
+#[command(next_help_heading = NARROWING)]
+pub struct Whose {
+    /// Only records this identity created or took.
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["mine", "team"])]
+    pub by: Option<String>,
+    /// Only your own: `--by` with the identity the writers sign with.
+    #[arg(long, conflicts_with = "team")]
+    pub mine: bool,
+    /// Everyone's, whatever the notebook's `scope` key says.
+    #[arg(long)]
+    pub team: bool,
+}
+
+/// What every listing narrows by. Each flag is a predicate over the same
+/// notebook, so two flags ask for the intersection, and a narrowing
+/// honoured while printing is honoured while drawing: a picture of another
+/// notebook is no picture of this one.
+#[derive(Args)]
+#[command(next_help_heading = NARROWING)]
+pub struct Narrowing {
+    #[command(flatten)]
+    pub whose: Whose,
+    /// Only records inside this record's scope: an epic, what it waits on
+    /// and what was born inside it.
     #[arg(long = "for", value_name = "ID")]
     pub scope: Option<String>,
-    /// Only records of these types. Every type by default, including one
-    /// whose own `type` field no notebook word matches.
+    /// Only records carrying this tag; repeated, carrying every one.
+    #[arg(long = "tag", value_name = "TAG")]
+    pub tags: Vec<String>,
+    /// Only records whose id, title, tags, people or body hold this text,
+    /// whatever its case.
+    #[arg(long = "match", value_name = "TEXT")]
+    pub text: Option<String>,
+}
+
+/// Which records a listing reaches at all: their types, their kinds, and
+/// the archive. The queue is live open Tasks by definition, so `ready`
+/// takes none of these.
+#[derive(Args, Default)]
+#[command(next_help_heading = NARROWING)]
+pub struct Extent {
+    /// Only records of these types, comma-separated or repeated. Every
+    /// type by default, including one whose own `type` field no notebook
+    /// word matches.
     #[arg(long = "type", value_name = "TYPE", value_delimiter = ',', value_parser = a_record_type)]
     pub types: Vec<RecordType>,
-    /// Only what can be started now: the ready lens.
-    #[arg(long)]
-    pub ready: bool,
-    /// Only this record and the graph around it.
-    #[arg(long, value_name = "ID")]
-    pub focus: Option<String>,
-    /// How many edges out from `--focus` the graph reaches; 1 by default.
-    #[arg(long, value_name = "N", requires = "focus")]
-    pub depth: Option<usize>,
+    /// Only records of these kinds, comma-separated or repeated: a
+    /// Decision's rule, shape or drift; a Note's fact, term, guide, idea,
+    /// model or spec.
+    #[arg(long = "kind", value_name = "KIND", value_delimiter = ',')]
+    pub kinds: Vec<String>,
     /// The archive too; by default only the work still in play.
     #[arg(long)]
     pub archive: bool,

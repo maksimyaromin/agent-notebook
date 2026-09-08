@@ -25,13 +25,13 @@ The page never writes record files. It is a snapshot you can keep or share; chan
 |---|---|
 | Whole notebook, including the archive | `anb graph --json --archive --full --all` |
 | One epic | `anb graph --json --for <hub> --full --all` |
-| Ready work | `anb graph --json --ready --full --all` |
+| One person's work | `anb graph --json --mine --full --all` |
 | Neighbors of one record | `anb graph --json --focus <id> --depth 2 --full --all` |
 | Tasks | `anb graph --json --type task --full --all` |
 
-Graph JSON includes every node and edge in the selected slice. `--full` adds record envelopes and bodies; `--all` removes their text and field limits. Omit `--full` when ids, titles and state are enough.
+`graph` takes the same narrowing flags as `list`: `--for`, `--tag`, `--match`, `--by`, `--mine`, `--team`, `--type`, `--kind` and `--archive`, composable. Graph JSON includes every node and edge in the selected slice. `--full` adds record envelopes and bodies; `--all` removes their text and field limits. Omit `--full` when ids, titles and state are enough.
 
-The document contains `v` for the format version, `slice` for the query, `nodes` and `edges`. Nodes include identity, type, state, readiness, archive status, degree, creation date and title. Tasks may include priority, and hubs include epic progress.
+The document contains `v` for the format version, `slice` for the query, `nodes` and `edges`. Nodes include identity, type, state, readiness, archive status, degree, creation date and title. Tasks may include priority, and hubs include epic progress. A page about what can start now reads readiness off each node rather than asking for a narrower slice: a ready Task waits on nothing live, so a slice of ready Tasks alone would have no edges to draw.
 
 | Edge | Direction |
 |---|---|

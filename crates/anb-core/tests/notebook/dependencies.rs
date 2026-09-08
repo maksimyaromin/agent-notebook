@@ -602,7 +602,7 @@ mod epics {
     #[test]
     fn a_hub_reports_the_children_it_waits_on_and_what_to_pick_up_next() {
         assert_eq!(
-            Notebook::new(&mut an_epic()).overview().unwrap().epics,
+            epics(&mut an_epic()),
             vec![Epic {
                 id: "task.epic-auth".to_owned(),
                 closed: 1,
@@ -639,7 +639,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics,
+            epics(&mut storage),
             vec![Epic {
                 id: "task.epic".to_owned(),
                 closed: 1,
@@ -676,7 +676,7 @@ mod epics {
             .collect();
         assert_eq!(scoped, vec!["task.epic", "task.heir"]);
         assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics[0].next,
+            epics(&mut storage)[0].next,
             Some("task.heir".to_owned()),
             "the epic's queue reaches the record its filed lineage carries"
         );
@@ -707,10 +707,7 @@ mod epics {
                 &record_file("task.child", "task", "open", &["from: task.epic"], ""),
             ),
         ]);
-        assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics,
-            vec![]
-        );
+        assert_eq!(epics(&mut storage), vec![]);
     }
 
     /// The same corruption seen from the epic's side: a child that stands
@@ -734,7 +731,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics,
+            epics(&mut storage),
             vec![Epic {
                 id: "task.epic".to_owned(),
                 closed: 0,
@@ -763,7 +760,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics,
+            epics(&mut storage),
             vec![],
             "origin alone is not decomposition — the task does not wait on the doubt"
         );
@@ -782,7 +779,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics,
+            epics(&mut storage),
             vec![],
             "waiting on something is not having given birth to it"
         );
@@ -852,7 +849,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics,
+            epics(&mut storage),
             vec![Epic {
                 id: "task.epic-auth".to_owned(),
                 closed: 1,
@@ -1028,10 +1025,7 @@ mod epics {
             vec!["task.g1", "task.g2"],
             "an epic with dispatchable work must never report an empty queue"
         );
-        assert_eq!(
-            notebook.overview().unwrap().epics[0].next.as_deref(),
-            Some("task.g1")
-        );
+        assert_eq!(epics(&mut storage)[0].next.as_deref(), Some("task.g1"));
     }
 
     #[test]
@@ -1053,7 +1047,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics,
+            epics(&mut storage),
             vec![],
             "its acceptance close has happened; asking for it again asks for done work"
         );
@@ -1084,7 +1078,7 @@ mod epics {
             ),
         ]);
         assert_eq!(
-            Notebook::new(&mut storage).overview().unwrap().epics,
+            epics(&mut storage),
             vec![],
             "one command must not call a record invalid in one block and an epic in another"
         );

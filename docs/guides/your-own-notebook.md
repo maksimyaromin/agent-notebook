@@ -27,8 +27,8 @@ Knowledge commands work in either scope. Add `--global` to create, read, correct
 Tag a guide Note with `skill` when you want agents to find it as a reusable practice:
 
 ```text
-$ anb search review --global
-matches[1]{id,state,priority,title}:
+$ anb list --match review --global
+records[1]{id,state,priority,title}:
   note.review-in-two-passes,active,-,Review in two passes
 ```
 
@@ -36,7 +36,7 @@ Read it with `anb show note.review-in-two-passes --global`. Tell your agent to u
 
 ## Make project exceptions explicit
 
-When a project Decision overrides a global Decision, cite the global id in the project's record. Status reads the global notebook and reports the pair as `shadow` Debt. The agent can then see the project exception and the personal rule together. The tool detects the citation, not a semantic disagreement, and leaves the global Decision unchanged.
+When a project Decision overrides a global Decision, cite the global id in the project's record. Debt reads the global notebook and reports the pair as a `shadow` signal, counted on Status and listed by `anb debt`. The agent can then see the project exception and the personal rule together. The tool detects the citation, not a semantic disagreement, and leaves the global Decision unchanged.
 
 ## Choose a notebook location
 

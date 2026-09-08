@@ -16,8 +16,9 @@ mod restore;
 mod status;
 
 use anb_core::{
-    Blocker, Budget, CitedProof, DebtSignal, Draft, Edit, Filter, FindingCode, Link, MemoryStorage,
-    Notebook, NotebookError, Proof, RecordType, Repair, Storage, StorageError, Transitioned,
+    Blocker, Budget, CitedProof, DebtSignal, Draft, Edit, Epic, Filter, FindingCode, GraphSlice,
+    Link, MemoryStorage, Notebook, NotebookError, Proof, RecordType, Repair, Storage, StorageError,
+    Transitioned,
 };
 
 const TODAY: &str = "2026-08-27";
@@ -42,6 +43,18 @@ fn record_file(id: &str, type_word: &str, state: &str, extra_lines: &[&str], bod
     text.push_str("created: 2026-08-24\nupdated: 2026-08-25\n---\n");
     text.push_str(body);
     text
+}
+
+/// Where every live epic stands, read off the hubs' nodes: the graph is
+/// the read that carries an epic's progress.
+fn epics(storage: &mut MemoryStorage) -> Vec<Epic> {
+    Notebook::new(storage)
+        .graph(&GraphSlice::default())
+        .unwrap()
+        .nodes
+        .into_iter()
+        .filter_map(|node| node.epic)
+        .collect()
 }
 
 /// The listing narrowed to one hub's scope.
