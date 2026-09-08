@@ -1,6 +1,6 @@
 {
   "name": "@supolka/agent-notebook-win32-x64",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "The anb binary for Windows on x86-64; installed by @supolka/agent-notebook, never on its own",
   "license": "MIT",
   "repository": {

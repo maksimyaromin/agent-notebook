@@ -1,5 +1,22 @@
 # Changelog
 
+## agent-notebook v2026.09.08.2
+
+A Task belongs to who holds it. A team in which one person plans and the others do asked for reads that answer with the work each person holds, not with what each person wrote; this release is that ruling and the reads a planner and a developer need beside it. The packages move to 0.6.0: `--mine`, `--by <name>` and `scope: mine` no longer admit a Task by its author, and Status and a listing's JSON filter gain a field, so a script built on either reads the entries below first.
+
+### New
+
+- **Handing over at creation.** `add task --taken-by <name>` writes a Task and hands it over in one command, guarded like `edit --taken-by`; `add task --mine` takes it for the identity, and is refused with the fix named when the host knows nobody. A planner's session is one line per Task. (#76)
+- **The pool is one read.** `--untaken` on `ready`, `list` and `graph` is the Tasks nobody holds, the ones anyone may take. It answers whose outright, so it outranks `scope: mine` and is refused beside `--by`, `--mine` or `--team`; the truncation hint carries it, and a listing's JSON filter carries `untaken`. (#76)
+- **A narrowed Status counts the pool.** Under `scope: mine` a developer who held nothing saw a quiet notebook while the pool had work. The dashboard now prints `untaken: N — anb ready --untaken` when it is narrowed and the pool is not empty, a pool alone opens the gate, and `--json` carries `untaken.count`. The team's dashboard lists the pool in its queue and carries no count. (#76)
+
+### Improved
+
+- **Mine is what I hold.** `taken-by` names a Task's holder and `by` its author, and for a Task `mine` is `taken-by` and nothing else; `by` keeps meaning `mine` for a Question, a Note or a Decision. A Task you wrote and handed to a colleague is the colleague's in every read, and a Task nobody holds is nobody's, however many people wrote or planned it. `--by <name>` answers with a colleague's work the same way, and the dashboard's own-first order and marks read the holder. (#76)
+- **The skill takes from the pool.** A session resumes the active Task, else takes the top of the user's queue, else the top of `ready --untaken`; the team paragraph is written around holder and author, and the worked session shows a hand-over at creation, the pool and a narrowed Status with an empty queue. (#76)
+
+Packages in this release: `@supolka/agent-notebook@0.6.0` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.08.1
 
 Status is where the work continues, and every listing narrows the same way. A team on one notebook asked for a read side that answers each of its questions once, and for a complexity revision before another flag was added; the revision is this release. The packages move to 0.5.0: `search` and `overview` are gone, `graph --ready` with them, Status no longer prints rules, epics or Debt rows, and the graph document is at version 3, so a script built on any of those reads the entries below first.
