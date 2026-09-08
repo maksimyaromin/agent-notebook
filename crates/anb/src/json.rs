@@ -387,6 +387,7 @@ fn filter_fields(filter: &Filter) -> Map<String, Value> {
         ("tag", words(&filter.tags)),
         ("for", json!(filter.hub)),
         ("by", json!(filter.by)),
+        ("untaken", json!(filter.untaken)),
         ("match", json!(filter.text)),
         ("archive", json!(filter.archive)),
     ])
@@ -484,8 +485,9 @@ fn view_value(view: &View, all: bool) -> Value {
 
 /// The dashboard as data. The Budget belongs to the text: it measures a
 /// rendering, and this one is bounded per section instead — so neither the
-/// spent estimate nor the text it measures is restated here. Debt is a
-/// count, as on the text: `anb debt` is the read.
+/// spent estimate nor the text it measures is restated here. The pool and
+/// Debt are counts, as on the text: `anb ready --untaken` and `anb debt`
+/// are the reads.
 fn status_value(status: &Status) -> Value {
     Value::Object(fields([
         ("quiet", json!(status.quiet)),
@@ -513,6 +515,7 @@ fn status_value(status: &Status) -> Value {
             "ready",
             section(&status.ready, dashboard_rows(&status.ready), ready_row),
         ),
+        ("untaken", json!({"count": status.untaken})),
         (
             "questions",
             section(
@@ -525,7 +528,7 @@ fn status_value(status: &Status) -> Value {
     ]))
 }
 
-/// The fields of a row about a record, with who created it and who took
+/// The fields of a row about a record, with who wrote it and who holds
 /// it beside them when the record names them.
 fn attributed<'a>(
     entries: impl IntoIterator<Item = (&'a str, Value)>,

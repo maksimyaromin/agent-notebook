@@ -19,7 +19,7 @@ stateDiagram-v2
     closed --> open: reopen
 ```
 
-`start` moves a Task into active work and records who took it as `taken-by`. A Task someone else took is refused with `taken`; `anb edit <id> --taken-by <name>` hands it over. Use `submit` when the result needs human acceptance, then `close` to accept it or `start` to continue work. Review is optional; you can close directly from active. `reopen` returns a closed Task to open and logs the transition. The CLI refuses an invalid move and lists valid alternatives:
+`start` moves a Task into active work and records who holds it as `taken-by`. A Task someone else holds is refused with `taken`; `anb add task --taken-by <name>` hands a Task over as it is written and `anb edit <id> --taken-by <name>` later. Use `submit` when the result needs human acceptance, then `close` to accept it or `start` to continue work. Review is optional; you can close directly from active. `reopen` returns a closed Task to open and logs the transition. The CLI refuses an invalid move and lists valid alternatives:
 
 ```
 $ anb submit task.ship-the-parser

@@ -1,13 +1,14 @@
 ---
 id: decision.a-task-is-taken-never-assigned-start
 type: decision
-state: active
+state: superseded
 kind: shape
 title: A Task is taken, never assigned: start records who took it
 by: Maksim Yaromin
 via: claude-code
 tags: identity, tasks
 supersedes: decision.a-task-is-held-by-its-assignee-written
+superseded-by: decision.a-task-belongs-to-who-holds-it-mine-is
 created: 2026-09-08
 updated: 2026-09-08
 ---

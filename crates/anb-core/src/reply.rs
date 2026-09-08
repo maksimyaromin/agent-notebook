@@ -67,8 +67,8 @@ pub struct Edged {
     pub already: bool,
 }
 
-/// The people a record names: who created it and, on a Task, who took it.
-/// A listing is narrowed by it and the dashboard sorts by it.
+/// The people a record names: who wrote it and, on a Task, who holds it.
+/// Whose the record is, is [`Record::belongs_to`]'s to say.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Attribution {
     pub by: Option<String>,
@@ -81,19 +81,6 @@ impl Attribution {
             by: record.file().field("by").map(str::to_owned),
             taken_by: record.taken_by().map(str::to_owned),
         }
-    }
-
-    /// Whether `identity` created or took the record.
-    #[must_use]
-    pub fn names(&self, identity: &str) -> bool {
-        self.by.as_deref() == Some(identity) || self.taken_by.as_deref() == Some(identity)
-    }
-
-    /// The one name that answers whose the record is: who took it, else who
-    /// created it.
-    #[must_use]
-    pub fn name(&self) -> Option<&str> {
-        self.taken_by.as_deref().or(self.by.as_deref())
     }
 }
 
@@ -113,8 +100,8 @@ pub struct ReadyTask {
 impl ReadyTask {
     /// The ready table — header and the first `shown` rows, ages derived
     /// from `today_day`. The caller owns its own truncation hint. The row
-    /// carries who took the Task and not who created it, because a reader
-    /// picking work asks whether a Task is already taken.
+    /// carries who holds the Task and not who wrote it, because a reader
+    /// picking work asks whether a Task is already somebody's.
     #[must_use]
     pub fn table(rows: &[ReadyTask], shown: usize, today_day: i64) -> String {
         let mut out = format!("ready[{}]{{id,priority,age,taken-by,title}}:\n", rows.len());

@@ -9,7 +9,10 @@
 //!
 //! Whose work it is follows the `by` narrowing every listing takes: the
 //! whole team's, the reader's own first and every other line naming its
-//! person, or one identity's alone.
+//! person, or one identity's alone. A dashboard narrowed to one identity
+//! hides the pool, the ready Tasks nobody holds, so it counts the pool on
+//! a line of its own: a session whose own queue is empty is not a session
+//! with nothing to do.
 //!
 //! Over Budget the sections collapse one rung at a time up [`Collapse`],
 //! and the first active line survives every rung: no notebook, however
@@ -109,6 +112,8 @@ pub struct Status {
     pub review: Vec<ReviewTask>,
     pub held: Vec<HeldTask>,
     pub ready: Vec<ReadyTask>,
+    /// How many ready Tasks nobody holds; `anb ready --untaken` is the read.
+    pub untaken: usize,
     pub questions: Vec<OpenQuestion>,
     /// How many Debt signals the notebook carries; `anb debt` is the read.
     pub debt: usize,
@@ -129,6 +134,7 @@ pub(crate) struct StatusInputs {
     pub review: Vec<ReviewTask>,
     pub held: Vec<HeldTask>,
     pub ready: Vec<ReadyTask>,
+    pub untaken: usize,
     pub questions: Vec<OpenQuestion>,
     pub debt: usize,
     pub today_day: i64,
@@ -136,14 +142,15 @@ pub(crate) struct StatusInputs {
 
 impl StatusInputs {
     /// The gate: signal is work in motion, work waiting on a human,
-    /// dispatchable work, an open doubt, or decay. Review counts
-    /// deliberately: a Task parked at acceptance is not a quiet notebook.
-    /// A hold does not count: it is a pause somebody chose, and a hold
-    /// gone stale is Debt's to raise.
+    /// dispatchable work, the reader's own or anyone's, an open doubt, or
+    /// decay. Review counts deliberately: a Task parked at acceptance is
+    /// not a quiet notebook. A hold does not count: it is a pause somebody
+    /// chose, and a hold gone stale is Debt's to raise.
     fn has_signal(&self) -> bool {
         !self.active.is_empty()
             || !self.review.is_empty()
             || !self.ready.is_empty()
+            || self.untaken > 0
             || !self.questions.is_empty()
             || self.debt > 0
     }
@@ -264,6 +271,7 @@ fn status_from(inputs: StatusInputs, text: String, spent: u32, quiet: bool) -> S
         review: inputs.review,
         held: inputs.held,
         ready: inputs.ready,
+        untaken: inputs.untaken,
         questions: inputs.questions,
         debt: inputs.debt,
         spent,
@@ -351,6 +359,7 @@ fn render_body(inputs: &StatusInputs, ladder: Ladder, ready_shown: usize) -> Str
         inputs.today_day,
         inputs.by.as_deref(),
     );
+    render_untaken(&mut out, inputs.untaken, inputs.by.as_deref());
     render_questions(
         &mut out,
         &inputs.questions,
@@ -380,14 +389,15 @@ fn narrowed(command: &str, by: Option<&str>) -> String {
     }
 }
 
-/// The name a line carries when the record is somebody else's: the reader
+/// The name a Task line carries when somebody else holds it: the reader
 /// never resumes another person's work by mistake, while the reader's own
-/// lines, and lines nobody is named on, carry no mark.
+/// lines, and lines nobody holds, carry no mark.
 fn mark(attribution: &Attribution, identity: Option<&str>) -> Option<String> {
     attribution
-        .name()
-        .filter(|whose| Some(*whose) != identity)
-        .map(|whose| format!(" ({})", quoted_if_delimited(whose)))
+        .taken_by
+        .as_deref()
+        .filter(|holder| Some(*holder) != identity)
+        .map(|holder| format!(" ({})", quoted_if_delimited(holder)))
 }
 
 /// What is in motion, and where the first of it stopped. The floor keeps
@@ -512,6 +522,18 @@ fn render_ready(
     if ready.len() > shown {
         let _ = writeln!(out, "  \u{2026} {} more: {lift}", ready.len() - shown);
     }
+}
+
+/// The pool, counted: the ready Tasks nobody holds. A dashboard narrowed
+/// to one identity shows that person's queue and hides the pool with the
+/// rest of the team's work, so it names the pool by count where a session
+/// with an empty queue looks for its next work. The whole team's queue
+/// already lists the pool, each of its rows with `-` for a holder.
+fn render_untaken(out: &mut String, untaken: usize, by: Option<&str>) {
+    if untaken == 0 || by.is_none() {
+        return;
+    }
+    let _ = writeln!(out, "untaken: {untaken} — anb ready --untaken");
 }
 
 /// The open doubts, oldest first: what the session is about to work past.

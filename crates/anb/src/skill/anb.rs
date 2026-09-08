@@ -131,11 +131,11 @@ Choose by what a later reader needs, with an explicit `--kind` for Notes and Dec
 
 ### Orient
 
-Read `anb status` unless the hook supplied it. Status is the work: the active Tasks with the last log line of the first, work in review or on hold, the queue, the open Questions and a count of Debt. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Before the work, read the standing rules with `anb list --type decision --kind rule` and open the ones its subject touches, then the knowledge the Task cites and the relevant code. Search before creating records: `anb list --match <text>` matches ids, titles, tags, the people named in the envelope and bodies, and `--archive` reaches history. Use `show --all` for a truncated body and narrowed lists for larger work; loading the whole notebook obscures the immediate decision.
+Read `anb status` unless the hook supplied it. Status is the work: the active Tasks with the last log line of the first, work in review or on hold, the queue, the open Questions and a count of Debt. Follow the requested subject; otherwise resume the active Task, or take the top of `ready`; when the user's own queue is empty and Status counts the pool on its `untaken:` line, take the top of `ready --untaken`. Before the work, read the standing rules with `anb list --type decision --kind rule` and open the ones its subject touches, then the knowledge the Task cites and the relevant code. Search before creating records: `anb list --match <text>` matches ids, titles, tags, the people named in the envelope and bodies, and `--archive` reaches history. Use `show --all` for a truncated body and narrowed lists for larger work; loading the whole notebook obscures the immediate decision.
 
-Every listing narrows the same way: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine` and `--team` compose on `list`, `ready` and `graph`, and `--type`, `--kind` and `--archive` on `list` and `graph`, each answering with the records every flag admits. `list --type note --tag domain-model` is the domain language; `ready --tag parser` is one area's queue; `anb debt` is the Debt that Status counts.
+Every listing narrows the same way: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine`, `--team` and `--untaken` compose on `list`, `ready` and `graph`, and `--type`, `--kind` and `--archive` on `list` and `graph`, each answering with the records every flag admits. `list --type note --tag domain-model` is the domain language; `ready --tag parser` is one area's queue; `anb debt` is the Debt that Status counts.
 
-Several people can share one notebook, and nobody assigns work in it: a Task is taken. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names a Task someone already took; choose one nobody took, or one the user took, and read `ready --mine` when the queue is long. A notebook whose config sets `scope: mine` answers every read with the user's own records by default; `--team` widens one call to the whole project, which is how new work is chosen when the user's own queue is empty. `start` records the user as the Task's `taken-by` and refuses a Task another person took; handing it over is `edit <id> --taken-by <name>`, decided by the user, never by the agent.
+Several people can share one notebook, and a Task belongs to whoever holds it: `taken-by` names the holder, `by` the author, and a Task nobody holds is nobody's, whoever wrote it. `start` takes an untaken Task for the user and refuses one another person holds. A planner hands a Task over as it is written with `add task --taken-by <name>`, or later with `edit <id> --taken-by <name>`, both decided by the user, never by the agent; `add task --mine` takes a Task for the user, for a follow-up the user will do. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names each Task's holder, and `ready --untaken` is the pool, the Tasks anyone may take. A notebook whose config sets `scope: mine` answers every read with the Tasks the user holds and the records the user wrote; Status then counts the pool on its `untaken:` line, and `--team` widens one call to the whole project.
 
 ### Shape the idea
 
@@ -181,12 +181,13 @@ Run `anb check`, address findings and recheck. When no CLI repair exists, report
 | Quote an id intended as a relationship | Cite it outside backticks | Quoted examples do not create mentions |
 | Retry a refused command unchanged | Read its `try:` instruction and fill its placeholders | Refusals explain the required correction |
 | Repeat `add` after an uncertain result | Inspect the notebook first | Creation without an explicit id can produce duplicates |
-| Start a Task marked as another person's | Pick a Task nobody took, or ask the user before `edit --taken-by` | Two people working one Task learn of it from a merge conflict |
+| Start a Task marked as another person's | Take one from `ready --untaken`, or ask the user before `edit --taken-by` | Two people working one Task learn of it from a merge conflict |
+| Leave a Task in the pool when its doer is already known | `add task --mine` for the user, `--taken-by <name>` for a colleague | A Task nobody holds enters nobody's queue |
 | Start work straight from Status | Read `list --type decision --kind rule` first | Status is the work; a rule is read before the work it binds |
 
 ## References
 
-Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list` and `ready` rows carry `by` and `taken-by` there. Use the installed `anb-atlas` skill for a visual review.
+Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list` and `ready` rows carry `by` and `taken-by` there, and Status carries the pool as `untaken.count`. Use the installed `anb-atlas` skill for a visual review.
 
 For a named personal practice, `list --match <name> --global` finds it and `show <id> --global` reads it; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.
 "#;
@@ -446,13 +447,27 @@ const SESSION: &[Step] = &[
     ]),
     Step::Head("The queue"),
     Step::Say(
-        "The queue shows what can start now; the blocked child waits, and the `taken-by` column would name a Task someone already took:",
+        "A Task planned for a colleague is handed over as it is written, and the queue shows what can start now: the blocked child waits, the `taken-by` column names who holds a Task, and `--untaken` is the pool, the Tasks nobody holds:",
     ),
+    Step::Run(&[
+        "add",
+        "task",
+        "Port the parser to Go",
+        "--priority",
+        "3",
+        "--taken-by",
+        "Grace",
+    ]),
     Step::Run(&["ready"]),
+    Step::Run(&["ready", "--untaken"]),
     Step::Run(&["ready", "--for", "task.ship-the-parser"]),
+    Step::Say(
+        "Narrowed to the user's own, with `--mine` or the config key `scope: mine`, a dashboard holds the Tasks the user holds and the records the user wrote; Ada holds nothing yet, so it counts the pool where her next work is:",
+    ),
+    Step::Run(&["status", "--mine", "--budget", "0"]),
     Step::Head("A session at work"),
     Step::Say(
-        "A session takes the top of the queue, which records who took it as `taken-by`, logs as it goes with the entry signed `by/via`, and parks a doubt without widening its scope:",
+        "A session takes the top of the pool, which records who holds it as `taken-by`, logs as it goes with the entry signed `by/via`, and parks a doubt without widening its scope:",
     ),
     Step::Run(&["start", "task.grammar-parser-accepts-fences"]),
     Step::Run(&[
@@ -516,11 +531,11 @@ const SESSION: &[Step] = &[
     Step::Run(&["list", "--type", "decision", "--kind", "rule"]),
     Step::Head("Status"),
     Step::Say(
-        "Status opens the session with the work: the active Task and its last log line, the queue and the open Questions; an active Task another person took would carry their name after its title:",
+        "Status opens the session with the work: the active Task and its last log line, the queue with who holds each Task, and the open Questions; an active Task another person holds would carry their name after its title:",
     ),
     Step::Run(&["status", "--budget", "0"]),
     Step::Say(
-        "Narrowed to the user's own, with `--mine` or the config key `scope: mine`, it says whose it is and how to widen it:",
+        "Narrowed to the user's own, it says whose it is and how to widen it, and a colleague's Task is not in it:",
     ),
     Step::Run(&["status", "--mine", "--budget", "0"]),
     Step::Head("Closing a Question"),
@@ -549,9 +564,8 @@ const SESSION: &[Step] = &[
     Step::Run(&["archive", "task.grammar-parser-accepts-fences"]),
     Step::Head("Ending without work, pausing"),
     Step::Say(
-        "A Task overtaken before it started ends with its reason, from open, and is archived like any closed record; a pause carries its reason too:",
+        "A Task overtaken before it started ends with its reason, from open, whoever holds it, and is archived like any closed record; a pause carries its reason too:",
     ),
-    Step::Run(&["add", "task", "Port the parser to Go"]),
     Step::Run(&[
         "close",
         "task.port-the-parser-to-go",
@@ -569,7 +583,7 @@ const SESSION: &[Step] = &[
     ]),
     Step::Head("Reading back, and the gate"),
     Step::Say(
-        "Reading back: one record, the whole notebook, the records that are Ada's own, the records holding a text with the archive reached, and the gate, which is clean because every settled record was archived as it settled:",
+        "Reading back: one record, the whole notebook, the records that are Ada's own, which the hub she wrote and nobody holds is not, the records holding a text with the archive reached, and the gate, which is clean because every settled record was archived as it settled:",
     ),
     Step::Run(&["show", "task.ship-the-parser"]),
     Step::Run(&["list"]),
@@ -601,7 +615,7 @@ const REFUSALS: &[Step] = &[
     Step::Run(&["close", "task.ship-the-parser", "--no-proof"]),
     Step::Head("taken"),
     Step::Say(
-        "Another person took the Task. `start` takes work, so a Task already taken changes hands through `edit --taken-by` first, on purpose.",
+        "Another person holds the Task, having started it or been handed it. `start` takes work nobody holds, so a held Task changes hands through `edit --taken-by` first, on purpose.",
     ),
     Step::Run(&[
         "edit",

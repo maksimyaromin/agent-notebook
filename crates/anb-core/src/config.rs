@@ -53,7 +53,7 @@ const CONFIG_KEYS: &[ConfigKey] = &[
 const SCOPE: &str = "scope";
 
 /// Whose records a read answers with by default: everyone's, or the
-/// caller's own, the ones the identity created or took.
+/// caller's own, the Tasks the identity holds and the records it wrote.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Scope {
     #[default]

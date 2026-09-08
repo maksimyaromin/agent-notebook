@@ -37,7 +37,7 @@ The supplied skill defines this working cycle:
 
 | During the work | What the agent does |
 |---|---|
-| Starting | Resumes the user's own active Task, or selects ready work nobody else took when none is active. It keeps one Task in flight. |
+| Starting | Resumes the user's own active Task; when none is active, takes the top of the user's queue, or of the pool nobody holds when the queue is empty. It keeps one Task in flight. |
 | Understanding a new request | Captures an idea with its source, clarifies the intended outcome, and records questions and evidence. Creates a spec or domain model when the work needs one. |
 | Planning delivery | Creates a hub Task from the idea, child Tasks from the hub, and dependencies where one result needs another. |
 | Making progress | Logs what it established and what comes next. |

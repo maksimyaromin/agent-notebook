@@ -367,11 +367,23 @@ impl Record {
         self.file.field("resolved-by")
     }
 
-    /// Who took the Task into work: written by `start`, corrected by
-    /// `edit --taken-by`.
+    /// Who holds the Task: written by `start` or `add --taken-by`,
+    /// corrected by `edit --taken-by`.
     #[must_use]
     pub fn taken_by(&self) -> Option<&str> {
         self.file.field("taken-by")
+    }
+
+    /// Whose the record is: who holds a Task, who wrote anything else. Work
+    /// belongs to its holder and authorship is a separate fact, so a Task
+    /// nobody holds is nobody's, however many people wrote or planned it.
+    #[must_use]
+    pub fn belongs_to(&self) -> Option<&str> {
+        if self.record_type() == Some(RecordType::Task) {
+            self.taken_by()
+        } else {
+            self.file.field("by")
+        }
     }
 
     #[must_use]

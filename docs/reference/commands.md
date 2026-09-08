@@ -13,9 +13,10 @@ A read answers with the records its narrowing admits. Each flag is a predicate o
 
 | Flag | Meaning |
 |---|---|
-| `--by <NAME>` | Only records this identity created or took |
+| `--by <NAME>` | Only this identity's work: the tasks it holds and the records it wrote |
 | `--mine` | Only your own: `--by` with the identity the writers sign with |
 | `--team` | Everyone's, whatever the notebook's `scope` key says |
+| `--untaken` | Only the tasks nobody holds, the pool anyone may take, whatever the notebook's `scope` key says |
 | `--for <ID>` | Only records inside this record's scope: an epic, what it waits on and what was born inside it |
 | `--tag <TAG>` | Only records carrying this tag; repeated, carrying every one |
 | `--match <TEXT>` | Only records whose id, title, tags, people or body hold this text, whatever its case |
@@ -39,13 +40,15 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 | `--body-file <PATH>` | The prose under the envelope, read from a file; `-` reads standard input. Refused beside --body |
 | `--by <BY>` | The accountable identity; omitted, `ANB_BY` or the git identity fills it |
 | `--via <VIA>` | The acting agent tool |
+| `--taken-by <NAME>` | Who will do the task: hands it over as it is written. Omitted, the task is nobody's until someone starts it |
+| `--mine` | Take the task for yourself: `--taken-by` with the identity the writers sign with |
 | `--priority <PRIORITY>` | A task's urgency, 0 to 4, 0 the most urgent |
 | `--kind <KIND>` | A decision's rule, shape, or drift; a note's fact, term, guide, idea, model, or spec |
 | `--supersedes <SUPERSEDES>` | The Decision or Note this one replaces; it flips in the same move |
 
 ### anb start
 
-open | review → active: take the Task into work, or back into it; the Task records who took it, and one taken by someone else is refused
+open | review → active: take the Task into work, or back into it; the Task records who holds it, and one somebody else holds is refused
 
 Arguments: `<ID>`
 
@@ -124,13 +127,13 @@ Arguments: `<ID>`
 
 ### anb ready
 
-The dispatch queue: open, unblocked, unheld Tasks, most urgent first, each naming who took it when someone did
+The dispatch queue: open, unblocked, unheld Tasks, most urgent first, each naming who holds it when someone does
 
 | Flag | Meaning |
 |---|---|
 | `--all` | Every row; the listing is bounded by default |
 
-Narrowing: `--by`, `--mine`, `--team`, `--for`, `--tag`, `--match`.
+Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--for`, `--tag`, `--match`.
 
 ### anb list
 
@@ -140,7 +143,7 @@ The records, ids and titles out: every live one by default, or the ones the narr
 |---|---|
 | `--all` | Every row; the listing is bounded by default |
 
-Narrowing: `--by`, `--mine`, `--team`, `--for`, `--tag`, `--match`, `--type`, `--kind`, `--archive`.
+Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--for`, `--tag`, `--match`, `--type`, `--kind`, `--archive`.
 
 ### anb show
 
@@ -215,7 +218,7 @@ Arguments: `<ID>`
 | `--from <FROM>` | Origin: the record this record was born from |
 | `--priority <PRIORITY>` | 0 to 4, 0 the most urgent |
 | `--review-by <DATE>` | The explicit resurfacing date |
-| `--taken-by <NAME>` | Who took the task: the hand-over that lets another identity start it |
+| `--taken-by <NAME>` | Who holds the task: the hand-over that lets another identity start it |
 | `--clear <FIELD>` | The optional field to erase: `from`, `priority`, `review-by`, or `taken-by`; repeatable |
 
 ### anb graph
@@ -229,7 +232,7 @@ The notebook as records and the edges between them: `list` with edges
 | `--full` | Each record's envelope and body as well |
 | `--all` | Every row the plain text bounds. JSON is never bounded: a graph missing edges is not a smaller graph, it is a wrong one |
 
-Narrowing: `--by`, `--mine`, `--team`, `--for`, `--tag`, `--match`, `--type`, `--kind`, `--archive`.
+Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--for`, `--tag`, `--match`, `--type`, `--kind`, `--archive`.
 
 ### anb setup
 

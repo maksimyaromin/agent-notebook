@@ -226,6 +226,61 @@ mod task_cycle_replies {
         );
     }
 
+    /// A planner hands a Task over in the command that writes it, and a
+    /// developer takes one for themself without spelling their own name.
+    #[test]
+    fn add_task_hands_the_task_over_or_takes_it_for_the_caller() {
+        let mut storage = MemoryStorage::new();
+        ok(
+            &mut storage,
+            &["add", "task", "Planned for Grace", "--taken-by", "Grace"],
+        );
+        ok(&mut storage, &["add", "task", "Planned for me", "--mine"]);
+        ok(&mut storage, &["add", "task", "Planned for nobody"]);
+        assert!(
+            storage
+                .read("tasks/task.planned-for-grace.md")
+                .unwrap()
+                .contains("\nby: Maks\ntaken-by: Grace\n")
+        );
+        assert!(
+            storage
+                .read("tasks/task.planned-for-me.md")
+                .unwrap()
+                .contains("\nby: Maks\ntaken-by: Maks\n")
+        );
+        assert_snapshot!(
+            ok(&mut storage, &["ready"]),
+            @r"
+        ready[3]{id,priority,age,taken-by,title}:
+          task.planned-for-grace,-,0d,Grace,Planned for Grace
+          task.planned-for-me,-,0d,Maks,Planned for me
+          task.planned-for-nobody,-,0d,-,Planned for nobody
+        "
+        );
+    }
+
+    /// A host that knows nobody has nobody to take the Task for; the
+    /// refusal names the fix.
+    #[test]
+    fn add_task_mine_without_an_identity_is_a_recovery_payload() {
+        let mut storage = MemoryStorage::new();
+        let line = ["anb", "add", "task", "Planned for me", "--mine"];
+        let cli = Cli::try_parse_from(line).unwrap();
+        let error = execute(cli.command, &mut storage, anonymous_host()).unwrap_err();
+        assert_eq!(
+            text::render_error(
+                &error,
+                &anb::recovery::subject(&Cli::try_parse_from(line).unwrap().command)
+            ),
+            "error[invalid-argument]: mine: no identity to take the task for; set git user.name or ANB_BY\ntry: anb add task \"<title>\"\n"
+        );
+        assert!(
+            storage.list("tasks").unwrap().is_empty(),
+            "nothing was written"
+        );
+    }
+
     /// Whether the value is an integer is the command line\'s question;
     /// whether it is a priority is the notebook\'s, and both answers reach
     /// the caller in one shape.
@@ -1207,9 +1262,19 @@ mod flat_lists {
     #[test]
     fn mine_narrows_to_the_callers_own_and_the_hint_carries_the_name() {
         let mut files: Vec<(String, String)> = (0..22)
-            .map(|n| open_task(&format!("task.m{n:02}"), "A demo record", &["by: Maks"]))
+            .map(|n| {
+                open_task(
+                    &format!("task.m{n:02}"),
+                    "A demo record",
+                    &["taken-by: Maks"],
+                )
+            })
             .collect();
-        files.push(open_task("task.hers", "Somebody else's", &["by: Grace"]));
+        files.push(open_task(
+            "task.hers",
+            "Somebody else's",
+            &["taken-by: Grace"],
+        ));
         let mut storage = storage_with(&files);
         let mine = ok(&mut storage, &["ready", "--mine"]);
         assert!(mine.starts_with("ready[22]{"), "{mine}");
@@ -1229,7 +1294,7 @@ mod flat_lists {
                 open_task(
                     &format!("task.g{n:02}"),
                     "A demo record",
-                    &["by: Grace Hopper"],
+                    &["taken-by: Grace Hopper"],
                 )
             })
             .collect();
@@ -3263,15 +3328,15 @@ mod narrowed_listings {
     #[test]
     fn the_scope_key_narrows_every_read_and_team_widens_one_call() {
         let mut storage = storage_with(&[
-            open_task("task.mine", "My record", &["by: Maks"]),
-            open_task("task.hers", "Her record", &["by: Grace"]),
+            open_task("task.mine", "My record", &["taken-by: Maks"]),
+            open_task("task.hers", "Her record", &["taken-by: Grace"]),
         ]);
         anb_core::Storage::write(&mut storage, "config", "scope: mine\n").unwrap();
         assert_snapshot!(
             ok(&mut storage, &["ready"]),
             @r"
         ready[1]{id,priority,age,taken-by,title}:
-          task.mine,-,4d,-,My record
+          task.mine,-,4d,Maks,My record
         "
         );
         assert_snapshot!(
@@ -3289,6 +3354,56 @@ mod narrowed_listings {
           task.hers,open,-,Her record
         "
         );
+    }
+
+    /// The pool is the Tasks nobody holds, one read under any scope: it
+    /// answers whose outright, so `scope: mine` does not narrow it, and the
+    /// hint that lifts its bound carries the flag. On the dashboard the
+    /// pool is a count under a narrowing and part of the queue otherwise.
+    #[test]
+    fn untaken_is_the_pool_under_any_scope_and_the_dashboard_counts_it() {
+        let mut files: Vec<(String, String)> = (0..21)
+            .map(|n| open_task(&format!("task.free{n:02}"), "Anyone's", &["by: Grace"]))
+            .collect();
+        files.push(open_task("task.hers", "Her record", &["taken-by: Grace"]));
+        let mut storage = storage_with(&files);
+        anb_core::Storage::write(&mut storage, "config", "scope: mine\n").unwrap();
+        let pool = ok(&mut storage, &["ready", "--untaken"]);
+        assert!(pool.starts_with("ready[21]{"), "{pool}");
+        assert!(!pool.contains("task.hers"), "{pool}");
+        assert_eq!(
+            pool.lines().last().unwrap(),
+            "  \u{2026} 1 more: anb ready --untaken --all"
+        );
+        let listed = ok(&mut storage, &["list", "--untaken", "--all"]);
+        assert_eq!(listed.lines().count(), 22, "{listed}");
+
+        let status = ok(&mut storage, &["status", "--budget", "0"]);
+        assert!(
+            status.contains("untaken: 21 — anb ready --untaken\n"),
+            "{status}"
+        );
+        assert!(!status.contains("ready["), "{status}");
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
+        assert_eq!(value["untaken"], serde_json::json!({"count": 21}));
+        let team = ok(&mut storage, &["status", "--team", "--budget", "0"]);
+        assert!(!team.contains("untaken:"), "{team}");
+        assert!(team.contains("ready[22]{"), "{team}");
+    }
+
+    /// The pool is nobody's, so asking for it beside a name asks a
+    /// contradiction, and the command line refuses the pair.
+    #[test]
+    fn untaken_beside_a_name_is_refused_by_the_command_line() {
+        for line in [
+            vec!["anb", "ready", "--untaken", "--mine"],
+            vec!["anb", "list", "--untaken", "--by", "Grace"],
+            vec!["anb", "graph", "--untaken", "--team"],
+        ] {
+            assert!(Cli::try_parse_from(line.clone()).is_err(), "{line:?}");
+        }
+        assert!(Cli::try_parse_from(["anb", "status", "--untaken"]).is_err());
     }
 
     /// Under `scope: mine` a host that knows nobody has nothing to narrow

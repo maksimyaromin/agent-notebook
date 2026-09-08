@@ -76,7 +76,7 @@ try: anb close task.ship-the-parser --reason "<why>"
 
 ## taken
 
-Another person took the Task. `start` takes work, so a Task already taken changes hands through `edit --taken-by` first, on purpose.
+Another person holds the Task, having started it or been handed it. `start` takes work nobody holds, so a held Task changes hands through `edit --taken-by` first, on purpose.
 
 ```
 $ anb edit task.grammar-parser-accepts-fences --taken-by Grace
