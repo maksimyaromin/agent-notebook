@@ -46,7 +46,7 @@ Status also reports work awaiting review, standing rules, epic progress and Debt
 
 A compact section still has a count. `ready: 7` means there are seven Tasks, even if the budget omitted their rows. `anb status --budget 0` removes budget-driven cuts; individual sections still limit their rows. Use the relevant listing with `--all` for the complete set. [Status and Debt](../reference/status.md) specifies the sections, limits and clocks.
 
-A quiet notebook produces one line. Holds alone do not trigger the full summary, but a stale hold becomes Debt and makes it visible again.
+A quiet notebook produces one line. A standing rule alone opens the full summary, so the law reaches a session before its first Task exists. Holds alone do not trigger the full summary, but a stale hold becomes Debt and makes it visible again.
 
 ## Finish or pause
 

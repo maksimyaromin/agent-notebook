@@ -1598,6 +1598,38 @@ mod session_status {
         );
     }
 
+    /// The hook is what an unattended session reads, so the law reaches it
+    /// with no Task in the notebook.
+    #[test]
+    fn a_rule_alone_reaches_the_dashboard_and_the_hook() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.gates.md".to_owned(),
+            record_file(
+                "decision.gates",
+                "decision",
+                "active",
+                "The developer opens each gate",
+                &["kind: rule"],
+                "",
+            ),
+        )]);
+        assert_snapshot!(
+            ok(&mut storage, &["status", "--budget", "0"]),
+            @r#"
+        ok: notebook — 0 tasks, 1 decision, 0 notes, 0 questions
+        rules[1]:
+          decision.gates: "The developer opens each gate"
+        budget: ~45 tokens (no ceiling)
+        "#
+        );
+        let payload: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--hook"])).unwrap();
+        let context = payload["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(context.contains("rules[1]:"), "{context}");
+    }
+
     #[test]
     fn a_quiet_notebook_is_one_line() {
         let mut storage = storage_with(&[(

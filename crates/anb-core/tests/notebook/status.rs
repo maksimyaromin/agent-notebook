@@ -442,8 +442,11 @@ mod status_dashboard {
         );
     }
 
+    /// A team that agreed how to work before filing its first Task must
+    /// not start every session blind to the law: a standing rule opens the
+    /// dashboard on its own, and the unattended hook reads the same.
     #[test]
-    fn rules_alone_do_not_open_the_gate() {
+    fn a_standing_rule_alone_opens_the_gate() {
         let mut storage = storage_with(&[(
             "decisions/decision.demo.md",
             &record_file("decision.demo", "decision", "active", &["kind: rule"], ""),
@@ -451,11 +454,34 @@ mod status_dashboard {
         let status = Notebook::new(&mut storage)
             .status(TODAY, Budget::Unbounded, no_lost_proofs)
             .unwrap();
+        assert!(!status.quiet, "{}", status.text);
         assert!(
-            status.quiet,
-            "a standing rule is not work in motion: {}",
+            status
+                .text
+                .contains("rules[1]:\n  decision.demo: \"A demo record\"\n"),
+            "{}",
             status.text
         );
+    }
+
+    /// A Decision that is not a rule binds nothing at session start, so it
+    /// is no signal: a notebook of shapes and Notes stays quiet.
+    #[test]
+    fn a_decision_that_is_not_a_rule_leaves_the_notebook_quiet() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.demo.md",
+                &record_file("decision.demo", "decision", "active", &["kind: shape"], ""),
+            ),
+            (
+                "notes/note.demo.md",
+                &record_file("note.demo", "note", "active", &["kind: fact"], ""),
+            ),
+        ]);
+        let status = Notebook::new(&mut storage)
+            .status(TODAY, Budget::Unbounded, no_lost_proofs)
+            .unwrap();
+        assert!(status.quiet, "{}", status.text);
     }
 
     #[test]

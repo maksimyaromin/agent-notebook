@@ -19,7 +19,7 @@ Sections print in this order when present:
 8. `debt[N]`: the aging signals below.
 9. `budget: ~N/M tokens` with what was cut, or `(no ceiling)`.
 
-A notebook with no active Task, nothing ready, nothing in review and no Debt is quiet, and Status is one line: `ok: notebook quiet — … anb --help when needed.` A hold alone does not trigger the full summary. A stale hold does, through Debt.
+A notebook with no active Task, nothing ready, nothing in review, no Debt and no standing rule is quiet, and Status is one line: `ok: notebook quiet — … anb --help when needed.` A rule alone opens the full summary, since a session must respect it before any work, and a team that agreed how to work has not always filed its first Task. A hold alone does not trigger the full summary. A stale hold does, through Debt.
 
 ## The budget
 

@@ -119,15 +119,19 @@ pub(crate) struct StatusInputs {
 
 impl StatusInputs {
     /// The gate: signal is work in motion, work waiting on a human,
-    /// dispatchable work, or decay. Review counts deliberately: a Task
-    /// parked at acceptance is not a quiet notebook. A hold does not count:
-    /// it is a pause somebody chose, and a hold gone stale is Debt's to
-    /// raise.
+    /// dispatchable work, decay, or a standing rule. Review counts
+    /// deliberately: a Task parked at acceptance is not a quiet notebook.
+    /// A rule counts because a session must respect it before it does any
+    /// work, and a notebook holding rules and no Task is a team that
+    /// agreed how to work before filing its first Task. A hold does not
+    /// count: it is a pause somebody chose, and a hold gone stale is
+    /// Debt's to raise.
     fn has_signal(&self) -> bool {
         !self.active.is_empty()
             || !self.review.is_empty()
             || !self.ready.is_empty()
             || !self.debt.is_empty()
+            || !self.rules.is_empty()
     }
 
     fn has_log(&self) -> bool {
