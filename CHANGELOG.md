@@ -1,5 +1,20 @@
 # Changelog
 
+## agent-notebook v2026.09.08.4
+
+A narrowed listing says whose it is. Under `scope: mine` an agent that never typed a flag read `count: 0` as an empty epic or an empty notebook; now every read narrowed to one identity says so and names the call that widens it, as Status did. The packages move to 0.8.0: a line joins three replies and a field joins two JSON documents, which by the versioning rule this release also writes down is a minor.
+
+### New
+
+- **`by:` on `list`, `ready` and `graph`.** A read narrowed to one identity, by a flag or by the `scope` key, opens with `by: <name> — anb <verb> … --team`, the other narrowings of the call carried into the widening command; JSON `list` and `ready` carry `by` beside `count`. Everyone's read, `--team` and `--untaken` print nothing. (#83)
+- **Whose question, which flag.** The skill's Orient section carries a table: what is mine, what a colleague is doing, where the epic or the team stands, what can be taken, and why a held Task is not in the queue, each with its read and its reason. (#83)
+
+### Improved
+
+- **Releases move by semantic versioning.** The releasing guide states which number a release moves: patch for a fix that changes no documented shape, minor for anything added, major for a removal, a rename or a changed meaning, and only the maintainer moves the major. (#83)
+
+Packages in this release: `@supolka/agent-notebook@0.8.0` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.08.3
 
 A link is an edge, and a record names whom it waits on. A schema Note could not enumerate the documents that declared it theirs, and under `scope: mine` the person a Question or a review waited on never saw it; this release closes both, under one ruling: the notebook is working memory an agent reads, not a channel, so each relation is one line in the skill and nothing more. The packages move to 0.7.0: the graph document is at version 4, the review section of Status is a table and the questions table gains a column, so a script built on any of those reads the entries below first.

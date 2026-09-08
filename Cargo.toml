@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/anb-core", "crates/anb"]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 # Not a compatibility promise until the first public release; bump freely.
 rust-version = "1.98"
