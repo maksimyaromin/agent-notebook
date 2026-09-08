@@ -1257,7 +1257,7 @@ mod flat_lists {
                         .command
                 )
             ),
-            "error[invalid-argument]: mine: no identity to match; set git user.name or ANB_BY\n"
+            "error[invalid-argument]: mine: no identity to match; set git user.name or ANB_BY, or pass --team\n"
         );
     }
 
@@ -1536,9 +1536,9 @@ mod session_status {
             @r#"
         ok: notebook — 2 tasks, 0 decisions, 0 notes, 0 questions
         active: task.demo "A demo record"
-        held[1]{id,reason,until}:
-          task.parked,waits for the API key,2026-09-20
-        budget: ~58 tokens (no ceiling)
+        held[1]{id,reason,until,taken-by}:
+          task.parked,waits for the API key,2026-09-20,-
+        budget: ~61 tokens (no ceiling)
         "#
         );
         let value: serde_json::Value =
@@ -1598,28 +1598,41 @@ mod session_status {
         );
     }
 
-    /// The hook is what an unattended session reads, so the law reaches it
-    /// with no Task in the notebook.
+    /// The dashboard is the work: an open Question is on it with who asked,
+    /// a rule is not, and the hook carries the same text.
     #[test]
-    fn a_rule_alone_reaches_the_dashboard_and_the_hook() {
-        let mut storage = storage_with(&[(
-            "decisions/decision.gates.md".to_owned(),
-            record_file(
-                "decision.gates",
-                "decision",
-                "active",
-                "The developer opens each gate",
-                &["kind: rule"],
-                "",
+    fn an_open_question_reaches_the_dashboard_and_the_hook_and_a_rule_does_not() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.gates.md".to_owned(),
+                record_file(
+                    "decision.gates",
+                    "decision",
+                    "active",
+                    "The developer opens each gate",
+                    &["kind: rule"],
+                    "",
+                ),
             ),
-        )]);
+            (
+                "questions/question.gates.md".to_owned(),
+                record_file(
+                    "question.gates",
+                    "question",
+                    "open",
+                    "Which gate opens first?",
+                    &["by: Grace"],
+                    "",
+                ),
+            ),
+        ]);
         assert_snapshot!(
             ok(&mut storage, &["status", "--budget", "0"]),
             @r#"
-        ok: notebook — 0 tasks, 1 decision, 0 notes, 0 questions
-        rules[1]:
-          decision.gates: "The developer opens each gate"
-        budget: ~45 tokens (no ceiling)
+        ok: notebook — 0 tasks, 1 decision, 0 notes, 1 question
+        questions[1]{id,age,by,title}:
+          question.gates,4d,Grace,Which gate opens first?
+        budget: ~50 tokens (no ceiling)
         "#
         );
         let payload: serde_json::Value =
@@ -1627,7 +1640,78 @@ mod session_status {
         let context = payload["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
-        assert!(context.contains("rules[1]:"), "{context}");
+        assert!(context.contains("questions[1]"), "{context}");
+        assert!(!context.contains("decision.gates"), "{context}");
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
+        assert_eq!(
+            value["questions"]["rows"][0],
+            serde_json::json!({"id": "question.gates", "created": "2026-08-24", "by": "Grace", "title": "Which gate opens first?"})
+        );
+    }
+
+    /// `--mine` narrows the dashboard to the caller's own and says so;
+    /// `--team` widens one call past a notebook whose config narrows it.
+    #[test]
+    fn the_dashboard_narrows_to_the_callers_own_and_widens_on_request() {
+        let mut storage = storage_with(&[
+            (
+                "tasks/task.hers.md".to_owned(),
+                record_file(
+                    "task.hers",
+                    "task",
+                    "active",
+                    "Her record",
+                    &["taken-by: Grace"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.mine.md".to_owned(),
+                record_file(
+                    "task.mine",
+                    "task",
+                    "active",
+                    "My record",
+                    &["taken-by: Maks"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_snapshot!(
+            ok(&mut storage, &["status", "--mine", "--budget", "0"]),
+            @r#"
+        ok: notebook — 2 tasks, 0 decisions, 0 notes, 0 questions
+        by: Maks — anb status --team
+        active: task.mine "My record"
+        budget: ~45 tokens (no ceiling)
+        "#
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json", "--mine"])).unwrap();
+        assert_eq!(value["by"], serde_json::json!("Maks"));
+        assert_eq!(value["active"]["count"], serde_json::json!(1));
+
+        anb_core::Storage::write(&mut storage, "config", "scope: mine\n").unwrap();
+        assert!(
+            !ok(&mut storage, &["status"]).contains("task.hers"),
+            "the config key narrows the plain call"
+        );
+        let widened = ok(&mut storage, &["status", "--team", "--budget", "0"]);
+        assert!(
+            widened.contains("active: task.hers \"Her record\" (Grace)\n"),
+            "{widened}"
+        );
+        assert!(!widened.contains("by: "), "{widened}");
+        let hook: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--hook"])).unwrap();
+        let context = hook["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(
+            context.contains("by: Maks — anb status --team"),
+            "the hook reads the config key too: {context}"
+        );
     }
 
     #[test]
@@ -1777,10 +1861,33 @@ mod json_surface {
         );
     }
 
+    /// The dashboard counts Debt and points at the read; both renderings
+    /// of the dashboard carry the count alone.
+    #[test]
+    fn the_dashboard_counts_debt_in_both_renderings() {
+        let mut storage = storage_with(&[(
+            "notes/note.cites.md".to_owned(),
+            record_file(
+                "note.cites",
+                "note",
+                "active",
+                "A demo record",
+                &[],
+                "cites task.gone here.\n",
+            ),
+        )]);
+        assert!(
+            ok(&mut storage, &["status"]).contains("debt: 1 — anb debt\n"),
+            "{}",
+            ok(&mut storage, &["status"])
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
+        assert_eq!(value["debt"], serde_json::json!({"count": 1}));
+    }
+
     #[test]
     fn the_json_debt_rows_are_the_debt_lines_the_text_prints() {
-        // Two classes, one of them past the section bound: Debt is bounded
-        // per class, so a flat cut would drop the second class whole.
         let mut files: Vec<(String, String)> = (0..3)
             .map(|n| {
                 (
@@ -1804,23 +1911,23 @@ mod json_surface {
         }));
         let mut storage = storage_with(&files);
 
-        let printed: Vec<String> = ok(&mut storage, &["status"])
+        let printed: Vec<String> = ok(&mut storage, &["debt"])
             .lines()
             .filter(|line| line.starts_with("  ") && !line.contains('\u{2026}'))
             .map(|line| line.trim().to_owned())
             .collect();
         let value: serde_json::Value =
-            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
-        let carried: Vec<String> = value["debt"]["rows"]
+            serde_json::from_str(&ok(&mut storage, &["debt", "--json"])).unwrap();
+        let carried: Vec<String> = value["debt"]
             .as_array()
             .unwrap()
             .iter()
             .map(|row| row["line"].as_str().unwrap().to_owned())
             .collect();
 
-        assert_eq!(value["debt"]["count"], serde_json::json!(9));
-        assert_eq!(carried, printed, "one dashboard, two renderings");
-        assert_eq!(carried.len(), 8, "five of one class, three of the other");
+        assert_eq!(value["count"], serde_json::json!(9));
+        assert_eq!(carried, printed, "one listing, two renderings");
+        assert_eq!(carried.len(), 9, "every signal, in the clock table's order");
     }
 
     #[test]
@@ -1869,8 +1976,8 @@ mod json_surface {
             ),
         ]);
         let value: serde_json::Value =
-            serde_json::from_str(&ok(&mut storage, &["status", "--json"])).unwrap();
-        let rows = value["debt"]["rows"].as_array().unwrap();
+            serde_json::from_str(&ok(&mut storage, &["debt", "--json"])).unwrap();
+        let rows = value["debt"].as_array().unwrap();
         let row = |code: &str| {
             rows.iter()
                 .find(|row| row["code"] == code)
@@ -2087,7 +2194,30 @@ fn the_command_vocabulary_parses() {
         vec!["anb", "--global", "list"],
         vec!["anb", "list", "--global"],
         vec!["anb", "graph"],
-        vec!["anb", "graph", "--for", "task.epic", "--ready"],
+        vec![
+            "anb",
+            "graph",
+            "--for",
+            "task.epic",
+            "--type",
+            "task",
+            "--mine",
+        ],
+        vec![
+            "anb",
+            "list",
+            "--type",
+            "decision,note",
+            "--kind",
+            "rule",
+            "--tag",
+            "parser",
+        ],
+        vec!["anb", "ready", "--tag", "parser", "--team"],
+        vec!["anb", "list", "--match", "fence", "--archive"],
+        vec!["anb", "status", "--mine"],
+        vec!["anb", "status", "--by", "Grace", "--budget", "0"],
+        vec!["anb", "debt", "--all"],
         vec!["anb", "setup"],
         vec!["anb", "setup", "--remove"],
         vec!["anb", "skill"],
@@ -2111,8 +2241,6 @@ fn the_command_vocabulary_parses() {
             "--review-by",
             "2026-09-01",
         ],
-        vec!["anb", "search", "parser", "--all"],
-        vec!["anb", "overview"],
     ] {
         assert!(Cli::try_parse_from(&line).is_ok(), "must parse: {line:?}");
     }
@@ -2662,81 +2790,6 @@ mod maintenance_replies {
     }
 
     #[test]
-    fn the_epic_block_names_progress_and_what_to_pick_up() {
-        assert_snapshot!(
-            ok(&mut an_epic(), &["overview"]),
-            @r"
-        notebook: 3 tasks, 0 decisions, 0 notes, 0 questions
-        epics[1]:
-          task.epic-auth: 1/2 closed, next: task.auth-tokens
-        tasks[3]{id,state,priority,title}:
-          task.auth-login,closed,-,The login screen
-          task.auth-tokens,open,-,Token rotation
-          task.epic-auth,open,-,Auth end to end
-        "
-        );
-    }
-
-    /// One epic per row, and a notebook can carry more epics than any reply
-    /// shows.
-    fn many_epics(count: usize) -> MemoryStorage {
-        let mut files = Vec::new();
-        for nth in 0..count {
-            let hub = format!("task.epic-{nth:02}");
-            let child = format!("task.child-{nth:02}");
-            files.push((
-                format!("tasks/{hub}.md"),
-                record_file(
-                    &hub,
-                    "task",
-                    "open",
-                    "An epic",
-                    &[&format!("blocked-by: {child}")],
-                    "",
-                ),
-            ));
-            files.push((
-                format!("tasks/{child}.md"),
-                record_file(
-                    &child,
-                    "task",
-                    "open",
-                    "A child",
-                    &[&format!("from: {hub}")],
-                    "",
-                ),
-            ));
-        }
-        storage_with(&files)
-    }
-
-    #[test]
-    fn the_epic_block_is_bounded_like_every_other_listing() {
-        let shown = ok(&mut many_epics(22), &["overview"]);
-        assert!(
-            shown.contains("epics[22]:")
-                && shown.matches("closed, next:").count() == 20
-                && shown.contains("\u{2026} 2 more: anb overview --all"),
-            "the count is the notebook\'s, the rows are the reply\'s: {shown}"
-        );
-        assert_eq!(
-            ok(&mut many_epics(22), &["overview", "--all"])
-                .matches("closed, next:")
-                .count(),
-            22,
-            "and --all lifts the bound here as everywhere"
-        );
-    }
-
-    #[test]
-    fn the_epic_block_is_a_shape_the_json_carries_too() {
-        assert_eq!(
-            ok(&mut an_epic(), &["overview", "--json"]),
-            r#"{"live":{"tasks":3,"decisions":0,"notes":0,"questions":0},"epics":{"count":1,"rows":[{"id":"task.epic-auth","closed":1,"total":2,"next":"task.auth-tokens"}]},"tasks":{"count":3,"rows":[{"id":"task.auth-login","state":"closed","title":"The login screen"},{"id":"task.auth-tokens","state":"open","title":"Token rotation"},{"id":"task.epic-auth","state":"open","title":"Auth end to end"}]},"decisions":{"count":0,"rows":[]},"notes":{"count":0,"rows":[]},"questions":{"count":0,"rows":[]},"archive":{"tasks":0,"decisions":0,"notes":0,"questions":0}}"#
-        );
-    }
-
-    #[test]
     fn a_scoped_queue_answers_only_the_epic_it_was_asked_about() {
         let mut storage = an_epic();
         ok(&mut storage, &["add", "task", "Something else entirely"]);
@@ -2937,7 +2990,7 @@ mod maintenance_replies {
             ),
         ]);
         assert!(
-            ok(&mut storage, &["status"]).contains("may-conflict"),
+            ok(&mut storage, &["debt"]).contains("may-conflict"),
             "an undeclared citation between live Decisions is Debt"
         );
         assert_snapshot!(
@@ -2945,7 +2998,7 @@ mod maintenance_replies {
             @"ok: edit decision.second — link"
         );
         assert!(
-            !ok(&mut storage, &["status"]).contains("may-conflict"),
+            !ok(&mut storage, &["debt"]).contains("may-conflict"),
             "the declared edge is the judgement; the pair is no longer Debt"
         );
     }
@@ -3052,11 +3105,13 @@ mod maintenance_replies {
     }
 }
 
-mod search_replies {
+mod narrowed_listings {
     use super::*;
 
+    /// A text reaches the archive only when asked for: history is
+    /// findable, and it is not what a working question is about.
     #[test]
-    fn matches_share_the_listing_shape() {
+    fn a_text_narrows_the_listing_and_the_archive_joins_when_asked_for() {
         let mut storage = storage_with(&[
             open_task("task.parser", "Grammar parser work", &[]),
             (
@@ -3065,66 +3120,191 @@ mod search_replies {
             ),
         ]);
         assert_snapshot!(
-            ok(&mut storage, &["search", "parser"]),
+            ok(&mut storage, &["list", "--match", "parser"]),
             @r"
-        matches[2]{id,state,priority,title}:
+        records[1]{id,state,priority,title}:
+          task.parser,open,-,Grammar parser work
+        "
+        );
+        assert_snapshot!(
+            ok(&mut storage, &["list", "--match", "parser", "--archive"]),
+            @r"
+        records[2]{id,state,priority,title}:
           task.parser,open,-,Grammar parser work
           task.spike,closed,-,Parser spike
         "
         );
     }
 
-    /// The hint is meant to be typed back, so the query it carries must
-    /// survive the shell — including the quote that would end the word.
+    /// Every standing rule, and every Note of one tag, is one listing.
     #[test]
-    fn the_truncation_hint_carries_the_query_as_one_shell_word() {
+    fn a_type_a_kind_and_a_tag_narrow_the_listing() {
+        let mut storage = storage_with(&[
+            open_task("task.demo", "A demo record", &["tags: parser"]),
+            (
+                "decisions/decision.nest.md".to_owned(),
+                record_file(
+                    "decision.nest",
+                    "decision",
+                    "active",
+                    "Fences never nest",
+                    &["kind: rule", "tags: parser"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.rust.md".to_owned(),
+                record_file(
+                    "decision.rust",
+                    "decision",
+                    "active",
+                    "Rust for the CLI",
+                    &["kind: shape", "tags: stack"],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.fence.md".to_owned(),
+                record_file(
+                    "note.fence",
+                    "note",
+                    "active",
+                    "Fence",
+                    &["kind: term", "tags: parser, domain-model"],
+                    "",
+                ),
+            ),
+        ]);
+        assert_snapshot!(
+            ok(&mut storage, &["list", "--type", "decision", "--kind", "rule"]),
+            @r"
+        records[1]{id,state,priority,title}:
+          decision.nest,active,-,Fences never nest
+        "
+        );
+        assert_snapshot!(
+            ok(&mut storage, &["list", "--type", "note", "--tag", "domain-model"]),
+            @r"
+        records[1]{id,state,priority,title}:
+          note.fence,active,-,Fence
+        "
+        );
+        assert_snapshot!(
+            ok(&mut storage, &["list", "--tag", "parser"]),
+            @r"
+        records[3]{id,state,priority,title}:
+          task.demo,open,-,A demo record
+          decision.nest,active,-,Fences never nest
+          note.fence,active,-,Fence
+        "
+        );
+    }
+
+    /// The hint is meant to be typed back, so every narrowing travels in
+    /// it, and a text survives the shell — including the quote that would
+    /// end the word.
+    #[test]
+    fn the_truncation_hint_carries_every_narrowing_as_shell_words() {
         let mut storage = many_open_tasks(22);
         assert_snapshot!(
-            ok(&mut storage, &["search", "demo record"]).lines().last().unwrap(),
-            @r"  … 2 more: anb search 'demo record' --all"
+            ok(&mut storage, &["list", "--type", "task", "--match", "demo record"]).lines().last().unwrap(),
+            @r"  … 2 more: anb list --type task --match 'demo record' --all"
         );
         let files: Vec<(String, String)> = (0..22)
-            .map(|n| open_task(&format!("task.q{n:02}"), "Won't fix, won't file", &[]))
+            .map(|n| {
+                open_task(
+                    &format!("task.q{n:02}"),
+                    "Won't fix, won't file",
+                    &["tags: parser"],
+                )
+            })
             .collect();
         assert_snapshot!(
-            ok(&mut storage_with(&files), &["search", "won't"]).lines().last().unwrap(),
-            @r"  … 2 more: anb search 'won'\''t' --all"
+            ok(&mut storage_with(&files), &["ready", "--tag", "parser", "--match", "won't"]).lines().last().unwrap(),
+            @r"  … 2 more: anb ready --tag parser --match 'won'\''t' --all"
         );
     }
 
     #[test]
     fn a_match_of_nothing_answers_count_zero() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
-        assert_snapshot!(ok(&mut storage, &["search", "zeppelin"]), @"count: 0");
+        assert_snapshot!(ok(&mut storage, &["list", "--match", "zeppelin"]), @"count: 0");
     }
-}
 
-mod overview_reply {
-    use super::*;
-
+    /// The queue is live open Tasks by definition, so it takes no flag
+    /// that could only admit nothing more: the command line refuses it
+    /// before any record is read.
     #[test]
-    fn the_page_groups_types_and_counts_the_archive() {
-        let mut storage = storage_with(&[
-            open_task("task.a", "A demo record", &[]),
-            (
-                "decisions/decision.d.md".to_owned(),
-                record_file("decision.d", "decision", "active", "A ruling", &[], ""),
-            ),
-            (
-                "archive/tasks/task.done.md".to_owned(),
-                record_file("task.done", "task", "closed", "Shipped", &[], ""),
-            ),
-        ]);
+    fn the_queue_takes_no_narrowing_it_cannot_answer() {
+        for flag in [&["--type", "task"][..], &["--kind", "rule"], &["--archive"]] {
+            let mut line = vec!["anb", "ready"];
+            line.extend_from_slice(flag);
+            assert!(
+                Cli::try_parse_from(&line).is_err(),
+                "the queue must refuse {flag:?}"
+            );
+        }
+        assert!(Cli::try_parse_from(["anb", "list", "--type", "task", "--archive"]).is_ok());
+    }
+
+    /// A kind no type allows is refused with the vocabulary named, rather
+    /// than answered with a listing of nothing.
+    #[test]
+    fn a_kind_no_type_allows_is_a_recovery_payload() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         assert_snapshot!(
-            ok(&mut storage, &["overview"]),
+            refused(&mut storage, &["list", "--kind", "law"]),
+            @"error[invalid-argument]: kind: `law` is not one of rule, shape, drift, fact, term, guide, idea, model, spec"
+        );
+    }
+
+    /// `--team` widens one call past a notebook whose config narrows every
+    /// read to the caller's own; `--mine` narrows one call under the team's.
+    #[test]
+    fn the_scope_key_narrows_every_read_and_team_widens_one_call() {
+        let mut storage = storage_with(&[
+            open_task("task.mine", "My record", &["by: Maks"]),
+            open_task("task.hers", "Her record", &["by: Grace"]),
+        ]);
+        anb_core::Storage::write(&mut storage, "config", "scope: mine\n").unwrap();
+        assert_snapshot!(
+            ok(&mut storage, &["ready"]),
             @r"
-        notebook: 1 task, 1 decision, 0 notes, 0 questions
-        tasks[1]{id,state,priority,title}:
-          task.a,open,-,A demo record
-        decisions[1]{id,state,priority,title}:
-          decision.d,active,-,A ruling
-        archive: 1 task, 0 decisions, 0 notes, 0 questions
+        ready[1]{id,priority,age,taken-by,title}:
+          task.mine,-,4d,-,My record
         "
+        );
+        assert_snapshot!(
+            ok(&mut storage, &["list", "--team"]),
+            @r"
+        records[2]{id,state,priority,title}:
+          task.hers,open,-,Her record
+          task.mine,open,-,My record
+        "
+        );
+        assert_snapshot!(
+            ok(&mut storage, &["list", "--by", "Grace"]),
+            @r"
+        records[1]{id,state,priority,title}:
+          task.hers,open,-,Her record
+        "
+        );
+    }
+
+    /// Under `scope: mine` a host that knows nobody has nothing to narrow
+    /// by; the refusal names the fix and the way around.
+    #[test]
+    fn the_scope_key_without_an_identity_is_a_recovery_payload() {
+        let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
+        anb_core::Storage::write(&mut storage, "config", "scope: mine\n").unwrap();
+        let cli = Cli::try_parse_from(["anb", "list"]).unwrap();
+        let error = execute(cli.command, &mut storage, anonymous_host()).unwrap_err();
+        assert_eq!(
+            text::render_error(
+                &error,
+                &anb::recovery::subject(&Cli::try_parse_from(["anb", "list"]).unwrap().command)
+            ),
+            "error[invalid-argument]: scope: mine needs an identity; set git user.name or ANB_BY, or pass --team\n"
         );
     }
 }
@@ -3138,8 +3318,12 @@ mod task_graph {
     /// only two of them startable now.
     fn a_chain() -> MemoryStorage {
         storage_with(&[
-            open_task("task.first", "The blocker", &[]),
-            open_task("task.second", "The waiter", &["blocked-by: task.first"]),
+            open_task("task.first", "The blocker", &["tags: parser"]),
+            open_task(
+                "task.second",
+                "The waiter",
+                &["blocked-by: task.first", "tags: parser"],
+            ),
             open_task("task.stray", "Another line of work", &[]),
         ])
     }
@@ -3162,19 +3346,24 @@ mod task_graph {
     /// is and which slice it answers.
     #[test]
     fn the_data_names_its_reading_and_the_slice_it_answers() {
-        let payload = ok(&mut a_chain(), &["--json", "graph", "--ready"]);
+        let payload = ok(
+            &mut a_chain(),
+            &["--json", "graph", "--match", "blocker", "--tag", "parser"],
+        );
         let parsed: serde_json::Value =
             serde_json::from_str(&payload).unwrap_or_else(|_| panic!("not JSON: {payload}"));
 
-        assert_eq!(parsed["v"], 2);
-        assert_eq!(parsed["slice"]["ready"], true);
+        assert_eq!(parsed["v"], 3);
+        assert_eq!(parsed["slice"]["match"], "blocker");
+        assert_eq!(parsed["slice"]["tag"], serde_json::json!(["parser"]));
         assert_eq!(parsed["slice"]["archive"], false);
-        assert_eq!(parsed["nodes"]["count"], 2);
+        assert!(parsed["slice"].get("for").is_none(), "{payload}");
+        assert_eq!(parsed["nodes"]["count"], 1);
         assert_eq!(parsed["nodes"]["rows"][0]["id"], "task.first");
         assert_eq!(parsed["nodes"]["rows"][0]["degree"], 0);
         assert_eq!(
             parsed["edges"]["count"], 0,
-            "the ready lens holds only what waits on nothing live"
+            "the waiter is off the map, so the line to it is not drawn"
         );
     }
 
@@ -3224,11 +3413,12 @@ mod task_graph {
     #[test]
     fn every_slice_flag_narrows_what_the_verb_answers() {
         let mut storage = a_chain();
-        assert_snapshot!(ok(&mut storage, &["graph", "--ready"]), @r"
+        assert_snapshot!(ok(&mut storage, &["graph", "--tag", "parser"]), @r"
         nodes[2]{id,type,state,ready,archived,degree,priority,created,epic,title}:
-          task.first,task,open,yes,no,0,-,2026-08-24,-,The blocker
-          task.stray,task,open,yes,no,0,-,2026-08-24,-,Another line of work
-        edges[0]{from,to,kind}:
+          task.first,task,open,yes,no,1,-,2026-08-24,-,The blocker
+          task.second,task,open,no,no,1,-,2026-08-24,-,The waiter
+        edges[1]{from,to,kind}:
+          task.first,task.second,waits
         ");
         assert_snapshot!(ok(&mut storage, &["graph", "--for", "task.second"]), @r"
         nodes[2]{id,type,state,ready,archived,degree,priority,created,epic,title}:
@@ -3394,7 +3584,6 @@ mod unknown_verbs {
             text::render_recovery(&recovery),
             @r"
         error[unknown-command]: `archiv` is not an anb command
-        try: anb search --help
         try: anb archive --help
         try: anb --help
         "
@@ -3872,29 +4061,31 @@ mod json_maintenance_surface {
     }
 
     #[test]
-    fn search_answers_matches() {
+    fn a_narrowed_listing_answers_the_same_rows_as_the_whole() {
         let mut storage = storage_with(&[open_task("task.demo", "A demo record", &[])]);
         assert_eq!(
-            ok(&mut storage, &["search", "demo", "--json"]),
-            r#"{"count":1,"matches":[{"id":"task.demo","state":"open","title":"A demo record"}]}"#
+            ok(&mut storage, &["list", "--match", "demo", "--json"]),
+            r#"{"count":1,"records":[{"id":"task.demo","state":"open","title":"A demo record"}]}"#
         );
     }
 
     #[test]
-    fn overview_carries_the_tallies_and_the_sections() {
-        let mut storage = storage_with(&[
-            open_task("task.a", "A demo record", &[]),
-            (
-                "archive/tasks/task.done.md".to_owned(),
-                record_file("task.done", "task", "closed", "Shipped", &[], ""),
+    fn debt_answers_the_signals_as_rows() {
+        let mut storage = storage_with(&[(
+            "notes/note.cites.md".to_owned(),
+            record_file(
+                "note.cites",
+                "note",
+                "active",
+                "A demo record",
+                &[],
+                "cites task.gone here.\n",
             ),
-        ]);
-        let value: serde_json::Value =
-            serde_json::from_str(&ok(&mut storage, &["overview", "--json"])).unwrap();
-        assert_eq!(value["live"]["tasks"], serde_json::json!(1));
-        assert_eq!(value["tasks"]["rows"][0]["id"], serde_json::json!("task.a"));
-        assert_eq!(value["decisions"]["count"], serde_json::json!(0));
-        assert_eq!(value["archive"]["tasks"], serde_json::json!(1));
+        )]);
+        assert_eq!(
+            ok(&mut storage, &["debt", "--json"]),
+            r#"{"count":1,"debt":[{"code":"dangling-mention","id":"note.cites","target":"task.gone","line":"dangling-mention: note.cites -> task.gone"}]}"#
+        );
     }
 }
 
@@ -3913,7 +4104,7 @@ mod the_global_scope {
         &["retire", "note.demo"],
         &["show", "note.demo"],
         &["list"],
-        &["search", "rule"],
+        &["list", "--match", "rule"],
     ];
 
     /// The verbs the rule admits beyond those, each for a reason the
@@ -3928,10 +4119,10 @@ mod the_global_scope {
         &["archive", "note.demo"],
         &["restore", "note.demo"],
         &["delete", "note.demo"],
-        &["overview"],
         &["status"],
         &["ready"],
         &["graph"],
+        &["debt"],
         &["skill"],
     ];
 

@@ -53,15 +53,14 @@ fn writes_work(command: &Command) -> bool {
         Command::Retire { .. }
         | Command::Show { .. }
         | Command::List { .. }
-        | Command::Search { .. }
         | Command::Ready { .. }
         | Command::Check { .. }
+        | Command::Debt { .. }
         | Command::Archive { .. }
         | Command::Restore { .. }
         | Command::Delete { .. }
         | Command::Edit(_)
         | Command::Graph(_)
-        | Command::Overview { .. }
         | Command::Status { .. }
         | Command::Setup { .. }
         | Command::Skill { .. } => false,

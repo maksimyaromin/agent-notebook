@@ -27,9 +27,7 @@ $ anb status
 ok: notebook — 1 task, 1 decision, 0 notes, 0 questions
 active: task.parser-accepts-fenced-bodies "Parser accepts fenced bodies"
 log: "- 2026-09-05 Alex: fences parse; the indented-body case is next"
-rules[1]:
-  decision.fences-never-nest: "Fences never nest"
-budget: ~82/1500 tokens
+budget: ~65/1500 tokens
 ```
 
 The notebook stores Tasks, Decisions, Notes and Questions in plain Markdown files. Status summarizes what needs attention; commands let an agent follow the detail and update it without editing files by hand. Sharing through git, personal knowledge across projects and interactive maps are available when your workflow needs them.

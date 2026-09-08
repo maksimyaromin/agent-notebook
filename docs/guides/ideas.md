@@ -47,7 +47,7 @@ The [Task guide](tasks.md#hubs-and-epics) shows the commands. An idea can have s
 
 ## Continue in another session
 
-Ask the agent to continue the idea or delivery by name. Search finds ids, titles and tags, including archived records; it does not search the body. Consistent subject tags make the associated work easier to find.
+Ask the agent to continue the idea or delivery by name. `anb list --match <text>` finds ids, titles, tags, people and bodies, and `--tag` narrows to one subject, so consistent subject tags make the associated work easier to find; `--archive` reaches archived records.
 
 The Task log records the established result and next action. The hub points to the idea and governing documents. Progress stays in Tasks rather than being copied into status tables across the idea, spec and plan.
 

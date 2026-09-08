@@ -15,10 +15,11 @@ For work in this repository, start with:
 
 ```sh
 cargo run --quiet -- status
-cargo run --quiet -- search proof
+cargo run --quiet -- list --type decision --kind rule
+cargo run --quiet -- list --match proof --archive
 ```
 
-Search includes the archive. Read the relevant Decisions and reports before reopening a design question: they record the constraint and the alternatives considered. When a constraint changes, record the new decision and its reason. The [session guide](../guides/session.md) covers the work loop; `AGENTS.md` contains the repository conventions.
+The rules are read before the work; `--archive` reaches the closed Tasks and their reports. Read the relevant Decisions and reports before reopening a design question: they record the constraint and the alternatives considered. When a constraint changes, record the new decision and its reason. The [session guide](../guides/session.md) covers the work loop; `AGENTS.md` contains the repository conventions.
 
 ## Where behavior belongs
 

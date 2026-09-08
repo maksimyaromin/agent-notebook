@@ -2,7 +2,7 @@
 //! and the committed skill teach the same commands. Worked replies execute
 //! against a scratch notebook; CI checks the committed copy for drift.
 
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, NARROWING};
 use crate::recovery::subject;
 use crate::reply::{Host, execute};
 use crate::text;
@@ -131,9 +131,11 @@ Choose by what a later reader needs, with an explicit `--kind` for Notes and Dec
 
 ### Orient
 
-Read `anb status` unless the hook supplied it. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Read its cited knowledge and relevant code. Search before creating records: search matches ids, titles, tags and the people named in the envelope, including the archive, but not bodies. Use `show --all` for a truncated body and scoped lists for larger work; loading the whole notebook obscures the immediate decision.
+Read `anb status` unless the hook supplied it. Status is the work: the active Tasks with the last log line of the first, work in review or on hold, the queue, the open Questions and a count of Debt. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Before the work, read the standing rules with `anb list --type decision --kind rule` and open the ones its subject touches, then the knowledge the Task cites and the relevant code. Search before creating records: `anb list --match <text>` matches ids, titles, tags, the people named in the envelope and bodies, and `--archive` reaches history. Use `show --all` for a truncated body and narrowed lists for larger work; loading the whole notebook obscures the immediate decision.
 
-Several people can share one notebook, and nobody assigns work in it: a Task is taken. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names a Task someone already took; choose one nobody took, or one the user took, and read `ready --mine` when the queue is long. `start` records the user as the Task's `taken-by` and refuses a Task another person took; handing it over is `edit <id> --taken-by <name>`, decided by the user, never by the agent.
+Every listing narrows the same way: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine` and `--team` compose on `list`, `ready` and `graph`, and `--type`, `--kind` and `--archive` on `list` and `graph`, each answering with the records every flag admits. `list --type note --tag domain-model` is the domain language; `ready --tag parser` is one area's queue; `anb debt` is the Debt that Status counts.
+
+Several people can share one notebook, and nobody assigns work in it: a Task is taken. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names a Task someone already took; choose one nobody took, or one the user took, and read `ready --mine` when the queue is long. A notebook whose config sets `scope: mine` answers every read with the user's own records by default; `--team` widens one call to the whole project, which is how new work is chosen when the user's own queue is empty. `start` records the user as the Task's `taken-by` and refuses a Task another person took; handing it over is `edit <id> --taken-by <name>`, decided by the user, never by the agent.
 
 ### Shape the idea
 
@@ -180,12 +182,13 @@ Run `anb check`, address findings and recheck. When no CLI repair exists, report
 | Retry a refused command unchanged | Read its `try:` instruction and fill its placeholders | Refusals explain the required correction |
 | Repeat `add` after an uncertain result | Inspect the notebook first | Creation without an explicit id can produce duplicates |
 | Start a Task marked as another person's | Pick a Task nobody took, or ask the user before `edit --taken-by` | Two people working one Task learn of it from a merge conflict |
+| Start work straight from Status | Read `list --type decision --kind rule` first | Status is the work; a rule is read before the work it binds |
 
 ## References
 
-Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list`, `ready` and `search` rows carry `by` and `taken-by` there. Use the installed `anb-atlas` skill for a visual review.
+Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list` and `ready` rows carry `by` and `taken-by` there. Use the installed `anb-atlas` skill for a visual review.
 
-For a named personal practice, search and show with `--global`; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.
+For a named personal practice, `list --match <name> --global` finds it and `show <id> --global` reads it; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.
 "#;
 
 fn reference(name: &str, description: &str, section: impl FnOnce(&mut String)) -> String {
@@ -227,13 +230,30 @@ fn headings(body: &str) -> Vec<&str> {
 }
 
 /// Every verb with its flags, from the clap tree the binary parses with.
+/// The narrowing flags are one table, since they mean the same on every
+/// verb that takes them; a verb's section names the ones it takes.
 fn commands_section(out: &mut String) {
     out.push_str("Global flags on every command: `--json` (compact JSON instead of text), `--notebook <PATH>` (where the notebook lives, outranking `ANB_NOTEBOOK`), `--global` (the user's notebook in the home directory; refused beside `--notebook`).\n\n");
     let cli = Cli::command();
-    for verb in cli
+    let verbs: Vec<&clap::Command> = cli
         .get_subcommands()
         .filter(|verb| verb.get_name() != "help")
-    {
+        .collect();
+
+    out.push_str("### Narrowing\n\n");
+    out.push_str("A read answers with the records its narrowing admits. Each flag is a predicate over the same notebook, so two flags ask for the intersection, and a flag means the same on every verb that takes it; a verb's section names its own. Without `--by`, `--mine` or `--team`, the notebook's `scope` config key decides whose records a read answers with.\n\n");
+    let mut named: Vec<String> = Vec::new();
+    out.push_str("| Flag | Meaning |\n|---|---|\n");
+    for flag in verbs.iter().flat_map(|verb| narrowing_flags(verb)) {
+        if named.contains(&flag_spelling(flag)) {
+            continue;
+        }
+        named.push(flag_spelling(flag));
+        let _ = writeln!(out, "| `{}` | {} |", flag_spelling(flag), flag_help(flag));
+    }
+    out.push('\n');
+
+    for verb in verbs {
         let _ = writeln!(out, "### anb {}", verb.get_name());
         if let Some(about) = verb.get_about() {
             let _ = writeln!(out, "\n{about}\n");
@@ -252,11 +272,7 @@ fn commands_section(out: &mut String) {
         if !positionals.is_empty() {
             let _ = writeln!(out, "Arguments: `{}`\n", positionals.join(" "));
         }
-        let mut flags = verb
-            .get_arguments()
-            .filter(|arg| arg.get_long().is_some() && !arg.is_global_set())
-            .filter(|arg| arg.get_id().as_str() != "help")
-            .peekable();
+        let mut flags = own_flags(verb).peekable();
         if flags.peek().is_some() {
             out.push_str("| Flag | Meaning |\n|---|---|\n");
             for flag in flags {
@@ -264,7 +280,28 @@ fn commands_section(out: &mut String) {
             }
             out.push('\n');
         }
+        let narrowing: Vec<String> = narrowing_flags(verb)
+            .map(|flag| format!("`--{}`", flag.get_long().unwrap_or_default()))
+            .collect();
+        if !narrowing.is_empty() {
+            let _ = writeln!(out, "Narrowing: {}.\n", narrowing.join(", "));
+        }
     }
+}
+
+/// The flags a verb declares for itself: not the global ones, not the
+/// shared narrowing.
+fn own_flags(verb: &clap::Command) -> impl Iterator<Item = &Arg> {
+    verb.get_arguments()
+        .filter(|arg| arg.get_long().is_some() && !arg.is_global_set())
+        .filter(|arg| arg.get_id().as_str() != "help")
+        .filter(|arg| arg.get_help_heading() != Some(NARROWING))
+}
+
+/// The narrowing flags a verb takes, under the heading that marks them.
+fn narrowing_flags(verb: &clap::Command) -> impl Iterator<Item = &Arg> {
+    verb.get_arguments()
+        .filter(|arg| arg.get_help_heading() == Some(NARROWING))
 }
 
 fn flag_spelling(flag: &Arg) -> String {
@@ -473,6 +510,19 @@ const SESSION: &[Step] = &[
         "--body",
         "A fence is a pair of triple-backtick lines; the parser treats the lines between as one opaque body.",
     ]),
+    Step::Say(
+        "The standing rules are one listing, read before the work they bind; the same flags narrow `ready` and `graph`:",
+    ),
+    Step::Run(&["list", "--type", "decision", "--kind", "rule"]),
+    Step::Head("Status"),
+    Step::Say(
+        "Status opens the session with the work: the active Task and its last log line, the queue and the open Questions; an active Task another person took would carry their name after its title:",
+    ),
+    Step::Run(&["status", "--budget", "0"]),
+    Step::Say(
+        "Narrowed to the user's own, with `--mine` or the config key `scope: mine`, it says whose it is and how to widen it:",
+    ),
+    Step::Run(&["status", "--mine", "--budget", "0"]),
     Step::Head("Closing a Question"),
     Step::Say("The doubt closes into the record that settled it, and is archived right after:"),
     Step::Run(&[
@@ -482,11 +532,6 @@ const SESSION: &[Step] = &[
         "decision.fences-never-nest",
     ]),
     Step::Run(&["archive", "question.do-fences-nest"]),
-    Step::Head("Status"),
-    Step::Say(
-        "Status opens the session with the active Task and its last log line, the rules, the queue and the epics; an active Task another person held would carry their name after its title:",
-    ),
-    Step::Run(&["status", "--budget", "0"]),
     Step::Head("Closing a Task"),
     Step::Say(
         "The work closes with its report as a Note, and is archived right after; the reply names what the close unblocked:",
@@ -524,12 +569,12 @@ const SESSION: &[Step] = &[
     ]),
     Step::Head("Reading back, and the gate"),
     Step::Say(
-        "Reading back: one record, the whole notebook, the records that are Ada's own, a search that reaches the archive, and the gate, which is clean because every settled record was archived as it settled:",
+        "Reading back: one record, the whole notebook, the records that are Ada's own, the records holding a text with the archive reached, and the gate, which is clean because every settled record was archived as it settled:",
     ),
     Step::Run(&["show", "task.ship-the-parser"]),
     Step::Run(&["list"]),
     Step::Run(&["list", "--mine"]),
-    Step::Run(&["search", "fence"]),
+    Step::Run(&["list", "--match", "fence", "--archive"]),
     Step::Run(&["check"]),
 ];
 

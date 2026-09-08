@@ -96,4 +96,6 @@ You can keep a flat queue, use the supplied epic pattern, or run several agents 
 
 The CLI allows multiple active Tasks. `start` records who took a Task as `taken-by` and refuses a Task someone else took; each agent's identity comes from `ANB_BY` or the git `user.name` of its checkout. The write lock protects notebook mutations, but does not prevent two agents from editing the same source file. Your coordination rules need to cover that.
 
+To give each person their own view, set `scope: mine` in `.agent-notebook/config`. Status, the session hook, `ready`, `list` and `graph` then answer with the caller's own records unless a call passes `--team`, `--by <name>` or `--mine`. A session that finds its own queue empty chooses new work with `anb ready --team`.
+
 Tags can express your own categories. Automatic epic progress still follows the [hub relationships](tasks.md#hubs-and-epics): a hub depends on work created from it. A different tag alone does not change that calculation. You can change the convention agents follow while retaining those relationships when you want the built-in epic summary.

@@ -3,7 +3,7 @@ title: The session
 description: 'Resume work from Status, choose the next Task, and leave a useful handoff.'
 ---
 
-Start with `anb status`. It shows active work and the latest log entry, so you can continue without reading the notebook's history. A configured session-start hook provides this automatically; otherwise, run the command yourself.
+Start with `anb status`. It shows the work: active Tasks and the latest log entry, work in review or on hold, the ready queue and the open Questions, so you can continue without reading the notebook's history. A configured session-start hook provides this automatically; otherwise, run the command yourself. The standing rules are not on it: read them with `anb list --type decision --kind rule` before the work they bind.
 
 ## Resume the work
 
@@ -27,7 +27,7 @@ The CLI knows who is asking: `ANB_BY` names the identity, else the git `user.nam
 
 Nobody assigns work in the notebook: a Task is taken. `start` records who took it as `taken-by`. Status lists your own active Tasks first and names who took any other, so you resume your work and not a colleague's. A Task someone else took refuses `start` with `taken`; handing it over is `anb edit <id> --taken-by <name>`, a decision made on purpose.
 
-Reading stays the whole project's by default: `ready`, `list` and `search` show everyone's records, and Status shows every rule and the whole queue. `anb ready --mine` and `anb list --mine` narrow to the records you created or hold; `--by <name>` does the same for a colleague. `search` matches `by`, `via` and `taken-by`, so a name finds the records that carry it.
+Reading is the whole project's by default: `status`, `ready`, `list` and `graph` show everyone's records, your own first where the order matters. `--mine` narrows any of them to the records you created or took; `--by <name>` does the same for a colleague. A notebook whose config sets `scope: mine` makes that the default for every read, including the session hook, and `--team` widens one call to the whole project, which is how you choose new work when your own queue is empty. `list --match <name>` finds the records that name a person, since it matches `by`, `via` and `taken-by`.
 
 ## Leave a useful log
 
@@ -42,11 +42,11 @@ File an uncertainty as a [Question](knowledge.md#questions) with `--from <task>`
 
 ## Read beyond the summary
 
-Status also reports work awaiting review, standing rules, epic progress and Debt. Debt names matters that need attention, such as an old Question or a reference to a missing record. It does not change their state. Check whether the work is still relevant before acting: resolve the Question, update the Task, or record why it must stay paused. A date is a reason to look again, not evidence that the work is obsolete.
+Status also reports work awaiting review, the open Questions and how much Debt the notebook carries. `anb debt` lists the Debt: matters that need attention, such as an old Question or a reference to a missing record. It does not change their state. Check whether the work is still relevant before acting: resolve the Question, update the Task, or record why it must stay paused. A date is a reason to look again, not evidence that the work is obsolete. Where an epic stands is a read of its own: `anb ready --for <hub>` is its queue, and `anb list --for <hub> --archive` its whole membership.
 
 A compact section still has a count. `ready: 7` means there are seven Tasks, even if the budget omitted their rows. `anb status --budget 0` removes budget-driven cuts; individual sections still limit their rows. Use the relevant listing with `--all` for the complete set. [Status and Debt](../reference/status.md) specifies the sections, limits and clocks.
 
-A quiet notebook produces one line. A standing rule alone opens the full summary, so the law reaches a session before its first Task exists. Holds alone do not trigger the full summary, but a stale hold becomes Debt and makes it visible again.
+A quiet notebook produces one line. Knowledge alone leaves it quiet: a rule binds the work, and the skill reads it before the work rather than at every session's start. Holds alone do not trigger the full summary, but a stale hold becomes Debt and makes it visible again.
 
 ## Finish or pause
 

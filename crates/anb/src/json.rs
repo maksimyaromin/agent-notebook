@@ -6,9 +6,9 @@ use crate::recovery::{Recovery, Subject};
 use crate::reply::{Reply, SkillReply, repair_command, shown};
 use crate::setup::SetUp;
 use anb_core::{
-    Cited, Counts, DebtSignal, EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, GraphSlice,
-    ListedRecord, NotebookError, Overview, ReadyTask, RecordType, SECTION_ROWS, Status, View,
-    debt_classes, encode,
+    Cited, Counts, DebtSignal, EdgeKind, FileFinding, Filter, Graph, GraphEdge, GraphNode,
+    GraphSlice, ListedRecord, NotebookError, OpenQuestion, ReadyTask, RecordType, SECTION_ROWS,
+    Status, View, encode,
 };
 use serde_json::{Map, Value, json};
 
@@ -67,20 +67,19 @@ pub fn render(reply: &Reply) -> String {
             status_value(status)
         }
         Reply::Checked { findings, all } => checked_value(findings, *all),
+        Reply::Debt { signals, all } => json!({
+            "count": signals.len(),
+            "debt": signals[..shown(signals.len(), *all)]
+                .iter()
+                .map(debt_value)
+                .collect::<Vec<Value>>(),
+        }),
         Reply::Archived(moved) => archived_value(moved),
         Reply::Restored(moved) => restored_value(moved),
         Reply::Deleted(gone) => json!({"ok": "delete", "id": gone.id, "paths": gone.paths}),
         Reply::Skill(skill) => skill_value(skill),
         Reply::SetUp(done) => setup_value(done),
         Reply::Edited(edited) => edited_value(edited),
-        Reply::Searched { rows, all, .. } => json!({
-            "count": rows.len(),
-            "matches": rows[..shown(rows.len(), *all)]
-                .iter()
-                .map(listed_row)
-                .collect::<Vec<Value>>(),
-        }),
-        Reply::Overviewed { overview, all } => overview_value(overview, *all),
         Reply::Graphed { graph, full, all } => graph_value(graph, *full, *all),
         Reply::Silence => return String::new(),
     };
@@ -223,25 +222,29 @@ fn cited_value(cited: &Cited) -> Value {
 }
 
 fn ready_row(row: &ReadyTask) -> Value {
-    Value::Object(fields([
-        ("id", json!(row.id)),
-        ("priority", json!(row.priority)),
-        ("created", json!(row.created)),
-        ("by", json!(row.attribution.by)),
-        ("taken-by", json!(row.attribution.taken_by)),
-        ("title", json!(row.title)),
-    ]))
+    let mut object = attributed(
+        [
+            ("id", json!(row.id)),
+            ("priority", json!(row.priority)),
+            ("created", json!(row.created)),
+        ],
+        &row.attribution,
+    );
+    object.extend(fields([("title", json!(row.title))]));
+    Value::Object(object)
 }
 
 fn listed_row(row: &ListedRecord) -> Value {
-    Value::Object(fields([
-        ("id", json!(row.id)),
-        ("state", json!(row.state)),
-        ("priority", json!(row.priority)),
-        ("by", json!(row.attribution.by)),
-        ("taken-by", json!(row.attribution.taken_by)),
-        ("title", json!(row.title)),
-    ]))
+    let mut object = attributed(
+        [
+            ("id", json!(row.id)),
+            ("state", json!(row.state)),
+            ("priority", json!(row.priority)),
+        ],
+        &row.attribution,
+    );
+    object.extend(fields([("title", json!(row.title))]));
+    Value::Object(object)
 }
 
 fn checked_value(findings: &[FileFinding], all: bool) -> Value {
@@ -316,32 +319,10 @@ fn epic_value(epic: &anb_core::Epic) -> Value {
     ]))
 }
 
-fn overview_value(overview: &Overview, all: bool) -> Value {
-    let mut object = fields([
-        ("live", counts_value(&overview.live)),
-        (
-            "epics",
-            section(
-                &overview.epics,
-                shown(overview.epics.len(), all),
-                epic_value,
-            ),
-        ),
-    ]);
-    for grouped in &overview.sections {
-        object.insert(
-            grouped.record_type.directory().into(),
-            section(&grouped.rows, shown(grouped.rows.len(), all), listed_row),
-        );
-    }
-    object.insert("archive".into(), counts_value(&overview.archived));
-    Value::Object(object)
-}
-
 /// Which reading of the graph document this is. A caller builds against a
 /// shape, and a shape that could change without saying so is one nobody can
 /// build against.
-const GRAPH_CONTRACT: u8 = 2;
+const GRAPH_CONTRACT: u8 = 3;
 
 /// The graph as one document: the slice it answers, the records, and the
 /// edges between them. The two structural blocks are never bounded — a
@@ -363,22 +344,35 @@ fn graph_value(graph: &Graph, full: bool, all: bool) -> Value {
     })
 }
 
+/// The slice as data: every narrowing that made the document, each under
+/// the flag that names it, and absent when it was not asked for. A
+/// narrowing left out here would read as a notebook that holds nothing of
+/// the kind, which is a true-sounding answer to a question the caller
+/// never asked.
 fn slice_value(slice: &GraphSlice) -> Value {
-    Value::Object(fields([
-        ("for", json!(slice.hub)),
-        ("ready", json!(slice.ready_only)),
+    let mut object = filter_fields(&slice.filter);
+    object.extend(fields([
         ("focus", json!(slice.focus.as_ref().map(|focus| &focus.id))),
         (
             "depth",
             json!(slice.focus.as_ref().map(|focus| focus.depth)),
         ),
-        ("archive", json!(slice.archive)),
-        // A narrowing left out here reads as a notebook that holds nothing
-        // of the kind, which is a true-sounding answer to a question the
-        // caller never asked.
+    ]));
+    Value::Object(object)
+}
+
+fn filter_fields(filter: &Filter) -> Map<String, Value> {
+    let words = |words: &[String]| {
+        if words.is_empty() {
+            Value::Null
+        } else {
+            json!(words)
+        }
+    };
+    fields([
         (
             "type",
-            match slice.types.as_slice() {
+            match filter.types.as_slice() {
                 [] => Value::Null,
                 types => json!(
                     types
@@ -389,7 +383,13 @@ fn slice_value(slice: &GraphSlice) -> Value {
                 ),
             },
         ),
-    ]))
+        ("kind", words(&filter.kinds)),
+        ("tag", words(&filter.tags)),
+        ("for", json!(filter.hub)),
+        ("by", json!(filter.by)),
+        ("match", json!(filter.text)),
+        ("archive", json!(filter.archive)),
+    ])
 }
 
 fn graph_node_value(node: &GraphNode, degree: usize, full: bool, all: bool) -> Value {
@@ -484,21 +484,70 @@ fn view_value(view: &View, all: bool) -> Value {
 
 /// The dashboard as data. The Budget belongs to the text: it measures a
 /// rendering, and this one is bounded per section instead — so neither the
-/// spent estimate nor the text it measures is restated here.
+/// spent estimate nor the text it measures is restated here. Debt is a
+/// count, as on the text: `anb debt` is the read.
 fn status_value(status: &Status) -> Value {
-    json!({
-        "quiet": status.quiet,
-        "counts": counts_value(&status.counts),
-        "active": section(&status.active, dashboard_rows(&status.active), active_task_value),
-        "review": section(&status.review, dashboard_rows(&status.review), |id| json!(id)),
-        "held": section(&status.held, dashboard_rows(&status.held), held_task_value),
-        "rules": section(&status.rules, dashboard_rows(&status.rules), |rule| {
-            json!({"id": rule.id, "title": rule.title})
-        }),
-        "ready": section(&status.ready, dashboard_rows(&status.ready), ready_row),
-        "epics": section(&status.epics, dashboard_rows(&status.epics), epic_value),
-        "debt": debt_section(&status.debt),
-    })
+    Value::Object(fields([
+        ("quiet", json!(status.quiet)),
+        ("by", json!(status.by)),
+        ("counts", counts_value(&status.counts)),
+        (
+            "active",
+            section(
+                &status.active,
+                dashboard_rows(&status.active),
+                active_task_value,
+            ),
+        ),
+        (
+            "review",
+            section(&status.review, dashboard_rows(&status.review), |task| {
+                Value::Object(attributed([("id", json!(task.id))], &task.attribution))
+            }),
+        ),
+        (
+            "held",
+            section(&status.held, dashboard_rows(&status.held), held_task_value),
+        ),
+        (
+            "ready",
+            section(&status.ready, dashboard_rows(&status.ready), ready_row),
+        ),
+        (
+            "questions",
+            section(
+                &status.questions,
+                dashboard_rows(&status.questions),
+                question_row,
+            ),
+        ),
+        ("debt", json!({"count": status.debt})),
+    ]))
+}
+
+/// The fields of a row about a record, with who created it and who took
+/// it beside them when the record names them.
+fn attributed<'a>(
+    entries: impl IntoIterator<Item = (&'a str, Value)>,
+    attribution: &anb_core::Attribution,
+) -> Map<String, Value> {
+    let mut object = fields(entries);
+    object.extend(fields([
+        ("by", json!(attribution.by)),
+        ("taken-by", json!(attribution.taken_by)),
+    ]));
+    object
+}
+
+fn question_row(row: &OpenQuestion) -> Value {
+    Value::Object(attributed(
+        [
+            ("id", json!(row.id)),
+            ("created", json!(row.created)),
+            ("title", json!(row.title)),
+        ],
+        &row.attribution,
+    ))
 }
 
 /// The fields of one object, in insertion order, where a null value lands
@@ -554,35 +603,24 @@ fn dashboard_rows<T>(rows: &[T]) -> usize {
     rows.len().min(SECTION_ROWS)
 }
 
-/// Debt as data: the same rows the dashboard's text prints, which is the
-/// head of every class rather than the head of the list.
-fn debt_section(debt: &[DebtSignal]) -> Value {
-    json!({
-        "count": debt.len(),
-        "rows": debt_classes(debt)
-            .iter()
-            .flat_map(|class| class.shown.iter().copied())
-            .map(debt_value)
-            .collect::<Vec<Value>>(),
-    })
-}
-
 fn held_task_value(task: &anb_core::HeldTask) -> Value {
-    Value::Object(fields([
-        ("id", json!(task.id)),
-        ("reason", json!(task.reason)),
-        ("until", json!(task.until)),
-    ]))
+    Value::Object(attributed(
+        [
+            ("id", json!(task.id)),
+            ("reason", json!(task.reason)),
+            ("until", json!(task.until)),
+        ],
+        &task.attribution,
+    ))
 }
 
 fn active_task_value(task: &anb_core::ActiveTask) -> Value {
-    Value::Object(fields([
-        ("id", json!(task.id)),
-        ("title", json!(task.title)),
-        ("by", json!(task.attribution.by)),
-        ("taken-by", json!(task.attribution.taken_by)),
-        ("log", json!(task.log)),
-    ]))
+    let mut object = attributed(
+        [("id", json!(task.id)), ("title", json!(task.title))],
+        &task.attribution,
+    );
+    object.extend(fields([("log", json!(task.log))]));
+    Value::Object(object)
 }
 
 /// The signal's own values ride beside the printed line, so a program

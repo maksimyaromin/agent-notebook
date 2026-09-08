@@ -53,9 +53,11 @@ Choose by what a later reader needs, with an explicit `--kind` for Notes and Dec
 
 ### Orient
 
-Read `anb status` unless the hook supplied it. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Read its cited knowledge and relevant code. Search before creating records: search matches ids, titles, tags and the people named in the envelope, including the archive, but not bodies. Use `show --all` for a truncated body and scoped lists for larger work; loading the whole notebook obscures the immediate decision.
+Read `anb status` unless the hook supplied it. Status is the work: the active Tasks with the last log line of the first, work in review or on hold, the queue, the open Questions and a count of Debt. Follow the requested subject; otherwise resume the active Task or choose from `ready`. Before the work, read the standing rules with `anb list --type decision --kind rule` and open the ones its subject touches, then the knowledge the Task cites and the relevant code. Search before creating records: `anb list --match <text>` matches ids, titles, tags, the people named in the envelope and bodies, and `--archive` reaches history. Use `show --all` for a truncated body and narrowed lists for larger work; loading the whole notebook obscures the immediate decision.
 
-Several people can share one notebook, and nobody assigns work in it: a Task is taken. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names a Task someone already took; choose one nobody took, or one the user took, and read `ready --mine` when the queue is long. `start` records the user as the Task's `taken-by` and refuses a Task another person took; handing it over is `edit <id> --taken-by <name>`, decided by the user, never by the agent.
+Every listing narrows the same way: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine` and `--team` compose on `list`, `ready` and `graph`, and `--type`, `--kind` and `--archive` on `list` and `graph`, each answering with the records every flag admits. `list --type note --tag domain-model` is the domain language; `ready --tag parser` is one area's queue; `anb debt` is the Debt that Status counts.
+
+Several people can share one notebook, and nobody assigns work in it: a Task is taken. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names a Task someone already took; choose one nobody took, or one the user took, and read `ready --mine` when the queue is long. A notebook whose config sets `scope: mine` answers every read with the user's own records by default; `--team` widens one call to the whole project, which is how new work is chosen when the user's own queue is empty. `start` records the user as the Task's `taken-by` and refuses a Task another person took; handing it over is `edit <id> --taken-by <name>`, decided by the user, never by the agent.
 
 ### Shape the idea
 
@@ -102,9 +104,10 @@ Run `anb check`, address findings and recheck. When no CLI repair exists, report
 | Retry a refused command unchanged | Read its `try:` instruction and fill its placeholders | Refusals explain the required correction |
 | Repeat `add` after an uncertain result | Inspect the notebook first | Creation without an explicit id can produce duplicates |
 | Start a Task marked as another person's | Pick a Task nobody took, or ask the user before `edit --taken-by` | Two people working one Task learn of it from a merge conflict |
+| Start work straight from Status | Read `list --type decision --kind rule` first | Status is the work; a rule is read before the work it binds |
 
 ## References
 
-Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list`, `ready` and `search` rows carry `by` and `taken-by` there. Use the installed `anb-atlas` skill for a visual review.
+Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list` and `ready` rows carry `by` and `taken-by` there. Use the installed `anb-atlas` skill for a visual review.
 
-For a named personal practice, search and show with `--global`; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.
+For a named personal practice, `list --match <name> --global` finds it and `show <id> --global` reads it; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.

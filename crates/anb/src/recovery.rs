@@ -43,13 +43,12 @@ pub fn subject(command: &Command) -> Subject {
         Command::List { .. } => ("list", None),
         Command::Status { .. } => ("status", None),
         Command::Check { .. } => ("check", None),
+        Command::Debt { .. } => ("debt", None),
         Command::Archive { id } => ("archive", Some(id)),
         Command::Restore { id } => ("restore", Some(id)),
         Command::Delete { id } => ("delete", Some(id)),
         Command::Edit(args) => ("edit", Some(&args.id)),
-        Command::Search { .. } => ("search", None),
         Command::Graph(_) => ("graph", None),
-        Command::Overview { .. } => ("overview", None),
         Command::Setup { .. } => ("setup", None),
         Command::Skill { .. } => ("skill", None),
     };
@@ -202,7 +201,6 @@ pub fn runnable(verb: &str, id: Option<&str>) -> Option<Vec<String>> {
         ("comment", Some(id)) => vec![format!("anb comment {id} \"<one line>\"")],
         ("edit", Some(id)) => vec![format!("anb edit {id} --title \"<title>\"")],
         ("add", _) => vec!["anb add task \"<title>\"".to_owned()],
-        ("search", _) => vec!["anb search \"<text>\"".to_owned()],
         ("setup", _) => crate::setup::agent_names()
             .into_iter()
             .map(|agent| format!("anb setup --agent {agent}"))

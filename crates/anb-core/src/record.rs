@@ -97,6 +97,16 @@ impl RecordType {
             RecordType::Task | RecordType::Question => None,
         }
     }
+
+    /// Every kind word any type allows, in type order: what a narrowing by
+    /// kind may name.
+    pub fn kind_words() -> impl Iterator<Item = &'static str> {
+        RecordType::ALL
+            .into_iter()
+            .filter_map(RecordType::kinds)
+            .flatten()
+            .copied()
+    }
 }
 
 /// The Task workflow states: `open → active → review → closed`, review

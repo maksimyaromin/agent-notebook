@@ -221,8 +221,9 @@ mod status_fits_its_budget {
             for index in 0..open_tasks {
                 files.push(task(index, "open", ""));
             }
-            // Each hub adopts one open Task, so the epics section grows with
-            // the notebook and the ladder's newest rung is generated too.
+            // Each hub waits on one open Task: the child reaches the queue
+            // and the hub stays out of it, so the fixture holds blocked open
+            // Tasks beside the dispatchable ones.
             for index in 0..epics.min(open_tasks) {
                 files.push(task(200 + index, "open", &format!("blocked-by: task.t{index}\n")));
                 files[index].1 = files[index]
@@ -243,7 +244,7 @@ mod status_fits_its_budget {
             let mut storage = MemoryStorage::from_files(files);
             let notebook = Notebook::new(&mut storage);
             let status = notebook
-                .status(TODAY, Budget::Tokens(ceiling), no_lost_proofs)
+                .status(TODAY, Budget::Tokens(ceiling), None, no_lost_proofs)
                 .unwrap();
             // The floor is counts, the first active line, what the rest
             // of it came to, and the budget line.
@@ -261,7 +262,7 @@ mod status_fits_its_budget {
                 status.text
             );
             let default = notebook
-                .status(TODAY, Budget::Tokens(Budget::DEFAULT_TOKENS), no_lost_proofs)
+                .status(TODAY, Budget::Tokens(Budget::DEFAULT_TOKENS), None, no_lost_proofs)
                 .unwrap();
             prop_assert!(
                 !default.text.contains("cut:"),

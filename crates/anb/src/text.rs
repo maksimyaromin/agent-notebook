@@ -9,13 +9,13 @@
 
 use crate::json;
 use crate::recovery::{Recovery, Subject};
-use crate::reply::{Reply, lifted, repair_command, shell_quoted, shown, slice_command};
+use crate::reply::{Reply, lifted, repair_command, shown, slice_command};
 use anb_core::date;
 use anb_core::encode::ROW_BOUND;
 use anb_core::encode::quoted_if_delimited;
 use anb_core::{
-    EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, ListedRecord, NotebookError, Overview,
-    ReadyTask, RecordType, View, counted, counts_phrase, encode,
+    DebtSignal, EdgeKind, FileFinding, Graph, GraphEdge, GraphNode, ListedRecord, NotebookError,
+    ReadyTask, RecordType, View, counted, encode,
 };
 use std::fmt::Write as _;
 
@@ -63,14 +63,12 @@ pub fn render(reply: &Reply, today: &str) -> String {
             today,
             &lifted("ready", filter),
         ),
-        Reply::Listing { rows, filter, all } => listing_table(
-            rows,
-            shown(rows.len(), *all),
-            "records",
-            &lifted("list", filter),
-        ),
+        Reply::Listing { rows, filter, all } => {
+            listing_table(rows, shown(rows.len(), *all), &lifted("list", filter))
+        }
         Reply::Viewed { view, all } => single_record(view, *all),
         Reply::Checked { findings, all } => findings_table(findings, shown(findings.len(), *all)),
+        Reply::Debt { signals, all } => debt_lines(signals, shown(signals.len(), *all)),
         Reply::Archived(moved) => archive_lines(moved),
         Reply::Restored(moved) => restore_lines(moved),
         Reply::SetUp(done) => setup_lines(done),
@@ -89,13 +87,6 @@ pub fn render(reply: &Reply, today: &str) -> String {
             dangling_mention_line(&mut out, &edited.dangling_mentions);
             out
         }
-        Reply::Searched { query, rows, all } => listing_table(
-            rows,
-            shown(rows.len(), *all),
-            "matches",
-            &format!("anb search {} --all", shell_quoted(query)),
-        ),
-        Reply::Overviewed { overview, all } => overview_page(overview, *all),
         Reply::Graphed { graph, full, all } => graph_blocks(graph, *full, *all),
         Reply::Status { status, hook } => {
             if *hook {
@@ -273,18 +264,12 @@ fn ready_table(rows: &[ReadyTask], shown: usize, today: &str, restore: &str) -> 
     out
 }
 
-fn listing_table(rows: &[ListedRecord], shown: usize, label: &str, restore: &str) -> String {
+/// The one shape of a record-listing block: header, then comma rows.
+fn listing_table(rows: &[ListedRecord], shown: usize, restore: &str) -> String {
     if rows.is_empty() {
         return EMPTY_LISTING.to_owned();
     }
-    let mut out = record_rows(rows, shown, label);
-    truncation_hint(&mut out, rows.len(), shown, restore);
-    out
-}
-
-/// The one shape of a record-listing block: header, then comma rows.
-fn record_rows(rows: &[ListedRecord], shown: usize, label: &str) -> String {
-    let mut out = format!("{label}[{}]{{id,state,priority,title}}:\n", rows.len());
+    let mut out = format!("records[{}]{{id,state,priority,title}}:\n", rows.len());
     for row in &rows[..shown] {
         let priority = row
             .priority
@@ -295,6 +280,7 @@ fn record_rows(rows: &[ListedRecord], shown: usize, label: &str) -> String {
             .map_or_else(|| "-".to_owned(), quoted_if_delimited);
         let _ = writeln!(out, "  {},{},{priority},{title}", row.id, row.state);
     }
+    truncation_hint(&mut out, rows.len(), shown, restore);
     out
 }
 
@@ -434,32 +420,17 @@ fn record_blocks(out: &mut String, nodes: &[GraphNode], all: bool, restore: &str
     truncation_hint(out, written.len(), bodies_shown, restore);
 }
 
-fn overview_page(overview: &Overview, all: bool) -> String {
-    let mut out = format!("notebook: {}\n", counts_phrase(&overview.live));
-    if !overview.epics.is_empty() {
-        let shown = shown(overview.epics.len(), all);
-        let _ = writeln!(out, "epics[{}]:", overview.epics.len());
-        for epic in &overview.epics[..shown] {
-            let _ = writeln!(out, "  {}", anb_core::epic_line(epic));
-        }
-        truncation_hint(&mut out, overview.epics.len(), shown, "anb overview --all");
+/// The Debt the dashboard's count line points at: one line per signal, in
+/// the clock table's order.
+fn debt_lines(signals: &[DebtSignal], shown: usize) -> String {
+    if signals.is_empty() {
+        return EMPTY_LISTING.to_owned();
     }
-    for section in &overview.sections {
-        if section.rows.is_empty() {
-            continue;
-        }
-        let shown = shown(section.rows.len(), all);
-        out.push_str(&record_rows(
-            &section.rows,
-            shown,
-            section.record_type.directory(),
-        ));
-        truncation_hint(&mut out, section.rows.len(), shown, "anb overview --all");
+    let mut out = format!("debt[{}]:\n", signals.len());
+    for signal in &signals[..shown] {
+        let _ = writeln!(out, "  {}", signal.line());
     }
-    let archived = &overview.archived;
-    if archived.tasks + archived.decisions + archived.notes + archived.questions > 0 {
-        let _ = writeln!(out, "archive: {}", counts_phrase(archived));
-    }
+    truncation_hint(&mut out, signals.len(), shown, "anb debt --all");
     out
 }
 

@@ -34,15 +34,19 @@ ready[1]{id,priority,age,taken-by,title}:
 
 `-` is an absent value. A value holding a comma or a quote is quoted. An empty listing is `count: 0`.
 
+## Narrowing
+
+`list`, `ready` and `graph` take the same narrowing flags: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine` and `--team`; `list` and `graph` also take `--type`, `--kind` and `--archive`, which a queue of live Tasks has no use for. Each is a predicate over the same notebook, so two flags ask for the intersection, and a narrowed listing's truncation hint carries every flag it was asked with. `status` takes `--by`, `--mine` and `--team`. Whose records a read answers with when none of those three is given is the notebook's `scope` config key, everyone's by default.
+
 ## Bounds
 
 Listings have default row limits and report omissions. Use `--all` to lift them. `show` also bounds long bodies and mention lists, marking where content was omitted. Graph JSON is unbounded so consumers receive the complete selected graph.
 
 ## JSON
 
-`--json` selects compact JSON. Mutation replies identify the operation with `ok`; read commands use fields appropriate to the result. For example, `ready` returns `count` and `ready`, `list` returns `count` and `records`, and `search` returns `count` and `matches`.
+`--json` selects compact JSON. Mutation replies identify the operation with `ok`; read commands use fields appropriate to the result. For example, `ready` returns `count` and `ready`, `list` returns `count` and `records`, and `debt` returns `count` and `debt`.
 
-A `list`, `ready` or `search` row carries `by` and `taken-by` when the record has them, so a script filters by identity without reading the files. Nested lists of consequences use `{count, rows}`. A truncated body uses `{lines, head, tail}`. Refusals provide `error`, `message`, `findings` and `try`. Parse these fields by name. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their own result structures.
+A `list` or `ready` row carries `by` and `taken-by` when the record has them, so a script filters by identity without reading the files. Nested lists of consequences use `{count, rows}`. A truncated body uses `{lines, head, tail}`. Refusals provide `error`, `message`, `findings` and `try`. Parse these fields by name. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their own result structures.
 
 ## Refusals
 

@@ -34,7 +34,7 @@ mod write;
 pub use error::NotebookError;
 
 use crate::config::{CONFIG_PATH, Config};
-use crate::debt::{self, DebtSources};
+use crate::debt::{self, DebtSignal, DebtSources};
 use crate::encode;
 use crate::finding::Finding;
 use crate::grammar::{self, RecordFile};
@@ -45,11 +45,10 @@ use crate::record::{
     not_utf8_finding,
 };
 use crate::reply::{
-    Archived, CitedProof, Closed, Commented, Counts, Created, Deleted, Edged, Edited, Filter,
-    Focus, Graph, GraphSlice, Held, ListedRecord, Overview, ReadyTask, Restored, Transitioned,
-    TypeSection, View,
+    Archived, Attribution, CitedProof, Closed, Commented, Created, Deleted, Edged, Edited, Graph,
+    Held, ListedRecord, ReadyTask, Restored, Transitioned, View,
 };
-use crate::request::{Draft, Edit, Link, Proof};
+use crate::request::{Draft, Edit, Filter, Focus, GraphSlice, Link, Proof};
 use crate::resolve::{
     Resolver, archive_of, archived_among, canonical_paths, is_archived, is_record_file, path_stem,
     record_path, resolvable_id,
@@ -127,66 +126,81 @@ impl<'a> Notebook<'a> {
     }
 
     /// The dispatch queue: open, unblocked, unheld Tasks, the most
-    /// urgent first, narrowed by `filter` — to one epic's scope for "what
-    /// is next inside this epic", to one identity's for "what is mine".
-    /// Invalid records are excluded, as from every derived query; `check`
-    /// names them.
+    /// urgent first, narrowed by `filter`. The queue is drawn from live
+    /// open Tasks, so a filter naming another type or the archive admits
+    /// nothing more. Invalid records are excluded, as from every derived
+    /// query; `check` names them.
     ///
     /// # Errors
     /// [`NotebookError::UnknownId`] when the hub names no record,
-    /// [`NotebookError::InvalidArgument`] on a malformed id, or a storage
-    /// failure.
+    /// [`NotebookError::InvalidArgument`] on a malformed id, a kind no type
+    /// allows, a malformed tag or an empty text, or a storage failure.
     pub fn ready(&self, filter: &Filter) -> Result<Vec<ReadyTask>, NotebookError> {
-        let (corpus, scope) = self.narrowed(filter)?;
-        Ok(query::ready_rows(&corpus.records, &corpus.resolver())
-            .into_iter()
-            .filter(|row| shown(filter, scope.as_ref(), &row.id, &row.attribution))
-            .collect())
+        let (corpus, admission) = self.narrowed(filter)?;
+        Ok(query::ready_rows(
+            &corpus.records,
+            &corpus.resolver(),
+            |record| admission.admits(record),
+        ))
     }
 
-    /// The live listing, in type-major file order, narrowed by `filter`; a
+    /// The listing, in type-major file order, narrowed by `filter`; a
     /// hub's scope includes the hub itself, so a reader opening an epic
-    /// sees it beside its work. An invalid record is a row of state `invalid`
-    /// — excluded from mutation and derived queries, never from sight;
-    /// `check` names its findings.
+    /// sees it beside its work, and the archive joins when asked for. An
+    /// invalid record is a row of state `invalid` — excluded from mutation
+    /// and derived queries, never from sight; `check` names its findings.
     ///
     /// # Errors
     /// See [`Notebook::ready`].
     pub fn list(&self, filter: &Filter) -> Result<Vec<ListedRecord>, NotebookError> {
-        let (corpus, scope) = self.narrowed(filter)?;
+        let (corpus, admission) = self.narrowed(filter)?;
         let resolvable = corpus.resolver();
         Ok(corpus
             .records
             .iter()
+            .filter(|record| admission.admits(record))
             .map(|record| query::listed_row(record, &resolvable))
-            .filter(|row| shown(filter, scope.as_ref(), &row.id, &row.attribution))
             .collect())
     }
 
-    /// The whole notebook and, when the filter names a hub, the ids inside
-    /// its scope. A filter narrows what is *shown*, never what is *read*: a
-    /// row is blocked, excluded and resolved against every record, so
-    /// narrowing a query cannot change any row's verdict — only which rows
-    /// reach the reader.
-    fn narrowed(
-        &self,
-        filter: &Filter,
-    ) -> Result<(Corpus, Option<BTreeSet<String>>), NotebookError> {
-        let Some(hub) = &filter.hub else {
-            return Ok((self.live_corpus()?, None));
+    /// The records a filter reads and what it admits of them. A filter
+    /// narrows what is *shown*, never what is *read*: a row is blocked,
+    /// excluded and resolved against every record, so narrowing a query
+    /// cannot change any row's verdict — only which rows reach the reader.
+    fn narrowed(&self, filter: &Filter) -> Result<(Corpus, query::Admission), NotebookError> {
+        guard_filter(filter)?;
+        let corpus = if filter.archive {
+            self.whole_corpus()?
+        } else {
+            self.live_corpus()?
         };
-        write::parsed_type(hub)?;
-        if self.holder_path(hub)?.is_none() {
-            return Err(NotebookError::UnknownId { id: hub.to_owned() });
-        }
-        let corpus = self.live_corpus()?;
-        let kin = self.archived_kin(&corpus)?;
+        let Some(hub) = &filter.hub else {
+            return Ok((corpus, query::Admission::of(filter, None)));
+        };
+        self.guard_hub(hub)?;
+        // A whole corpus already holds the archive; a live one borrows the
+        // filed kin an epic's lineage runs through.
+        let kin = if filter.archive {
+            Vec::new()
+        } else {
+            self.archived_kin(&corpus)?
+        };
         let scope = query::MembershipIndex::of(&corpus.records, &kin)
             .scope_of(hub)
             .into_iter()
             .map(str::to_owned)
             .collect();
-        Ok((corpus, Some(scope)))
+        Ok((corpus, query::Admission::of(filter, Some(scope))))
+    }
+
+    /// A hub a filter names must be a record the notebook holds: an empty
+    /// answer reads exactly like an epic with nothing in it.
+    fn guard_hub(&self, hub: &str) -> Result<(), NotebookError> {
+        write::parsed_type(hub)?;
+        if self.holder_path(hub)?.is_none() {
+            return Err(NotebookError::UnknownId { id: hub.to_owned() });
+        }
+        Ok(())
     }
 
     /// The archived records the live ones still name as a blocker or an
@@ -201,44 +215,6 @@ impl<'a> Notebook<'a> {
         let archived = corpus.resolver();
         let wanted = archived_among(corpus.records.iter().flat_map(query::kin_of), &archived);
         self.kin_closure(&archived, Vec::new(), wanted)
-    }
-
-    /// The kin an epic asks for — and, when the notebook keeps no epic,
-    /// only the one hop that establishes there is none.
-    ///
-    /// A hub names its own children on its `blocked-by` lines, so whether
-    /// the notebook holds an epic at all is settled one step into the
-    /// archive. Everything behind those children answers a second question
-    /// — where a live record sits inside an epic — which a notebook without
-    /// one never asks. So a dashboard reads history only once there is an
-    /// epic to spend it on.
-    fn epic_kin(&self, corpus: &Corpus) -> Result<Vec<Record>, NotebookError> {
-        let archived = corpus.resolver();
-        let children = archived_among(
-            corpus
-                .records
-                .iter()
-                .flat_map(|record| record.file().field_values("blocked-by")),
-            &archived,
-        );
-        let mut declared = Vec::new();
-        for id in children {
-            if let Some(record) = self.archived_record(&id)? {
-                declared.push(record);
-            }
-        }
-        if !query::any_hub(&corpus.records, &declared, &archived) {
-            return Ok(declared);
-        }
-        let wanted = archived_among(
-            corpus
-                .records
-                .iter()
-                .chain(declared.iter())
-                .flat_map(query::kin_of),
-            &archived,
-        );
-        self.kin_closure(&archived, declared, wanted)
     }
 
     /// Read the archived records `wanted` names, and those they name in
@@ -294,7 +270,8 @@ impl<'a> Notebook<'a> {
     /// The session-start dashboard under `budget`, gated: one quiet line
     /// when the notebook carries no signal, the full budgeted composite
     /// otherwise. The caller resolves `budget` — a CLI flag outranks the
-    /// config key, which defaults to 1500.
+    /// config key, which defaults to 1500 — and `by`, the one identity the
+    /// work is narrowed to, or the whole team's.
     ///
     /// `settle` is the host's answer to "which of these proofs does the
     /// world still hold": it is handed the proofs the live records cite and
@@ -308,18 +285,61 @@ impl<'a> Notebook<'a> {
         &self,
         today: &str,
         budget: Budget,
+        by: Option<&str>,
         settle: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
     ) -> Result<Status, NotebookError> {
         let today_day = write::guarded_day(today)?;
-        let thresholds = self.config()?.debt_thresholds();
         let corpus = self.live_corpus()?;
         let records = &corpus.records;
         let resolvable = corpus.resolver();
-        let live_valid: Vec<&Record> = records
+        let debt = self.decay(&corpus, today_day, settle)?;
+        let named = |record: &Record| by.is_none_or(|by| Attribution::of(record).names(by));
+        let scoped: Vec<&Record> = records
             .iter()
-            .filter(|record| !debt::is_excluded(record, &resolvable))
+            .filter(|record| !debt::is_excluded(record, &resolvable) && named(record))
             .collect();
+        let identity = self.identity;
+        let inputs = StatusInputs {
+            identity: identity.map(str::to_owned),
+            by: by.map(str::to_owned),
+            counts: query::live_counts(records),
+            active: query::active_tasks(&scoped, identity),
+            review: query::review_tasks(&scoped, identity),
+            held: query::held_tasks(&scoped, identity),
+            ready: query::ready_rows(records, &resolvable, named),
+            questions: query::open_questions(&scoped, identity),
+            debt: debt.len(),
+            today_day,
+        };
+        Ok(status::assemble(inputs, budget))
+    }
 
+    /// The Debt of the whole notebook, in the clock table's order: the
+    /// read the dashboard's count line points at. `settle` is what
+    /// [`Notebook::status`] takes.
+    ///
+    /// # Errors
+    /// See [`Notebook::status`].
+    pub fn debt(
+        &self,
+        today: &str,
+        settle: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
+    ) -> Result<Vec<DebtSignal>, NotebookError> {
+        let today_day = write::guarded_day(today)?;
+        self.decay(&self.live_corpus()?, today_day, settle)
+    }
+
+    /// Every sign of decay over the live records, the user's notebook
+    /// standing behind them.
+    fn decay(
+        &self,
+        corpus: &Corpus,
+        today_day: i64,
+        settle: impl FnOnce(&[CitedProof]) -> Vec<CitedProof>,
+    ) -> Result<Vec<DebtSignal>, NotebookError> {
+        let thresholds = self.config()?.debt_thresholds();
+        let records = &corpus.records;
+        let resolvable = corpus.resolver();
         let lost = settle(&query::cited_proofs(records));
         let behind = user_scope(self.user);
         let sources = DebtSources {
@@ -330,75 +350,7 @@ impl<'a> Notebook<'a> {
             user_records: &behind.records,
             user_archived: &behind.archived,
         };
-        let queue = query::ready_rows(records, &resolvable);
-        let inputs = StatusInputs {
-            identity: self.identity.map(str::to_owned),
-            counts: query::live_counts(records),
-            active: query::active_tasks(&live_valid, self.identity),
-            review: query::review_tasks(&live_valid),
-            held: query::held_tasks(&live_valid),
-            rules: query::standing_rules(&live_valid),
-            epics: query::epic_rows(records, &self.epic_kin(&corpus)?, &resolvable, &queue),
-            ready: queue,
-            debt: debt::signals(&sources, &thresholds),
-            today_day,
-        };
-        Ok(status::assemble(inputs, budget))
-    }
-
-    /// Find records by case-insensitive substring over id, title, tags, the
-    /// people named in the envelope, and body — live and archived alike:
-    /// the archive is history, and history is findable. Rows share the
-    /// listing shape.
-    ///
-    /// # Errors
-    /// [`NotebookError::InvalidArgument`] on an empty query, or a storage
-    /// failure.
-    pub fn search(&self, query: &str) -> Result<Vec<ListedRecord>, NotebookError> {
-        let needle = query.trim().to_lowercase();
-        if needle.is_empty() {
-            return Err(NotebookError::InvalidArgument {
-                reason: "search: the query must not be empty".to_owned(),
-            });
-        }
-        let corpus = self.whole_corpus()?;
-        let resolvable = corpus.resolver();
-        Ok(corpus
-            .records
-            .iter()
-            .filter(|record| query::matches_query(record, &needle))
-            .map(|record| query::listed_row(record, &resolvable))
-            .collect())
-    }
-
-    /// The whole notebook as one page: every live record grouped by type,
-    /// with the archive reduced to counts. The model is complete; what a
-    /// reader is shown of it is the reply's to bound.
-    ///
-    /// # Errors
-    /// A storage failure.
-    pub fn overview(&self) -> Result<Overview, NotebookError> {
-        let corpus = self.live_corpus()?;
-        let records = &corpus.records;
-        let resolvable = corpus.resolver();
-        let sections = RecordType::ALL
-            .into_iter()
-            .map(|record_type| TypeSection {
-                record_type,
-                rows: records
-                    .iter()
-                    .filter(|record| query::lives_in(record, record_type))
-                    .map(|record| query::listed_row(record, &resolvable))
-                    .collect(),
-            })
-            .collect();
-        let queue = query::ready_rows(records, &resolvable);
-        Ok(Overview {
-            live: query::live_counts(records),
-            epics: query::epic_rows(records, &self.epic_kin(&corpus)?, &resolvable, &queue),
-            sections,
-            archived: corpus.archive,
-        })
+        Ok(debt::signals(&sources, &thresholds))
     }
 
     /// The notebook as a graph: every record the slice reaches, each with the
@@ -420,27 +372,28 @@ impl<'a> Notebook<'a> {
     ///
     /// # Errors
     /// [`NotebookError::UnknownId`] when the slice names no record,
-    /// [`NotebookError::InvalidArgument`] on a malformed id or on a focus
-    /// the slice itself leaves out, or a storage failure.
+    /// [`NotebookError::InvalidArgument`] on a malformed id, a filter
+    /// [`Notebook::ready`] would refuse, or a focus the slice itself
+    /// leaves out, or a storage failure.
     pub fn graph(&self, slice: &GraphSlice) -> Result<Graph, NotebookError> {
-        if let Some(hub) = &slice.hub {
-            write::parsed_type(hub)?;
-            if self.holder_path(hub)?.is_none() {
-                return Err(NotebookError::UnknownId { id: hub.clone() });
-            }
+        let filter = &slice.filter;
+        guard_filter(filter)?;
+        if let Some(hub) = &filter.hub {
+            self.guard_hub(hub)?;
         }
         let live = self.live_corpus()?;
         let filed = self.filed_records()?;
         let resolvable = live.resolver();
-        let queue = query::ready_rows(&live.records, &resolvable);
+        let queue = query::ready_rows(&live.records, &resolvable, |_| true);
         let epics = query::epic_rows(&live.records, &filed, &resolvable, &queue);
-        let scope = slice.hub.as_deref().map(|hub| {
+        let scope = filter.hub.as_deref().map(|hub| {
             query::MembershipIndex::of(&live.records, &filed)
                 .scope_of(hub)
                 .into_iter()
                 .map(str::to_owned)
                 .collect::<BTreeSet<String>>()
         });
+        let admission = query::Admission::of(filter, scope);
 
         let mut claimed = BTreeSet::new();
         let drawable: Vec<&Record> = live
@@ -448,33 +401,26 @@ impl<'a> Notebook<'a> {
             .iter()
             .chain(&filed)
             .filter(|record| claimed.insert(path_stem(record.path())))
-            .filter(|record| slice.archive || !is_archived(record.path()))
+            .filter(|record| filter.archive || !is_archived(record.path()))
             .collect();
         let near = match &slice.focus {
             Some(focus) => Some(query::neighbourhood(
                 &drawable,
-                self.focusable(focus, slice.archive)?,
+                self.focusable(focus, filter.archive)?,
                 focus.depth,
             )),
             None => None,
         };
 
-        // The types narrow what is drawn, never what the neighbourhood was
-        // walked over: a reader asking which Decisions stand around a Task
-        // is asking about that Task's surroundings, and a walk that could
-        // not step through a Task would answer that nothing does.
-        let asked_for = |record: &Record| {
-            slice.types.is_empty()
-                || record
-                    .record_type()
-                    .is_some_and(|record_type| slice.types.contains(&record_type))
-        };
+        // The filter narrows what is drawn, never what the neighbourhood
+        // was walked over: a reader asking which Decisions stand around a
+        // Task is asking about that Task's surroundings, and a walk that
+        // could not step through a Task would answer that nothing does.
         let shown = |record: &Record| {
-            let id = path_stem(record.path());
-            asked_for(record)
-                && scope.as_ref().is_none_or(|scope| scope.contains(id))
-                && (!slice.ready_only || queue.iter().any(|row| row.id == id))
-                && near.as_ref().is_none_or(|near| near.contains(id))
+            admission.admits(record)
+                && near
+                    .as_ref()
+                    .is_none_or(|near| near.contains(path_stem(record.path())))
         };
         let nodes = drawable
             .into_iter()
@@ -1788,12 +1734,12 @@ impl<'a> Notebook<'a> {
     /// search it, or refuse an id it already claims.
     fn whole_corpus(&self) -> Result<Corpus, NotebookError> {
         let mut records = Vec::new();
-        let mut held = RecordType::ALL.map(|record_type| (record_type, 0));
-        for (record_type, tally) in &mut held {
+        for record_type in RecordType::ALL {
             records.extend(read_records_in(self.storage, record_type.directory())?);
-            let filed = read_records_in(self.storage, &archive_of(record_type.directory()))?;
-            *tally = filed.len();
-            records.extend(filed);
+            records.extend(read_records_in(
+                self.storage,
+                &archive_of(record_type.directory()),
+            )?);
         }
         let archived = records
             .iter()
@@ -1801,11 +1747,7 @@ impl<'a> Notebook<'a> {
             .filter_map(|record| resolvable_id(record.path()))
             .map(str::to_owned)
             .collect();
-        Ok(Corpus {
-            records,
-            archived,
-            archive: Counts::per_type(held),
-        })
+        Ok(Corpus { records, archived })
     }
 
     /// The live records, with the archive present by name alone: a query
@@ -1831,17 +1773,34 @@ fn decided(loaded: &LoadedLive, action: TaskAction) -> Result<Transition, Notebo
         })
 }
 
-/// Which rows of a narrowed listing reach the reader: the ones inside the
-/// hub's scope when one is named, and the ones naming the identity when one
-/// is.
-fn shown(
-    filter: &Filter,
-    scope: Option<&BTreeSet<String>>,
-    id: &str,
-    attribution: &crate::reply::Attribution,
-) -> bool {
-    scope.is_none_or(|scope| scope.contains(id))
-        && filter.by.as_deref().is_none_or(|by| attribution.names(by))
+/// A filter is refused before any record is read when it names what no
+/// record can carry: a kind no type allows, a tag the grammar rejects, or
+/// no text at all. An empty answer to any of these would read as a notebook
+/// holding nothing of the kind, which is a true-sounding answer to a
+/// question nobody can ask.
+fn guard_filter(filter: &Filter) -> Result<(), NotebookError> {
+    let invalid = |reason: String| Err(NotebookError::InvalidArgument { reason });
+    for kind in &filter.kinds {
+        if !RecordType::kind_words().any(|word| word == kind) {
+            return invalid(format!(
+                "kind: `{kind}` is not one of {}",
+                RecordType::kind_words().collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+    for tag in &filter.tags {
+        if !grammar::is_token(tag) {
+            return invalid(format!("tags: `{tag}` is not a `[a-z0-9-]+` tag"));
+        }
+    }
+    if filter
+        .text
+        .as_deref()
+        .is_some_and(|text| text.trim().is_empty())
+    {
+        return invalid("match: the text must not be empty".to_owned());
+    }
+    Ok(())
 }
 
 /// [`Notebook::live_corpus`] over any root, so a second notebook is read by
@@ -1852,21 +1811,14 @@ fn read_live_corpus(storage: &dyn Storage) -> Result<Corpus, NotebookError> {
         records.extend(read_records_in(storage, record_type.directory())?);
     }
     let mut archived = BTreeSet::new();
-    let mut held = RecordType::ALL.map(|record_type| (record_type, 0));
-    for (record_type, tally) in &mut held {
+    for record_type in RecordType::ALL {
         for path in storage.list(&archive_of(record_type.directory()))? {
-            if !is_record_file(&path) {
-                continue;
+            if is_record_file(&path) {
+                archived.extend(resolvable_id(&path).map(str::to_owned));
             }
-            *tally += 1;
-            archived.extend(resolvable_id(&path).map(str::to_owned));
         }
     }
-    Ok(Corpus {
-        records,
-        archived,
-        archive: Counts::per_type(held),
-    })
+    Ok(Corpus { records, archived })
 }
 
 /// The user's notebook standing behind a project's, read by the same rules
@@ -1913,7 +1865,6 @@ fn read_records_in(storage: &dyn Storage, dir: &str) -> Result<Vec<Record>, Note
 pub(super) struct Corpus {
     records: Vec<Record>,
     archived: BTreeSet<String>,
-    archive: Counts,
 }
 
 impl Corpus {
@@ -1922,7 +1873,6 @@ impl Corpus {
         Corpus {
             records: Vec::new(),
             archived: BTreeSet::new(),
-            archive: Counts::default(),
         }
     }
 

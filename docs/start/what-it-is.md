@@ -44,7 +44,7 @@ These checks apply regardless of which agent runs the command. They verify the r
 
 ### The session starts with a summary
 
-`anb status` summarizes active work, rules, ready Tasks and signs of neglected work. Its configurable budget limits how much context the summary consumes. It reports omissions so the agent can request more. A quiet notebook gets one line. Keeping history should not require putting all of it into every session. `anb show` opens one record, and scoped queries follow one branch of work.
+`anb status` summarizes the work: active Tasks, ready Tasks, open Questions and a count of neglected work. Its configurable budget limits how much context the summary consumes. It reports omissions so the agent can request more. A quiet notebook gets one line. Keeping history should not require putting all of it into every session. `anb show` opens one record, and one set of narrowing flags follows one branch of work, one type or kind of record, one tag, or one person's records on every listing.
 
 Replies use short text tables and stable refusal codes, with `--json` for programs. The [reply contract](../reference/replies.md) describes the shapes; [Status and Debt](../reference/status.md) explains the budget and its limits.
 

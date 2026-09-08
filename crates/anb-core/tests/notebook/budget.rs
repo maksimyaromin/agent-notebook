@@ -2,7 +2,8 @@ mod budget_ladder {
     use crate::*;
 
     /// A notebook with every section populated: an active Task with a
-    /// log, review work, rules, seven ready rows, an epic, and aged debt.
+    /// log, review work, seven ready rows, an open Question old enough to
+    /// be Debt too, and a rule that reaches no section.
     fn full_notebook() -> MemoryStorage {
         let mut files: Vec<(String, String)> = vec![
             (
@@ -59,7 +60,7 @@ mod budget_ladder {
     fn rendered(budget: Budget) -> Rendered {
         let mut storage = full_notebook();
         let status = Notebook::new(&mut storage)
-            .status(TODAY, budget, no_lost_proofs)
+            .status(TODAY, budget, None, no_lost_proofs)
             .unwrap();
         Rendered {
             text: status.text,
@@ -68,11 +69,16 @@ mod budget_ladder {
     }
 
     /// A notebook whose every listing section overflows its bound: eight
-    /// active Tasks, eight waiting on a human, eight standing rules, and
-    /// eight epics.
+    /// active Tasks, eight waiting on a human, eight ready children of
+    /// eight hubs, eight open Questions, and eight standing rules that
+    /// reach no section.
     fn crowded_notebook() -> MemoryStorage {
         let mut files: Vec<(String, String)> = Vec::new();
         for index in 0..8 {
+            files.push((
+                format!("questions/question.q{index}.md"),
+                record_file(&format!("question.q{index}"), "question", "open", &[], ""),
+            ));
             files.push((
                 format!("tasks/task.flight{index}.md"),
                 record_file(&format!("task.flight{index}"), "task", "active", &[], ""),
@@ -122,13 +128,14 @@ mod budget_ladder {
             .status(
                 TODAY,
                 Budget::Tokens(Budget::DEFAULT_TOKENS),
+                None,
                 no_lost_proofs,
             )
             .unwrap();
         let (sections, budget_line) = status.text.rsplit_once("budget: ").unwrap();
         assert_eq!(
             sections,
-            "ok: notebook — 32 tasks, 8 decisions, 0 notes, 0 questions\n\
+            "ok: notebook — 32 tasks, 8 decisions, 0 notes, 8 questions\n\
              active: task.flight0 \"A demo record\"\n\
              active: task.flight1 \"A demo record\"\n\
              active: task.flight2 \"A demo record\"\n\
@@ -136,25 +143,19 @@ mod budget_ladder {
              active: task.flight4 \"A demo record\"\n  \u{2026} 3 more active\n\
              review[8]: task.waiting0, task.waiting1, task.waiting2, task.waiting3, \
              task.waiting4, \u{2026} 3 more — waiting on a human\n\
-             rules[8]:\n\
-             \x20 decision.rule0: \"A demo record\"\n\
-             \x20 decision.rule1: \"A demo record\"\n\
-             \x20 decision.rule2: \"A demo record\"\n\
-             \x20 decision.rule3: \"A demo record\"\n\
-             \x20 decision.rule4: \"A demo record\"\n  \u{2026} 3 more\n\
              ready[8]{id,priority,age,taken-by,title}:\n\
              \x20 task.child0,-,3d,-,A demo record\n\
              \x20 task.child1,-,3d,-,A demo record\n\
              \x20 task.child2,-,3d,-,A demo record\n\
              \x20 task.child3,-,3d,-,A demo record\n\
              \x20 task.child4,-,3d,-,A demo record\n  \u{2026} 3 more: anb ready\n\
-             epics[8]:\n\
-             \x20 task.hub0: 0/1 closed, next: task.child0\n\
-             \x20 task.hub1: 0/1 closed, next: task.child1\n\
-             \x20 task.hub2: 0/1 closed, next: task.child2\n\
-             \x20 task.hub3: 0/1 closed, next: task.child3\n\
-             \x20 task.hub4: 0/1 closed, next: task.child4\n  \u{2026} 3 more\n",
-            "every section stops at five rows and counts the rest"
+             questions[8]{id,age,by,title}:\n\
+             \x20 question.q0,3d,-,A demo record\n\
+             \x20 question.q1,3d,-,A demo record\n\
+             \x20 question.q2,3d,-,A demo record\n\
+             \x20 question.q3,3d,-,A demo record\n\
+             \x20 question.q4,3d,-,A demo record\n  \u{2026} 3 more: anb list --type question\n",
+            "every section stops at five rows and counts the rest; knowledge reaches none"
         );
         assert_eq!(
             budget_line,
@@ -173,7 +174,7 @@ mod budget_ladder {
     fn the_floor_keeps_one_active_line_however_many_are_active() {
         let mut storage = crowded_notebook();
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1), no_lost_proofs)
+            .status(TODAY, Budget::Tokens(1), None, no_lost_proofs)
             .unwrap();
         assert_eq!(
             status.text.lines().count(),
@@ -195,10 +196,10 @@ mod budget_ladder {
             "active: task.flight",
             "log: \"- 2026-08-25 claude: stopped at the ladder\"",
             "review[1]: task.waiting — waiting on a human",
-            "rules[1]:",
             "ready[7]{id,priority,age,taken-by,title}:",
             "  … 2 more: anb ready",
-            "debt[",
+            "questions[1]{id,age,by,title}:\n  question.aged,26d,-,A demo record\n",
+            "debt: 1 — anb debt",
         ] {
             assert!(
                 full.text.contains(section),
@@ -211,6 +212,11 @@ mod budget_ladder {
                 .contains(&format!("budget: ~{} tokens (no ceiling)\n", full.spent))
         );
         assert!(!full.text.contains("cut:"), "{}", full.text);
+        assert!(
+            !full.text.contains("decision.rule"),
+            "a rule is read by a listing, never pushed into the opening: {}",
+            full.text
+        );
     }
 
     #[test]
@@ -227,76 +233,61 @@ mod budget_ladder {
         assert!(!comfortable.text.contains("cut:"), "{}", comfortable.text);
     }
 
-    /// The ladder's fixed order, read off a descending budget sweep: ready
-    /// rows go first, then debt collapses, then rules, then the log line —
-    /// never the other way around — and the text fits every budget the
-    /// floor has not been forced past.
-    /// The indented rows under one section header, wherever the ladder has
-    /// moved the sections around it.
+    /// The rows under one section header, wherever the ladder has moved
+    /// the sections around it; the hint that counts the rest is no row.
     fn rows_under(text: &str, header: &str) -> usize {
         text.lines()
             .skip_while(|line| !line.starts_with(header))
             .skip(1)
             .take_while(|line| line.starts_with("  "))
+            .filter(|line| !line.contains('\u{2026}'))
             .count()
     }
 
     #[test]
-    fn the_epic_block_states_progress_and_collapses_to_a_count() {
-        let full = rendered(Budget::Unbounded);
+    fn the_questions_block_collapses_to_a_count_that_names_the_way_back() {
+        let collapsed = (1..=400)
+            .rev()
+            .map(|ceiling| rendered(Budget::Tokens(ceiling)))
+            .find(|step| {
+                step.text
+                    .contains("questions: 1 — anb list --type question")
+            })
+            .expect("some ceiling collapses the questions and keeps the rest");
         assert!(
-            full.text.contains("epics[1]:\n  task.epic: 0/1 closed"),
-            "an epic whose only child is active has nothing ready: {}",
-            full.text
+            collapsed.text.contains("questions\u{2192}count"),
+            "the budget line says what it cut: {}",
+            collapsed.text
         );
-
-        let tight = rendered(Budget::Tokens(110));
         assert!(
-            tight.text.contains("epics: 1 — anb list --for <id>"),
-            "collapsed, it keeps the count and names the way back: {}",
-            tight.text
-        );
-        assert!(
-            tight.text.contains("epics\u{2192}count"),
-            "and the budget line says what it cut: {}",
-            tight.text
+            collapsed.text.contains("log: "),
+            "the questions collapse before the log goes: {}",
+            collapsed.text
         );
     }
 
+    /// The ladder's fixed order, read off a descending budget sweep: ready
+    /// rows go first, then the questions collapse, then the log line —
+    /// never the other way around — and the text fits every budget the
+    /// floor has not been forced past.
     #[test]
     fn sections_degrade_in_the_fixed_order_as_the_budget_shrinks() {
-        let mut stages = Vec::new();
-        // One ceiling per rung the ladder actually has, found by
-        // bisecting this fixture: a ceiling between two rungs renders what
-        // the one above it did, and proves nothing. The count assertion
-        // below is what keeps that true as the fixture moves.
-        for ceiling in [400, 150, 130, 122, 118, 113, 110, 100, 1] {
+        let mut stages: Vec<(usize, bool, bool)> = Vec::new();
+        for ceiling in (1..=400).rev() {
             let step = rendered(Budget::Tokens(ceiling));
             let ready_rows = rows_under(&step.text, "ready[");
-            let epics_itemized = step.text.contains("epics[");
-            let debt_itemized = step.text.contains("debt[");
-            let rules_itemized = step.text.contains("rules[");
+            let questions_itemized = step.text.contains("questions[");
             let has_log = step.text.contains("log: ");
             let floor = !step.text.contains("ready") && !step.text.contains("debt");
 
             assert!(
-                epics_itemized || ready_rows == 0,
-                "epics collapsed while ready rows remain at {ceiling}: {}",
+                questions_itemized || ready_rows == 0,
+                "questions collapsed while ready rows remain at {ceiling}: {}",
                 step.text
             );
             assert!(
-                debt_itemized || !epics_itemized,
-                "debt collapsed before epics at {ceiling}: {}",
-                step.text
-            );
-            assert!(
-                rules_itemized || !debt_itemized,
-                "rules collapsed before debt at {ceiling}: {}",
-                step.text
-            );
-            assert!(
-                has_log || !rules_itemized,
-                "the log dropped before rules collapsed at {ceiling}: {}",
+                has_log || !questions_itemized,
+                "the log dropped before questions collapsed at {ceiling}: {}",
                 step.text
             );
             assert!(
@@ -323,21 +314,22 @@ mod budget_ladder {
                     step.text
                 );
             }
-            stages.push((ready_rows, debt_itemized, rules_itemized, has_log));
+            let stage = (ready_rows, questions_itemized, has_log);
+            if stages.last() != Some(&stage) {
+                stages.push(stage);
+            }
         }
-        let distinct: std::collections::BTreeSet<_> = stages.iter().collect();
+        assert_eq!(stages.first(), Some(&(5, true, true)), "{stages:?}");
+        assert_eq!(stages.last(), Some(&(0, false, false)), "{stages:?}");
         assert!(
-            distinct.len() >= 5,
-            "the ceilings must step down every rung the ladder has, not repeat one: {stages:?}"
+            stages.len() >= 5,
+            "the sweep must step down every rung the ladder has, not skip them: {stages:?}"
         );
         let mut previous = stages[0];
         for stage in &stages {
             let stage = *stage;
             assert!(
-                stage.0 <= previous.0
-                    && (!stage.1 || previous.1)
-                    && (!stage.2 || previous.2)
-                    && (!stage.3 || previous.3),
+                stage.0 <= previous.0 && (!stage.1 || previous.1) && (!stage.2 || previous.2),
                 "a smaller budget restored a section: {stage:?} after {previous:?}"
             );
             previous = stage;
@@ -358,7 +350,7 @@ mod budget_ladder {
             let step = {
                 let mut storage = full_notebook();
                 Notebook::new(&mut storage)
-                    .status(TODAY, ceiling, no_lost_proofs)
+                    .status(TODAY, ceiling, None, no_lost_proofs)
                     .unwrap()
             };
             let whole = anb_core::estimate_tokens(&step.text);
@@ -388,7 +380,7 @@ mod budget_ladder {
         for ceiling in [200, 100, 60, 40, 20, 10, 2] {
             let mut storage = MemoryStorage::from_files(files.clone());
             let status = Notebook::new(&mut storage)
-                .status(TODAY, Budget::Tokens(ceiling), no_lost_proofs)
+                .status(TODAY, Budget::Tokens(ceiling), None, no_lost_proofs)
                 .unwrap();
             if let Some(cut) = status.text.split("cut: ").nth(1) {
                 assert!(
@@ -433,7 +425,7 @@ mod budget_ladder {
             &task_file("closed", &["closed: 2026-08-25"]),
         )]);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1), no_lost_proofs)
+            .status(TODAY, Budget::Tokens(1), None, no_lost_proofs)
             .unwrap();
         assert!(status.quiet);
         assert!(
@@ -445,9 +437,9 @@ mod budget_ladder {
 
     /// The Budget regression fixture. The 350 is a pin, not a derivation:
     /// this notebook's dashboard measured 212 true o200k tokens before the
-    /// rules, review, and log sections existed (2026-08-25), and the pin
-    /// grants those plus the estimator's overshoot their room. Growth past
-    /// it is dashboard bloat, and a budget-line regression is a failure.
+    /// review, log and questions sections existed, and the pin grants
+    /// those plus the estimator's overshoot their room. Growth past it is
+    /// dashboard bloat, and a budget-line regression is a failure.
     #[test]
     fn a_sixty_task_notebook_fits_the_default_budget_with_headroom() {
         let mut files: Vec<(String, String)> = vec![(
@@ -500,7 +492,7 @@ mod budget_ladder {
         }
         let mut storage = MemoryStorage::from_files(files);
         let status = Notebook::new(&mut storage)
-            .status(TODAY, Budget::Tokens(1500), no_lost_proofs)
+            .status(TODAY, Budget::Tokens(1500), None, no_lost_proofs)
             .unwrap();
         assert!(!status.text.contains("cut:"), "{}", status.text);
         assert!(

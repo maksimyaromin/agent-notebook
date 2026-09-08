@@ -52,7 +52,7 @@ These are instructions to the agent. The CLI validates record changes; it does n
 
 Ask the agent to continue the Task or epic. It reads Status and the active Task's latest log entry to find where work stopped. If the Task is finished, it selects the next ready one. Dependencies keep blocked work out of that queue.
 
-Closed work stays in `.agent-notebook/archive/`, including its reports. `anb search` and `anb show` can still read it. With the notebook committed, another collaborator or another clone has the same records. An agent in a new checkout also needs `anb` installed and the project's skills and hook enabled.
+Closed work stays in `.agent-notebook/archive/`, including its reports. `anb show` and `anb list --archive` can still read it. With the notebook committed, another collaborator or another clone has the same records. An agent in a new checkout also needs `anb` installed and the project's skills and hook enabled.
 
 For a visual review, ask:
 
@@ -123,9 +123,15 @@ $ anb status
 ok: notebook — 1 task, 1 decision, 0 notes, 0 questions
 active: task.parser-accepts-fenced-bodies "Parser accepts fenced bodies"
 log: "- 2026-09-05 Alex: fences parse; the indented-body case is next"
-rules[1]:
-  decision.fences-never-nest: "Fences never nest"
-budget: ~82/1500 tokens
+budget: ~65/1500 tokens
+```
+
+The rule is not on it: Status is the work, and a rule is read before the work it binds:
+
+```
+$ anb list --type decision --kind rule
+records[1]{id,state,priority,title}:
+  decision.fences-never-nest,active,-,Fences never nest
 ```
 
 When the work is finished, write a report of the result and its verification. This example uses a short report; a real one should contain enough evidence to assess the work. `--note` imports it into the notebook, and archiving the Task archives its report too:

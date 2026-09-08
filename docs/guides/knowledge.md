@@ -20,7 +20,7 @@ ok: add decision.fences-never-nest — decisions/decision.fences-never-nest.md
 | `shape` | A design choice between alternatives | Chosen approach, alternatives and the constraint that decided it |
 | `drift` | An accepted exception | The rule it departs from, its consequences and the condition for revisiting it |
 
-A proposed choice belongs in an idea or Question until it is agreed. A `drift` can use `review-by` when a review date is known; neither the kind nor the date automatically retires it. Status includes active `rule` Decisions by id and title, subject to its display limits. Open the record to read the reason.
+A proposed choice belongs in an idea or Question until it is agreed. A `drift` can use `review-by` when a review date is known; neither the kind nor the date automatically retires it. `anb list --type decision --kind rule` lists the standing rules by id and title; the supplied skill reads it before the work a rule binds. Open the record to read the reason.
 
 When the ruling changes, use `anb add decision "<title>" --supersedes <old>`. The command links the records and marks the predecessor `superseded`. Use `anb retire <id>` when a Decision no longer applies and has no replacement. Editing a Decision is for corrections to the same ruling, not for replacing it with another.
 
@@ -36,7 +36,7 @@ may-conflict[1]: decision.fences-never-nest (Alex)
 
 The tool reports a possible conflict when Decisions share at least two tags or the new one cites an active Decision. It does not compare their meaning. Read the named record and decide whether the new ruling replaces it.
 
-Status keeps a `may-conflict` Debt signal for a citation between active Decisions that neither supersedes nor links the other: a body that names `decision.fences-never-nest` keeps the pair in Debt. A citation the method asks for, a `drift` naming the rule it departs from or a rule that is part of a wider one, is declared once as a link on either record, and the pair leaves the signal:
+Debt keeps a `may-conflict` signal for a citation between active Decisions that neither supersedes nor links the other: a body that names `decision.fences-never-nest` keeps the pair in Debt, counted on Status and listed by `anb debt`. A citation the method asks for, a `drift` naming the rule it departs from or a rule that is part of a wider one, is declared once as a link on either record, and the pair leaves the signal:
 
 ```text
 $ anb edit decision.a-fence-body-is-opaque --link "within decision.fences-never-nest"
@@ -97,6 +97,6 @@ This allows a forward reference. If it was a typo, correct it; if it was an exam
 
 ## Archive settled knowledge
 
-Archive a superseded or retired Decision, a retired Note, or a closed Question with `anb archive <id>`. `show` and `search` still find archived records. `anb restore <id>` returns one to the working set without changing its state or contents.
+Archive a superseded or retired Decision, a retired Note, or a closed Question with `anb archive <id>`. `show` still reads an archived record, and `list --archive` still lists it. `anb restore <id>` returns one to the working set without changing its state or contents.
 
 Use `anb delete <id>` only for a record created by mistake. It removes the file and frees the id, but refuses while another record references it.

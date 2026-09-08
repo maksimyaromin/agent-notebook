@@ -7,6 +7,7 @@
 
 use crate::finding::Finding;
 use crate::record::{Record, RecordType};
+use crate::request::GraphSlice;
 use crate::resolve::path_stem;
 use crate::{date, encode};
 use std::collections::{BTreeMap, BTreeSet};
@@ -96,18 +97,6 @@ impl Attribution {
     }
 }
 
-/// Which records a listing shows. Every narrowing is a predicate over the
-/// same notebook, so asking for two asks for the intersection; the default
-/// shows everything.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Filter {
-    /// One epic's scope: the hub, what it waits on, and what was born
-    /// inside it.
-    pub hub: Option<String>,
-    /// One identity's records: the ones it created or took.
-    pub by: Option<String>,
-}
-
 /// One ready Task. It carries `created`, not an age: the Core holds no
 /// clock, so "how old" is the caller's derivation from its own today.
 #[derive(Debug, PartialEq, Eq)]
@@ -133,16 +122,12 @@ impl ReadyTask {
             let priority = row
                 .priority
                 .map_or_else(|| "-".to_owned(), |priority| priority.to_string());
-            let taken_by = row
-                .attribution
-                .taken_by
-                .as_deref()
-                .map_or_else(|| "-".to_owned(), encode::quoted_if_delimited);
             let _ = writeln!(
                 out,
-                "  {},{priority},{}d,{taken_by},{}",
+                "  {},{priority},{}d,{},{}",
                 row.id,
                 age_days(&row.created, today_day),
+                encode::absent_or(row.attribution.taken_by.as_deref()),
                 encode::quoted_if_delimited(&row.title)
             );
         }
@@ -152,7 +137,7 @@ impl ReadyTask {
 
 /// Whole days from `created` to `today_day`, floored at zero; an unreadable
 /// date counts as today.
-fn age_days(created: &str, today_day: i64) -> i64 {
+pub(crate) fn age_days(created: &str, today_day: i64) -> i64 {
     date::day_number(created).map_or(0, |day| (today_day - day).max(0))
 }
 
@@ -325,33 +310,6 @@ pub struct GraphNode {
     pub mentions: Vec<String>,
 }
 
-/// Which records a graph is asked for. Every narrowing is a predicate over the
-/// same notebook, so asking for two asks for the intersection.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GraphSlice {
-    /// Which types of record the graph holds; empty asks for all of them,
-    /// the records with no readable type among them.
-    pub types: Vec<RecordType>,
-    /// One epic's scope: the hub, what it waits on, and what was born
-    /// inside it.
-    pub hub: Option<String>,
-    /// What can be started now.
-    pub ready_only: bool,
-    /// One record and the graph around it.
-    pub focus: Option<Focus>,
-    /// Whether filed work is in the graph. Most of what a long-lived
-    /// notebook holds is finished, and drawing all of it buries the work in
-    /// flight, so the archive stays off until it is asked for.
-    pub archive: bool,
-}
-
-/// A record and how far around it the graph reaches, counted in edges.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Focus {
-    pub id: String,
-    pub depth: usize,
-}
-
 /// The graph one call asked for: every record the slice reaches, each with the
 /// edges it draws.
 #[derive(Debug, PartialEq, Eq)]
@@ -440,13 +398,6 @@ pub enum EdgeKind {
     Mentions,
 }
 
-/// One type's slice of the overview page.
-#[derive(Debug, PartialEq, Eq)]
-pub struct TypeSection {
-    pub record_type: RecordType,
-    pub rows: Vec<ListedRecord>,
-}
-
 /// Live records per type.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counts {
@@ -473,16 +424,6 @@ impl Counts {
         }
         counts
     }
-}
-
-/// The whole notebook as one page: every live record grouped by type, the
-/// archive as counts — history is recoverable, not re-read.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Overview {
-    pub live: Counts,
-    pub epics: Vec<Epic>,
-    pub sections: Vec<TypeSection>,
-    pub archived: Counts,
 }
 
 /// A proof one record cites, and what kind of thing it names. The host

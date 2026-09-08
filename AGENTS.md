@@ -53,4 +53,4 @@ cargo run --quiet -- --help     # every command
 
 ## Reading order
 
-[What it is](./docs/start/what-it-is.md) states the three rules the tool holds. [Records and files](./docs/reference/records.md) is the model the Core enforces, and [Replies](./docs/reference/replies.md) the contract every command keeps. [Development](./docs/contributing/development.md) is the workspace and the gate. The notebook itself explains why things are the way they are: `cargo run --quiet -- overview` reads it as one page, and the archive holds every closed Task with its report.
+[What it is](./docs/start/what-it-is.md) states the three rules the tool holds. [Records and files](./docs/reference/records.md) is the model the Core enforces, and [Replies](./docs/reference/replies.md) the contract every command keeps. [Development](./docs/contributing/development.md) is the workspace and the gate. The notebook itself explains why things are the way they are: `cargo run --quiet -- list --all` reads it as one page, `--type decision --kind rule` the standing rules alone, and the archive holds every closed Task with its report.

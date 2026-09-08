@@ -112,11 +112,11 @@ fn a_query_about_live_work_opens_nothing_in_the_archive() {
     );
 }
 
+/// The dashboard is about the work in flight, and every fact on it is a
+/// live record's own: it opens nothing in the archive, however much of it
+/// there is and whatever the live records name there.
 #[test]
-fn the_dashboard_opens_only_the_archived_records_live_ones_name() {
-    // Two hundred archived Tasks, one of them a live Task's blocker: an
-    // epic's progress is a count of its children, and its children are
-    // archived as they settle.
+fn the_dashboard_opens_nothing_in_the_archive() {
     let mut storage = watched(1, 200);
     storage
         .write(
@@ -124,15 +124,31 @@ fn the_dashboard_opens_only_the_archived_records_live_ones_name() {
             &task("task.live-0", "open", "blocked-by: task.filed-7\n"),
         )
         .unwrap();
-    for query in ["overview", "status"] {
+    Notebook::new(&mut storage)
+        .status(TODAY, Budget::Unbounded, None, nothing_lost)
+        .unwrap();
+    assert_eq!(storage.archived_reads(), Vec::<String>::new());
+}
+
+/// A listing narrowed to an epic follows the epic's edges into the
+/// archive, since its children are archived as they settle, and opens the
+/// one record an edge points at rather than the archive whole.
+#[test]
+fn a_scoped_listing_opens_only_the_archived_records_the_edges_name() {
+    let mut storage = watched(1, 200);
+    storage
+        .write(
+            "tasks/task.live-0.md",
+            &task("task.live-0", "open", "blocked-by: task.filed-7\n"),
+        )
+        .unwrap();
+    for query in ["ready", "list"] {
         storage.reads.borrow_mut().clear();
         let notebook = Notebook::new(&mut storage);
-        if query == "overview" {
-            notebook.overview().unwrap();
+        if query == "ready" {
+            notebook.ready(&within("task.live-0")).unwrap();
         } else {
-            notebook
-                .status(TODAY, Budget::Unbounded, nothing_lost)
-                .unwrap();
+            notebook.list(&within("task.live-0")).unwrap();
         }
         assert_eq!(
             storage.archived_reads(),
@@ -141,6 +157,18 @@ fn the_dashboard_opens_only_the_archived_records_live_ones_name() {
              archive costs follows the live notebook's edges, not its own size"
         );
     }
+}
+
+/// The archive is read whole only when a reader asks for history.
+#[test]
+fn a_listing_asked_for_the_archive_opens_it() {
+    let mut storage = watched(1, 3);
+    let history = Filter {
+        archive: true,
+        ..Filter::default()
+    };
+    Notebook::new(&mut storage).list(&history).unwrap();
+    assert_eq!(storage.archived_reads().len(), 3);
 }
 
 #[test]
@@ -161,19 +189,8 @@ fn a_verb_that_judges_history_opens_it() {
 #[test]
 fn a_dashboard_opens_each_record_it_reads_once() {
     let mut storage = watched(3, 2);
-    // Two live Tasks wait on the same filed one, so the widening that finds
-    // an epic's settled children runs beside the live pass — and the file
-    // two records name is still one file.
-    for id in ["task.live-0", "task.live-1"] {
-        storage
-            .write(
-                &format!("tasks/{id}.md"),
-                &task(id, "open", "blocked-by: task.filed-0\n"),
-            )
-            .unwrap();
-    }
     Notebook::new(&mut storage)
-        .status(TODAY, Budget::Unbounded, nothing_lost)
+        .status(TODAY, Budget::Unbounded, None, nothing_lost)
         .unwrap();
 
     let mut once = storage.reads();
@@ -186,6 +203,25 @@ fn a_dashboard_opens_each_record_it_reads_once() {
         "a Status costs the notebook one pass, not one per section: {:?}",
         storage.reads()
     );
+}
+
+/// Two live Tasks wait on the same filed one, so the widening that finds
+/// an epic's settled children runs beside the live pass — and the file
+/// two records name is still one file.
+#[test]
+fn a_scoped_listing_opens_each_filed_record_it_reads_once() {
+    let mut storage = watched(3, 2);
+    for id in ["task.live-0", "task.live-1"] {
+        storage
+            .write(
+                &format!("tasks/{id}.md"),
+                &task(id, "open", "blocked-by: task.filed-0\n"),
+            )
+            .unwrap();
+    }
+    Notebook::new(&mut storage)
+        .list(&within("task.live-0"))
+        .unwrap();
     assert_eq!(
         storage.archived_reads(),
         vec!["archive/tasks/task.filed-0.md"],
@@ -228,70 +264,6 @@ fn the_widening_opens_each_filed_record_once_when_the_edges_loop() {
         opened,
         vec!["archive/tasks/task.a.md", "archive/tasks/task.b.md"],
         "each end of the loop is opened once, and the walk ends"
-    );
-}
-
-/// The archive answers one question for the dashboard: where a record sits
-/// inside an epic. Establishing that there is no epic costs the one hop a
-/// hub would be named on; the lineage behind it is read only once a hub is
-/// there to place a record in.
-#[test]
-fn a_dashboard_reads_a_lineage_only_once_an_epic_can_hold_it() {
-    let mut storage = watched(0, 0);
-    for (id, origin) in [
-        ("task.child", "from: task.hub\n"),
-        ("task.deeper", "from: task.child\n"),
-    ] {
-        storage
-            .write(
-                &format!("archive/tasks/{id}.md"),
-                &task(id, "closed", origin),
-            )
-            .unwrap();
-    }
-    storage
-        .write(
-            "tasks/task.live.md",
-            &task("task.live", "open", "from: task.deeper\n"),
-        )
-        .unwrap();
-
-    Notebook::new(&mut storage)
-        .status(TODAY, Budget::Unbounded, nothing_lost)
-        .unwrap();
-    assert_eq!(
-        storage.archived_reads(),
-        Vec::<String>::new(),
-        "no live record names a child, so not even the one hop is owed"
-    );
-
-    storage
-        .write(
-            "tasks/task.hub.md",
-            &task("task.hub", "open", "blocked-by: task.child\n"),
-        )
-        .unwrap();
-    // A second live record naming the same child: the hop is owed once,
-    // however many records name it.
-    storage
-        .write(
-            "tasks/task.waiting.md",
-            &task("task.waiting", "open", "blocked-by: task.child\n"),
-        )
-        .unwrap();
-    storage.reads.borrow_mut().clear();
-    Notebook::new(&mut storage)
-        .status(TODAY, Budget::Unbounded, nothing_lost)
-        .unwrap();
-    let mut opened = storage.archived_reads();
-    opened.sort();
-    assert_eq!(
-        opened,
-        vec![
-            "archive/tasks/task.child.md",
-            "archive/tasks/task.deeper.md"
-        ],
-        "the hub's child, and the lineage that carries the live record to it"
     );
 }
 
