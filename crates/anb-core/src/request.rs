@@ -18,14 +18,16 @@ pub struct Filter {
     pub kinds: Vec<String>,
     /// Only records carrying every one of these tags.
     pub tags: Vec<String>,
-    /// One epic's scope: the hub, what it waits on, and what was born
-    /// inside it.
+    /// One record's scope: the hub, what it waits on, what was born
+    /// inside it, and what links it.
     pub hub: Option<String>,
-    /// One identity's work: the Tasks it holds and the other records it
-    /// wrote.
+    /// One identity's work: the Tasks it holds, the other records it
+    /// wrote, and the records waiting on it.
     pub by: Option<String>,
     /// Only the Tasks nobody holds: the pool anyone may take.
     pub untaken: bool,
+    /// Only the records addressed to this identity.
+    pub to: Option<String>,
     /// Only records whose id, title, tags, people or body hold this text,
     /// matched without regard to case.
     pub text: Option<String>,
@@ -52,7 +54,7 @@ pub struct Focus {
 
 /// A record to be created; `id: None` mints one from the title, `by: None`
 /// signs it with the notebook's identity, `taken_by` hands a Task over as
-/// it is written.
+/// it is written, `to` addresses a Task or a Question to someone.
 #[derive(Debug)]
 pub struct Draft {
     pub record_type: RecordType,
@@ -62,6 +64,7 @@ pub struct Draft {
     pub by: Option<String>,
     pub via: Option<String>,
     pub taken_by: Option<String>,
+    pub to: Option<String>,
     pub from: Option<String>,
     pub tags: Vec<String>,
     pub links: Vec<Link>,
@@ -81,6 +84,7 @@ impl Draft {
             by: None,
             via: None,
             taken_by: None,
+            to: None,
             from: None,
             tags: Vec::new(),
             links: Vec::new(),
@@ -150,6 +154,7 @@ pub struct Edit {
     pub priority: Option<u32>,
     pub review_by: Option<String>,
     pub taken_by: Option<String>,
+    pub to: Option<String>,
     /// The optional fields to erase, by their envelope key — `review-by`,
     /// not `review_by`. A record that never carried the field is already
     /// as asked, so the clear is a no-op.
@@ -160,12 +165,13 @@ pub struct Edit {
 /// those with an eraser of their own — a body through an empty `--body`, a
 /// tag through `--untag`. A field the record's type does not allow is
 /// erasable all the same; erasing it is the repair.
-pub(crate) const CLEARABLE: [&str; 4] = [FROM, PRIORITY, REVIEW_BY, TAKEN_BY];
+pub(crate) const CLEARABLE: [&str; 5] = [FROM, PRIORITY, REVIEW_BY, TAKEN_BY, TO];
 
 pub(crate) const FROM: &str = "from";
 pub(crate) const PRIORITY: &str = "priority";
 pub(crate) const REVIEW_BY: &str = "review-by";
 pub(crate) const TAKEN_BY: &str = "taken-by";
+pub(crate) const TO: &str = "to";
 
 impl Edit {
     pub(crate) fn changes_nothing(&self) -> bool {
@@ -179,6 +185,7 @@ impl Edit {
             && self.priority.is_none()
             && self.review_by.is_none()
             && self.taken_by.is_none()
+            && self.to.is_none()
             && self.clear.is_empty()
     }
 }

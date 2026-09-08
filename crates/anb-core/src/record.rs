@@ -9,6 +9,7 @@
 
 use crate::finding::{Finding, FindingCode};
 use crate::grammar::{self, RecordFile, Residence};
+use crate::resolve::path_stem;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordType {
@@ -374,6 +375,18 @@ impl Record {
         self.file.field("taken-by")
     }
 
+    /// The records this one links, each with the kind its `link` line
+    /// gives the relation: the edges a link draws, from the end that
+    /// carries them. A link naming anything but a record id draws none,
+    /// and neither does one naming this record: a relation has two ends.
+    pub(crate) fn linked_records(&self) -> impl Iterator<Item = (&str, &str)> {
+        let own = path_stem(&self.path);
+        self.file
+            .field_values("link")
+            .filter_map(linked_edge)
+            .filter(move |(_, target)| *target != own)
+    }
+
     /// Whose the record is: who holds a Task, who wrote anything else. Work
     /// belongs to its holder and authorship is a separate fact, so a Task
     /// nobody holds is nobody's, however many people wrote or planned it.
@@ -384,6 +397,36 @@ impl Record {
         } else {
             self.file.field("by")
         }
+    }
+
+    /// Whom the record is addressed to: written by `add --to`,
+    /// `submit --to` and `edit --to`, erased by `edit --clear to`.
+    #[must_use]
+    pub fn addressee(&self) -> Option<&str> {
+        self.file.field("to")
+    }
+
+    /// Whom the record waits on: its addressee, while it waits at all — a
+    /// Task in review, an open Question. A settled record waits on nobody,
+    /// whatever name it still carries, and a Task not yet submitted waits
+    /// on nobody either: its addressee is whom the next `submit` hands it
+    /// to.
+    #[must_use]
+    pub fn waits_on(&self) -> Option<&str> {
+        let waiting = match self.record_type()? {
+            RecordType::Task => self.state() == Some(TaskState::Review.word()),
+            RecordType::Question => self.state() == Some("open"),
+            RecordType::Decision | RecordType::Note => false,
+        };
+        waiting.then(|| self.addressee()).flatten()
+    }
+
+    /// Whether the record is `name`'s: theirs by [`Record::belongs_to`], or
+    /// waiting on them. One person's work is what they hold, what they
+    /// wrote, and what waits on them.
+    #[must_use]
+    pub fn concerns(&self, name: &str) -> bool {
+        self.belongs_to() == Some(name) || self.waits_on() == Some(name)
     }
 
     #[must_use]
@@ -408,6 +451,7 @@ pub(crate) fn not_utf8_finding() -> Finding {
 /// Fields legal only on some types; elsewhere they are orphans.
 const TYPE_BOUND_FIELDS: &[(&str, &[RecordType])] = &[
     ("taken-by", &[RecordType::Task]),
+    ("to", &[RecordType::Task, RecordType::Question]),
     ("priority", &[RecordType::Task]),
     ("hold", &[RecordType::Task]),
     ("hold-until", &[RecordType::Task]),
@@ -621,8 +665,16 @@ pub(crate) const REF_KEYS: [&str; 5] = [
 /// Only the id-shaped target names a record; nothing else can be resolved,
 /// and nothing else may be mistaken for a reference.
 pub(crate) fn linked_record(link: &str) -> Option<&str> {
-    let (_, target) = grammar::split_link(link)?;
-    grammar::id_error(target).is_none().then_some(target)
+    linked_edge(link).map(|(_, target)| target)
+}
+
+/// The kind and the record a `link` line relates this record to, under
+/// the rule of [`linked_record`].
+fn linked_edge(link: &str) -> Option<(&str, &str)> {
+    let (kind, target) = grammar::split_link(link)?;
+    grammar::id_error(target)
+        .is_none()
+        .then_some((kind, target))
 }
 
 /// The finding a reference into nothing deserves: one condition, one code,

@@ -38,7 +38,7 @@ pub enum DebtSignal {
     OriginClosed { id: String, origin: String },
     /// A held Task whose `updated` stopped moving.
     HoldStale { id: String, days: u32 },
-    /// A review Task waiting on a human.
+    /// A Task waiting in review.
     ReviewStale { id: String, days: u32 },
     /// A `review-by` date that has arrived, on any record type.
     ReviewDue { id: String, date: String },

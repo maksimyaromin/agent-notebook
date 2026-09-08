@@ -111,6 +111,56 @@ fn a_holder_on_a_draft_that_is_not_a_task_or_an_empty_one_is_refused() {
     );
 }
 
+/// A doubt put to someone waits on them from the moment it exists, and
+/// the name is stored trimmed; it is theirs in every read, beside what
+/// they hold and wrote. Only work and doubt wait on anyone, and an empty
+/// name is no addressee.
+#[test]
+fn a_question_put_to_someone_waits_on_them_from_the_moment_it_exists() {
+    let mut storage = MemoryStorage::new();
+    let mut notebook = Notebook::new(&mut storage).with_identity(Some("Ada"));
+    let mut asked = Draft::new(
+        RecordType::Question,
+        "Does the pool count belong on the bar?",
+    );
+    asked.to = Some(" Grace ".to_owned());
+    let created = notebook.create(&asked, TODAY).unwrap();
+    assert!(
+        storage
+            .read(&created.path)
+            .unwrap()
+            .contains("\nby: Ada\nto: Grace\n")
+    );
+    let theirs: Vec<String> = Notebook::new(&mut storage)
+        .list(&Filter {
+            by: Some("Grace".to_owned()),
+            ..Filter::default()
+        })
+        .unwrap()
+        .into_iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(theirs, [created.id]);
+
+    let mut notebook = Notebook::new(&mut storage);
+    let mut decision = Draft::new(RecordType::Decision, "Addressed");
+    decision.to = Some("Grace".to_owned());
+    assert!(matches!(
+        notebook.create(&decision, TODAY),
+        Err(NotebookError::InvalidArgument { .. })
+    ));
+    let mut blank = Draft::new(RecordType::Task, "Waits on nobody");
+    blank.to = Some("  ".to_owned());
+    assert!(matches!(
+        notebook.create(&blank, TODAY),
+        Err(NotebookError::InvalidArgument { .. })
+    ));
+    assert!(
+        storage.list("decisions").unwrap().is_empty() && storage.list("tasks").unwrap().is_empty(),
+        "nothing was written"
+    );
+}
+
 #[test]
 fn a_caller_supplied_id_that_is_taken_names_its_holder() {
     let mut storage = storage_with(&[("archive/tasks/task.demo.md", &task_file("closed", &[]))]);

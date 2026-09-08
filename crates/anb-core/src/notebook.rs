@@ -203,8 +203,8 @@ impl<'a> Notebook<'a> {
         Ok(())
     }
 
-    /// The archived records the live ones still name as a blocker or an
-    /// Origin, and the ones those name in turn.
+    /// The archived records the live ones still name as a blocker, an
+    /// Origin or a link target, and the ones those name in turn.
     ///
     /// An epic archives its children as they settle, so a hub read from the
     /// live records alone would forget its own progress and, in the end,
@@ -271,7 +271,9 @@ impl<'a> Notebook<'a> {
     /// when the notebook carries no signal, the full budgeted composite
     /// otherwise. The caller resolves `budget` — a CLI flag outranks the
     /// config key, which defaults to 1500 — and `by`, the one identity the
-    /// work is narrowed to, or the whole team's.
+    /// work is narrowed to, or the whole team's. Narrowed, it holds what
+    /// [`Record::concerns`] that identity: what they hold, what they
+    /// wrote, and what waits on them.
     ///
     /// `settle` is the host's answer to "which of these proofs does the
     /// world still hold": it is handed the proofs the live records cite and
@@ -293,7 +295,7 @@ impl<'a> Notebook<'a> {
         let records = &corpus.records;
         let resolvable = corpus.resolver();
         let debt = self.decay(&corpus, today_day, settle)?;
-        let named = |record: &Record| by.is_none_or(|by| record.belongs_to() == Some(by));
+        let named = |record: &Record| by.is_none_or(|by| record.concerns(by));
         let scoped: Vec<&Record> = records
             .iter()
             .filter(|record| !debt::is_excluded(record, &resolvable) && named(record))
@@ -473,9 +475,11 @@ impl<'a> Notebook<'a> {
     }
 
     /// Read one record whole, live or archived: every envelope field in file
-    /// order, the body, the ids its body cites, and the live records whose
-    /// bodies cite it. A record's own id never enters its blocks. Reading
-    /// never gates: an invalid record shows as it stands.
+    /// order, the body, the ids its body cites, the live records whose
+    /// bodies cite it, and the live records whose `link` lines name it,
+    /// each under the kind its line gives the relation. A record's own id
+    /// never enters its blocks. Reading never gates: an invalid record
+    /// shows as it stands.
     ///
     /// # Errors
     /// See [`Notebook::record`].
@@ -487,13 +491,24 @@ impl<'a> Notebook<'a> {
             .filter(|target| *target != id)
             .map(str::to_owned)
             .collect();
-        let mentioned_by = live
+        let others = live
             .records
             .iter()
-            .filter(|other| path_stem(other.path()) != id)
+            .filter(|other| path_stem(other.path()) != id);
+        let mentioned_by = others
+            .clone()
             .filter(|other| mention::mentions(other.file().body()).contains(&id))
             .map(|other| path_stem(other.path()).to_owned())
             .collect();
+        let mut linked_by: Vec<(String, String)> = others
+            .flat_map(|other| {
+                other
+                    .linked_records()
+                    .filter(|(_, target)| *target == id)
+                    .map(|(kind, _)| (kind.to_owned(), path_stem(other.path()).to_owned()))
+            })
+            .collect();
+        linked_by.sort();
         Ok(View {
             id: id.to_owned(),
             path: record.path().to_owned(),
@@ -506,6 +521,7 @@ impl<'a> Notebook<'a> {
             body: record.file().body().to_owned(),
             mentions,
             mentioned_by,
+            linked_by,
         })
     }
 
@@ -631,12 +647,27 @@ impl<'a> Notebook<'a> {
         })
     }
 
-    /// `active → review`: hand the work to a human for acceptance.
+    /// `active → review`: hand the work to a human for acceptance, `to`
+    /// naming whom when the caller says. Absent, the Task keeps the
+    /// addressee it carries, or waits on a human in general.
     ///
     /// # Errors
-    /// See [`Notebook::close`]; `submit` carries no proof.
-    pub fn submit(&mut self, id: &str, today: &str) -> Result<Transitioned, NotebookError> {
-        self.task_transition(id, TaskAction::Submit, today, |_| {})
+    /// [`NotebookError::InvalidArgument`] on an empty or multi-line name,
+    /// plus the refusals of [`Notebook::close`]; `submit` carries no proof.
+    pub fn submit(
+        &mut self,
+        id: &str,
+        to: Option<&str>,
+        today: &str,
+    ) -> Result<Transitioned, NotebookError> {
+        if let Some(to) = to {
+            write::guard_addressee(RecordType::Task, to)?;
+        }
+        self.task_transition(id, TaskAction::Submit, today, |file| {
+            if let Some(to) = to {
+                file.set_field("to", to.trim());
+            }
+        })
     }
 
     /// `active | review → closed`, stamping the close date and the proof
@@ -1438,6 +1469,11 @@ impl<'a> Notebook<'a> {
             self.guard_lineage_stays_open(id, origin)?;
         }
         for link in &edit.add_links {
+            if link.target.trim() == id {
+                return Err(NotebookError::InvalidArgument {
+                    reason: "link: a record cannot link itself".to_owned(),
+                });
+            }
             self.guard_link_target(link)?;
         }
 

@@ -67,12 +67,15 @@ pub struct Edged {
     pub already: bool,
 }
 
-/// The people a record names: who wrote it and, on a Task, who holds it.
-/// Whose the record is, is [`Record::belongs_to`]'s to say.
+/// The people a record names: who wrote it, on a Task who holds it, and
+/// whom it is addressed to. Whose the record is, is
+/// [`Record::belongs_to`]'s to say, and whom it waits on
+/// [`Record::waits_on`]'s.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Attribution {
     pub by: Option<String>,
     pub taken_by: Option<String>,
+    pub to: Option<String>,
 }
 
 impl Attribution {
@@ -80,6 +83,7 @@ impl Attribution {
         Attribution {
             by: record.file().field("by").map(str::to_owned),
             taken_by: record.taken_by().map(str::to_owned),
+            to: record.addressee().map(str::to_owned),
         }
     }
 }
@@ -290,6 +294,9 @@ pub struct GraphNode {
     pub ready: Option<bool>,
     pub blocked_by: Vec<String>,
     pub origin: Option<String>,
+    /// The records this one links, each under the kind its `link` line
+    /// gives the relation.
+    pub links: Vec<(String, String)>,
     /// The envelope in file order and the body, for the record a reader
     /// reads rather than for the node.
     pub fields: Vec<(String, String)>,
@@ -324,7 +331,7 @@ impl Graph {
         let mut drawn = BTreeSet::new();
         let mut edges = Vec::new();
         let mut draw =
-            |from: &'a str, to: &'a str, kind: EdgeKind, edges: &mut Vec<GraphEdge<'a>>| {
+            |from: &'a str, to: &'a str, kind: EdgeKind<'a>, edges: &mut Vec<GraphEdge<'a>>| {
                 if on_the_map.contains(from) && on_the_map.contains(to) && drawn.insert((from, to))
                 {
                     edges.push(GraphEdge { from, to, kind });
@@ -338,6 +345,11 @@ impl Graph {
             }
             if let Some(origin) = node.origin.as_deref() {
                 draw(origin, &node.id, EdgeKind::Origin, &mut edges);
+            }
+        }
+        for node in &self.nodes {
+            for (kind, linked) in &node.links {
+                draw(&node.id, linked, EdgeKind::Link(kind), &mut edges);
             }
         }
         for node in &self.nodes {
@@ -371,18 +383,42 @@ impl Graph {
 pub struct GraphEdge<'a> {
     pub from: &'a str,
     pub to: &'a str,
-    pub kind: EdgeKind,
+    pub kind: EdgeKind<'a>,
 }
 
 /// How two records are related: by what one waits on, by what it was born
-/// from, or by one naming the other in its prose.
+/// from, by a link one declares to the other, or by one naming the other
+/// in its prose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EdgeKind {
+pub enum EdgeKind<'a> {
     BlockedBy,
     Origin,
+    /// A `link` line naming a record, under the kind the line gives it:
+    /// the relation a record declares to what it belongs to, follows or
+    /// cites, in the notebook's own vocabulary.
+    Link(&'a str),
     /// One record naming another in its body: the web a notebook weaves
     /// beside the work it tracks.
     Mentions,
+}
+
+impl<'a> EdgeKind<'a> {
+    /// The words of the relations the notebook draws itself. A link kind
+    /// spelled like one would be read as that relation, so no link may
+    /// carry one.
+    pub(crate) const DRAWN_WORDS: [&'static str; 3] = ["waits", "born", "mentions"];
+
+    /// The one word every surface prints for the edge: the notebook's for
+    /// the three relations it draws itself, the link's own for a link.
+    #[must_use]
+    pub fn word(self) -> &'a str {
+        match self {
+            EdgeKind::BlockedBy => EdgeKind::DRAWN_WORDS[0],
+            EdgeKind::Origin => EdgeKind::DRAWN_WORDS[1],
+            EdgeKind::Link(kind) => kind,
+            EdgeKind::Mentions => EdgeKind::DRAWN_WORDS[2],
+        }
+    }
 }
 
 /// Live records per type.
@@ -429,8 +465,9 @@ impl std::fmt::Display for CitedProof {
     }
 }
 
-/// One record read whole: the envelope as it stands, the body, and the two
-/// derived Mention blocks.
+/// One record read whole: the envelope as it stands, the body, the two
+/// derived Mention blocks, and the live records whose `link` lines name
+/// it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct View {
     pub id: String,
@@ -440,6 +477,9 @@ pub struct View {
     pub body: String,
     pub mentions: Vec<String>,
     pub mentioned_by: Vec<String>,
+    /// Each as the link's kind and the record carrying it, by kind and
+    /// then by id, so a reader sees one relation's members together.
+    pub linked_by: Vec<(String, String)>,
 }
 
 /// One finding against the file that carries it: `check`'s row, and the

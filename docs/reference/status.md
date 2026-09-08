@@ -12,11 +12,11 @@ Sections print in this order when present:
 1. `ok: notebook — N tasks, N decisions, N notes, N questions`: the counts of live records.
 2. `by: <name> — anb status --team`: whose work the summary is narrowed to, printed only when it is narrowed; see [whose work](#whose-work).
 3. `active: <id> "<title>"` and `log: "<last entry>"`: the Tasks in flight and where the first stopped. Your own come first, by the identity `ANB_BY` or the git `user.name` names; a Task someone else holds carries that name after its title, as `active: <id> "<title>" (Grace)`, and a Task nobody holds carries nothing. A held Task is not in flight and never prints here.
-4. `review[N]`: ids of Tasks awaiting human acceptance, your own first, another person's marked with their name.
+4. `review[N]{id,taken-by,to}`: the Tasks awaiting acceptance, who holds each and whom it waits on, `-` when it names nobody; your own first, held by you or waiting on you.
 5. `held[N]{id,reason,until,taken-by}`: paused Tasks with their reasons, your own first.
 6. `ready[N]{id,priority,age,taken-by,title}`: the dispatch queue, `taken-by` naming who holds each Task.
 7. `untaken: N — anb ready --untaken`: the pool, how many ready Tasks nobody holds, printed only when the summary is narrowed to one person; the whole team's queue lists the pool in its rows.
-8. `questions[N]{id,age,by,title}`: the open Questions, your own first and then the oldest first, `by` naming who asked.
+8. `questions[N]{id,age,by,to,title}`: the open Questions, your own first and then the oldest first, `by` naming who asked and `to` whom.
 9. `debt: N — anb debt`: how many signs of decay the notebook carries; `anb debt` lists them.
 10. `budget: ~N/M tokens` with what was cut, or `(no ceiling)`.
 
@@ -24,7 +24,7 @@ A notebook with no active Task, nothing ready, nothing in the pool, nothing in r
 
 ## Whose work
 
-By default Status is the whole team's, your own lines first. `--mine` narrows it to the Tasks you hold and the Questions you asked; `--by <name>` does the same for a colleague. A Task belongs to whoever holds it, so one you wrote and handed over is the colleague's in every section, and one nobody holds is in nobody's summary but counts on the `untaken:` line. A notebook whose config sets `scope: mine` narrows every session's Status that way without a flag, and `--team` widens one call back to everyone's. A narrowed Status says so on its `by:` line, and its hints carry the same narrowing, so `anb ready --by <name>` opens the same queue the summary cut. Without an identity, `--mine` and `scope: mine` are refused with the fix named; the hook then delivers nothing, as for any refusal.
+By default Status is the whole team's, your own lines first. `--mine` narrows it to the Tasks you hold, the Questions you asked, and the reviews and Questions addressed to you with `--to`; `--by <name>` does the same for a colleague. A Task belongs to whoever holds it, so one you wrote and handed over is the colleague's in every section, and one nobody holds is in nobody's summary but counts on the `untaken:` line. A review or a Question addressed to somebody else is in their summary, not yours. A notebook whose config sets `scope: mine` narrows every session's Status that way without a flag, and `--team` widens one call back to everyone's. A narrowed Status says so on its `by:` line, and its hints carry the same narrowing, so `anb ready --by <name>` opens the same queue the summary cut. Without an identity, `--mine` and `scope: mine` are refused with the fix named; the hook then delivers nothing, as for any refusal.
 
 Narrowing changes what is shown, never what is true: a Task waiting on a colleague's stays blocked when their work is left out.
 
@@ -64,4 +64,4 @@ External proof checks use the filesystem for report paths and git for commit pro
 
 ## JSON
 
-`anb --json status` carries the same sections as objects: `quiet`, `by` when narrowed, `counts`, `active`, `review`, `held`, `ready`, `questions`, each list as `{count, rows}`, and `untaken` and `debt` as `{count}`, the pool counted whether or not the summary is narrowed. A Task or Question row carries `by` and `taken-by` when the record has them; the order of each list is the text's. `anb --json debt` answers `count` and `debt`, each row carrying `code`, the fields the table above names for its class, and `line`, the text the plain rendering prints. A cited record is `{id, by, via}`, with `by` and `via` absent when the record carries none; the `pair` of a `may-conflict` row lists the two in the order the line prints them.
+`anb --json status` carries the same sections as objects: `quiet`, `by` when narrowed, `counts`, `active`, `review`, `held`, `ready`, `questions`, each list as `{count, rows}`, and `untaken` and `debt` as `{count}`, the pool counted whether or not the summary is narrowed. A Task or Question row carries `by`, `taken-by` and `to` when the record has them; the order of each list is the text's. `anb --json debt` answers `count` and `debt`, each row carrying `code`, the fields the table above names for its class, and `line`, the text the plain rendering prints. A cited record is `{id, by, via}`, with `by` and `via` absent when the record carries none; the `pair` of a `may-conflict` row lists the two in the order the line prints them.

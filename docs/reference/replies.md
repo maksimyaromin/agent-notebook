@@ -36,17 +36,17 @@ ready[1]{id,priority,age,taken-by,title}:
 
 ## Narrowing
 
-`list`, `ready` and `graph` take the same narrowing flags: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine`, `--team` and `--untaken`; `list` and `graph` also take `--type`, `--kind` and `--archive`, which a queue of live Tasks has no use for. Each is a predicate over the same notebook, so two flags ask for the intersection, and a narrowed listing's truncation hint carries every flag it was asked with. `--by` and `--mine` answer with one person's work, the Tasks they hold and the records they wrote; `--untaken` with the pool, the Tasks nobody holds. `status` takes `--by`, `--mine` and `--team`. Whose records a read answers with when the call names nobody is the notebook's `scope` config key, everyone's by default.
+`list`, `ready` and `graph` take the same narrowing flags: `--for <id>`, `--tag`, `--match <text>`, `--by <name>`, `--mine`, `--team`, `--untaken` and `--to <name>`; `list` and `graph` also take `--type`, `--kind` and `--archive`, which a queue of live Tasks has no use for. Each is a predicate over the same notebook, so two flags ask for the intersection, and a narrowed listing's truncation hint carries every flag it was asked with. `--for` answers with one record's scope: what it waits on, what was born inside it and what links it, each followed as far as it goes. `--by` and `--mine` answer with one person's work, the Tasks they hold, the records they wrote and the records waiting on them; `--untaken` with the pool, the Tasks nobody holds; `--to` with the records addressed to a person. `status` takes `--by`, `--mine` and `--team`. Whose records a read answers with when the call names nobody is the notebook's `scope` config key, everyone's by default.
 
 ## Bounds
 
-Listings have default row limits and report omissions. Use `--all` to lift them. `show` also bounds long bodies and mention lists, marking where content was omitted. Graph JSON is unbounded so consumers receive the complete selected graph.
+Listings have default row limits and report omissions. Use `--all` to lift them. `show` also bounds long bodies and its `mentions`, `mentioned-by` and `linked-by` lists, marking where content was omitted. Graph JSON is unbounded so consumers receive the complete selected graph.
 
 ## JSON
 
 `--json` selects compact JSON. Mutation replies identify the operation with `ok`; read commands use fields appropriate to the result. For example, `ready` returns `count` and `ready`, `list` returns `count` and `records`, and `debt` returns `count` and `debt`.
 
-A `list` or `ready` row carries `by` and `taken-by` when the record has them, so a script filters by identity without reading the files. Nested lists of consequences use `{count, rows}`. A truncated body uses `{lines, head, tail}`. Refusals provide `error`, `message`, `findings` and `try`. Parse these fields by name. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their own result structures.
+A `list` or `ready` row carries `by`, `taken-by` and `to` when the record has them, so a script filters by identity without reading the files. Nested lists of consequences use `{count, rows}`. A truncated body uses `{lines, head, tail}`. Refusals provide `error`, `message`, `findings` and `try`. Parse these fields by name. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their own result structures.
 
 ## Refusals
 

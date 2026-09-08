@@ -19,7 +19,7 @@ stateDiagram-v2
     closed --> open: reopen
 ```
 
-`start` moves a Task into active work and records who holds it as `taken-by`. A Task someone else holds is refused with `taken`; `anb add task --taken-by <name>` hands a Task over as it is written and `anb edit <id> --taken-by <name>` later. Use `submit` when the result needs human acceptance, then `close` to accept it or `start` to continue work. Review is optional; you can close directly from active. `reopen` returns a closed Task to open and logs the transition. The CLI refuses an invalid move and lists valid alternatives:
+`start` moves a Task into active work and records who holds it as `taken-by`. A Task someone else holds is refused with `taken`; `anb add task --taken-by <name>` hands a Task over as it is written and `anb edit <id> --taken-by <name>` later. Use `submit` when the result needs human acceptance, `--to <name>` naming whose, then `close` to accept it or `start` to continue work. Review is optional; you can close directly from active. `reopen` returns a closed Task to open and logs the transition. The CLI refuses an invalid move and lists valid alternatives:
 
 ```
 $ anb submit task.ship-the-parser
@@ -87,7 +87,7 @@ A child Task should produce one independently reviewable result. Add dependencie
 
 You can use your own grouping convention; the automatic epic summary recognizes a hub by that pair of relationships: it depends on a Task whose origin points back to it. The `epic` tag helps you find the hub; it does not establish membership. If you missed an origin when creating a child, set it with `anb edit <id> --from <hub>`.
 
-`anb ready --for <hub>` is the epic's own queue and `anb list --for <hub>` its live membership, nested work included; `--archive` adds the children already filed. A hub's node in `anb graph` carries how many of its direct dependencies are closed and the next ready Task in its scope. Once all dependencies close, the hub becomes ready for acceptance. Close and archive it when the overall result is complete.
+`anb ready --for <hub>` is the epic's own queue and `anb list --for <hub>` its live membership, nested work included, with any record that links the hub; `--archive` adds the children already filed. A hub's node in `anb graph` carries how many of its direct dependencies are closed and the next ready Task in its scope. Once all dependencies close, the hub becomes ready for acceptance. Close and archive it when the overall result is complete.
 
 ## Correcting a record
 

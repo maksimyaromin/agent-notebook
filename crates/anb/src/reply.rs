@@ -56,6 +56,9 @@ fn narrowing_flags(filter: &Filter) -> String {
     if filter.untaken {
         out.push_str(" --untaken");
     }
+    if let Some(to) = &filter.to {
+        let _ = write!(out, " --to {}", shell_word(to));
+    }
     if let Some(text) = &filter.text {
         let _ = write!(out, " --match {}", shell_word(text));
     }
@@ -257,7 +260,9 @@ pub fn execute(
         }
         Command::Retire { id } => Ok(moved("retire", notebook.retire(&id, today)?)),
         Command::Start { id } => Ok(moved("start", notebook.start(&id, today)?)),
-        Command::Submit { id } => Ok(moved("submit", notebook.submit(&id, today)?)),
+        Command::Submit { id, to } => {
+            Ok(moved("submit", notebook.submit(&id, to.as_deref(), today)?))
+        }
         Command::Close(args) => Ok(Reply::Closed(close_reply(
             &mut notebook,
             args,
@@ -454,6 +459,7 @@ fn edited(
         priority,
         review_by,
         taken_by,
+        to,
         clear,
     } = args;
     let edit = Edit {
@@ -467,6 +473,7 @@ fn edited(
         priority,
         review_by,
         taken_by,
+        to,
         clear,
     };
     Ok(Reply::Edited(notebook.edit(&id, &edit, today)?))
@@ -506,6 +513,7 @@ fn draft(args: AddArgs, body: String, identity: Option<&str>) -> Result<Draft, N
     } else {
         args.taken_by
     };
+    draft.to = args.to;
     draft.from = args.from;
     draft.tags = args.tags;
     draft.links = args.links.iter().map(|raw| parsed_link(raw)).collect();
@@ -587,6 +595,7 @@ fn filter(
     let Narrowing {
         whose,
         untaken,
+        to,
         scope,
         tags,
         text,
@@ -610,6 +619,7 @@ fn filter(
         hub: scope,
         by,
         untaken,
+        to,
         text,
         archive,
     })

@@ -37,7 +37,7 @@ fn apply(storage: &mut MemoryStorage, verb: Verb) -> Result<bool, NotebookError>
     let id = "task.demo";
     match verb {
         Verb::Start => notebook.start(id, TODAY).map(|reply| reply.already),
-        Verb::Submit => notebook.submit(id, TODAY).map(|reply| reply.already),
+        Verb::Submit => notebook.submit(id, None, TODAY).map(|reply| reply.already),
         Verb::Close => notebook
             .close(id, &Proof::Sha("f00dfeed".to_owned()), TODAY)
             .map(|reply| reply.transition.already),

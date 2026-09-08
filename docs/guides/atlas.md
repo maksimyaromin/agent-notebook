@@ -38,5 +38,6 @@ The document contains `v` for the format version, `slice` for the query, `nodes`
 | `waits` | The prerequisite points to the Task waiting on it |
 | `born` | The origin points to the record created from it |
 | `mentions` | The citing record points to the cited record |
+| any other word | A `link` line whose target is a record, under the link's own kind: the record carrying the link points to the record it names |
 
 The CLI defines the graph; the skill defines the presentation and review workflow. Its installed files contain the layout guidance for agents building a page.

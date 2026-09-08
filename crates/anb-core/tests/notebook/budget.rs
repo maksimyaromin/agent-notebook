@@ -141,20 +141,24 @@ mod budget_ladder {
              active: task.flight2 \"A demo record\"\n\
              active: task.flight3 \"A demo record\"\n\
              active: task.flight4 \"A demo record\"\n  \u{2026} 3 more active\n\
-             review[8]: task.waiting0, task.waiting1, task.waiting2, task.waiting3, \
-             task.waiting4, \u{2026} 3 more — waiting on a human\n\
+             review[8]{id,taken-by,to}:\n\
+             \x20 task.waiting0,-,-\n\
+             \x20 task.waiting1,-,-\n\
+             \x20 task.waiting2,-,-\n\
+             \x20 task.waiting3,-,-\n\
+             \x20 task.waiting4,-,-\n  \u{2026} 3 more\n\
              ready[8]{id,priority,age,taken-by,title}:\n\
              \x20 task.child0,-,3d,-,A demo record\n\
              \x20 task.child1,-,3d,-,A demo record\n\
              \x20 task.child2,-,3d,-,A demo record\n\
              \x20 task.child3,-,3d,-,A demo record\n\
              \x20 task.child4,-,3d,-,A demo record\n  \u{2026} 3 more: anb ready\n\
-             questions[8]{id,age,by,title}:\n\
-             \x20 question.q0,3d,-,A demo record\n\
-             \x20 question.q1,3d,-,A demo record\n\
-             \x20 question.q2,3d,-,A demo record\n\
-             \x20 question.q3,3d,-,A demo record\n\
-             \x20 question.q4,3d,-,A demo record\n  \u{2026} 3 more: anb list --type question\n",
+             questions[8]{id,age,by,to,title}:\n\
+             \x20 question.q0,3d,-,-,A demo record\n\
+             \x20 question.q1,3d,-,-,A demo record\n\
+             \x20 question.q2,3d,-,-,A demo record\n\
+             \x20 question.q3,3d,-,-,A demo record\n\
+             \x20 question.q4,3d,-,-,A demo record\n  \u{2026} 3 more: anb list --type question\n",
             "every section stops at five rows and counts the rest; knowledge reaches none"
         );
         assert_eq!(
@@ -195,10 +199,10 @@ mod budget_ladder {
         for section in [
             "active: task.flight",
             "log: \"- 2026-08-25 claude: stopped at the ladder\"",
-            "review[1]: task.waiting — waiting on a human",
+            "review[1]{id,taken-by,to}:\n  task.waiting,-,-\n",
             "ready[7]{id,priority,age,taken-by,title}:",
             "  … 2 more: anb ready",
-            "questions[1]{id,age,by,title}:\n  question.aged,26d,-,A demo record\n",
+            "questions[1]{id,age,by,to,title}:\n  question.aged,26d,-,-,A demo record\n",
             "debt: 1 — anb debt",
         ] {
             assert!(

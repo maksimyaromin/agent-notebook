@@ -41,8 +41,16 @@ pub enum Command {
     /// open | review → active: take the Task into work, or back into it;
     /// the Task records who holds it, and one somebody else holds is refused.
     Start { id: String },
-    /// active → review: hand the work to a human for acceptance.
-    Submit { id: String },
+    /// active → review: hand the work over for acceptance, to a named
+    /// person or to a human in general.
+    Submit {
+        id: String,
+        /// Whom the review waits on; their Status shows it. Omitted, the
+        /// task keeps the addressee it carries, or waits on a human in
+        /// general.
+        #[arg(long, value_name = "NAME")]
+        to: Option<String>,
+    },
     /// active | review → closed, carrying its proof; --reason ends a Task or
     /// a Question without work, from open too; --resolved-by closes a
     /// Question into the record that settled it.
@@ -218,6 +226,11 @@ pub struct AddArgs {
     /// writers sign with.
     #[arg(long)]
     pub mine: bool,
+    /// Whom the record waits on: the person a question is put to, or the
+    /// one a task's review will be handed to. Omitted, it waits on nobody
+    /// in particular.
+    #[arg(long, value_name = "NAME")]
+    pub to: Option<String>,
     /// A task's urgency, 0 to 4, 0 the most urgent.
     #[arg(long)]
     pub priority: Option<u32>,
@@ -268,8 +281,11 @@ pub struct EditArgs {
     /// Who holds the task: the hand-over that lets another identity start it.
     #[arg(long = "taken-by", value_name = "NAME")]
     pub taken_by: Option<String>,
-    /// The optional field to erase: `from`, `priority`, `review-by`, or
-    /// `taken-by`; repeatable.
+    /// Whom the task or question waits on.
+    #[arg(long, value_name = "NAME")]
+    pub to: Option<String>,
+    /// The optional field to erase: `from`, `priority`, `review-by`,
+    /// `taken-by`, or `to`; repeatable.
     #[arg(long = "clear", value_name = "FIELD")]
     pub clear: Vec<String>,
 }
@@ -334,7 +350,8 @@ pub const NARROWING: &str = "Narrowing";
 #[derive(Args)]
 #[command(next_help_heading = NARROWING)]
 pub struct Whose {
-    /// Only this identity's work: the tasks it holds and the records it wrote.
+    /// Only this identity's work: the tasks it holds, the records it wrote
+    /// and the records waiting on it.
     #[arg(long, value_name = "NAME", conflicts_with_all = ["mine", "team"])]
     pub by: Option<String>,
     /// Only your own: `--by` with the identity the writers sign with.
@@ -358,8 +375,11 @@ pub struct Narrowing {
     /// notebook's `scope` key says.
     #[arg(long, conflicts_with_all = ["by", "mine", "team"])]
     pub untaken: bool,
-    /// Only records inside this record's scope: an epic, what it waits on
-    /// and what was born inside it.
+    /// Only the records addressed to this person.
+    #[arg(long, value_name = "NAME")]
+    pub to: Option<String>,
+    /// Only records inside this record's scope: what it waits on, what
+    /// was born inside it and what links it, as far as each goes.
     #[arg(long = "for", value_name = "ID")]
     pub scope: Option<String>,
     /// Only records carrying this tag; repeated, carrying every one.

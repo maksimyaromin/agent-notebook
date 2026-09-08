@@ -40,9 +40,10 @@ Commands update the fields they own. The grammar preserves the body as text; sep
 | `by` | text | any | `add`, from the identity (`ANB_BY`, else the git `user.name`), or `--by` |
 | `via` | text | any | `add --via`: the creating agent tool; `comment --via` signs a log entry `by/via` without changing this field |
 | `taken-by` | text | Task | who holds the Task: `start`, from the identity, when the Task has none; `add --taken-by` or `add --mine` hands it over as it is written, `edit --taken-by` later; `edit --clear taken-by` erases it |
+| `to` | text | Task, Question | whom the record is addressed to: `add --to`, `submit --to`, `edit --to`; `edit --clear to` erases it |
 | `from` | an id | any | `add --from`, `edit --from`: the origin |
 | `tags` | `[a-z0-9-]+`, comma-separated | any | `add --tag`, `edit --tag`, `edit --untag` |
-| `link` | `<kind> <target>`, repeatable | any | `add --link`, `edit --link`, `edit --unlink`, `close --note`, `--pr`, `--sha`, `--report` |
+| `link` | `<kind> <target>`, repeatable; a target shaped like an id names a record and forms an edge under the link's kind, see [relations](#relations) | any | `add --link`, `edit --link`, `edit --unlink`, `close --note`, `--pr`, `--sha`, `--report` |
 | `supersedes`, `superseded-by` | an id | Decision, Note | `add --supersedes`, both sides at once |
 | `blocked-by` | an id, repeatable | Task | `block`, `unblock` |
 | `resolved-by` | an id | Question | `close --resolved-by` |
@@ -87,7 +88,13 @@ Tasks can be held or blocked independently of their lifecycle state. A `hold` fi
 
 A Task belongs to whoever holds it, named by `taken-by`; `by` is the author and a different fact. `start` records who took it as `taken-by` when the Task has none, and refuses a Task someone else holds with `taken`; `add --taken-by` hands a Task over as it is written and `edit --taken-by` later. A Task nobody holds is nobody's, whoever wrote it.
 
+A record waits on the person `to` names while it waits at all: an open Question, or a Task in review. The name stays on the record through its lifecycle, so a Task taken back and submitted again waits on the same person, and a settled record waits on nobody whatever it still carries. `add question --to` puts a doubt to someone, `submit --to` hands a review to someone, and `edit --to` corrects either.
+
 Closing a completed Task requires `--note`, `--pr`, `--sha`, `--report` or `--no-proof`. `--reason` ends a Task without completing it, including from open. Questions close with `--resolved-by` or `--reason`. See [Tasks](../guides/tasks.md#closing-with-a-proof) for proof selection.
+
+## Relations
+
+A record relates to another through its envelope or its body. `from` is the origin: why the record exists. `blocked-by` is a dependency: what must close first. A `link` whose target is a record id declares a relation of your own under the link's kind, `schema`, `within`, `departs-from` or any other token but the three words the graph draws itself: what the record belongs to or follows. A record cannot link itself. A bare id in the body is a mention: context. The tool walks each of these: `show` lists `mentions`, `mentioned-by` and `linked-by`, the graph draws every one as an edge, `list --for <id>` and `graph --for <id>` reach what waits on the record, what was born inside it and what links it, and `--focus` walks the same edges. `supersedes` and `resolved-by` are lifecycle facts, written by the commands that settle a record, and are not walked. An id inside backticks is a quotation and relates nothing.
 
 ## Ids
 
@@ -120,7 +127,7 @@ Ids use `<type>.<slug>`, with a slug matching `[a-z0-9-]+`. `add` derives one fr
 |---|---|---|
 | `format` | `1` | the version of the format the notebook is written in |
 | `budget` | `1500` | the estimated Status token budget; `0` disables budget-driven cuts; [limits](status.md#the-budget) still apply |
-| `scope` | `team` | whose records a read answers with when the call names nobody: `team` for everyone's, `mine` for the Tasks the identity holds and the records it wrote; `--team`, `--mine`, `--by` and `--untaken` outrank it for one call |
+| `scope` | `team` | whose records a read answers with when the call names nobody: `team` for everyone's, `mine` for the Tasks the identity holds, the records it wrote and the records waiting on it; `--team`, `--mine`, `--by` and `--untaken` outrank it for one call |
 | `debt-task-stale` | `7` | days an active Task may go without a log entry |
 | `debt-question-age` | `14` | days a free-standing Question may stay open |
 | `debt-question-age-task-born` | `7` | the same for a Question born from a Task |

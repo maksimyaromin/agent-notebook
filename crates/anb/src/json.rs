@@ -6,9 +6,9 @@ use crate::recovery::{Recovery, Subject};
 use crate::reply::{Reply, SkillReply, repair_command, shown};
 use crate::setup::SetUp;
 use anb_core::{
-    Cited, Counts, DebtSignal, EdgeKind, FileFinding, Filter, Graph, GraphEdge, GraphNode,
-    GraphSlice, ListedRecord, NotebookError, OpenQuestion, ReadyTask, RecordType, SECTION_ROWS,
-    Status, View, encode,
+    Cited, Counts, DebtSignal, FileFinding, Filter, Graph, GraphEdge, GraphNode, GraphSlice,
+    ListedRecord, NotebookError, OpenQuestion, ReadyTask, RecordType, SECTION_ROWS, Status, View,
+    encode,
 };
 use serde_json::{Map, Value, json};
 
@@ -322,7 +322,7 @@ fn epic_value(epic: &anb_core::Epic) -> Value {
 /// Which reading of the graph document this is. A caller builds against a
 /// shape, and a shape that could change without saying so is one nobody can
 /// build against.
-const GRAPH_CONTRACT: u8 = 3;
+const GRAPH_CONTRACT: u8 = 4;
 
 /// The graph as one document: the slice it answers, the records, and the
 /// edges between them. The two structural blocks are never bounded — a
@@ -388,6 +388,7 @@ fn filter_fields(filter: &Filter) -> Map<String, Value> {
         ("for", json!(filter.hub)),
         ("by", json!(filter.by)),
         ("untaken", json!(filter.untaken)),
+        ("to", json!(filter.to)),
         ("match", json!(filter.text)),
         ("archive", json!(filter.archive)),
     ])
@@ -427,15 +428,7 @@ fn graph_node_value(node: &GraphNode, degree: usize, full: bool, all: bool) -> V
 }
 
 fn graph_edge_value(edge: &GraphEdge<'_>) -> Value {
-    json!({
-        "from": edge.from,
-        "to": edge.to,
-        "kind": match edge.kind {
-            EdgeKind::BlockedBy => "waits",
-            EdgeKind::Origin => "born",
-            EdgeKind::Mentions => "mentions",
-        },
-    })
+    json!({"from": edge.from, "to": edge.to, "kind": edge.kind.word()})
 }
 
 fn counts_value(counts: &Counts) -> Value {
@@ -480,6 +473,9 @@ fn view_value(view: &View, all: bool) -> Value {
         "body": body_value(&view.body, all),
         "mentions": section(&view.mentions, shown(view.mentions.len(), all), |id| json!(id)),
         "mentioned-by": section(&view.mentioned_by, shown(view.mentioned_by.len(), all), |id| json!(id)),
+        "linked-by": section(&view.linked_by, shown(view.linked_by.len(), all), |(kind, id)| {
+            json!({"id": id, "kind": kind})
+        }),
     })
 }
 
@@ -528,8 +524,8 @@ fn status_value(status: &Status) -> Value {
     ]))
 }
 
-/// The fields of a row about a record, with who wrote it and who holds
-/// it beside them when the record names them.
+/// The fields of a row about a record, with who wrote it, who holds it
+/// and whom it is addressed to beside them when the record names them.
 fn attributed<'a>(
     entries: impl IntoIterator<Item = (&'a str, Value)>,
     attribution: &anb_core::Attribution,
@@ -538,6 +534,7 @@ fn attributed<'a>(
     object.extend(fields([
         ("by", json!(attribution.by)),
         ("taken-by", json!(attribution.taken_by)),
+        ("to", json!(attribution.to)),
     ]));
     object
 }
