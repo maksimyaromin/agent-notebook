@@ -9,7 +9,9 @@ The [Release workflow](https://github.com/maksimyaromin/agent-notebook/blob/main
 
 The npm package `@supolka/agent-notebook` supplies a launcher that selects a native binary from an optional platform dependency. The packages cover macOS and Linux on x64 and arm64, and Windows on x64. npm downloads the packages during installation; no postinstall script fetches a binary.
 
-[GitHub releases](https://github.com/maksimyaromin/agent-notebook/releases) provide the binaries directly, one archive per platform, with `SHA256SUMS`. These do not require Node.js. The package and source versions agree and move by [semantic versioning](https://semver.org/): the patch number moves for a fix that changes no documented reply shape, flag or field; the minor number for anything added, a flag, a field, a line in a reply, a finding, or a changed default; the major number for a removal, a rename or a changed meaning of a command, a flag, a field, a state word or a reply shape, and only the maintainer moves it. A release tag names a day. The day's first release is `vYYYY.MM.DD`; each further release that day appends `.N`, counting from 1. So `v2026.09.06` shipped package version `0.1.1`, and `v2026.09.06.1`, the second release of that day, ships `0.2.0`.
+[GitHub releases](https://github.com/maksimyaromin/agent-notebook/releases) provide the binaries directly, one archive per platform, with `SHA256SUMS`. These do not require Node.js. The package and source versions agree and move by [semantic versioning](https://semver.org/): patch for a compatible fix, minor for new behavior or a changed default, and major for incompatible changes once the stable interface is released. Before 1.0, the maintainer may release incompatible changes as a minor version; the release notes must describe how to upgrade. The major number never moves without the maintainer's approval.
+
+A new release tag combines its date and complete package version: `vYYYY.MM.DD.MAJOR.MINOR.PATCH`. For example, package version `0.9.0` released on 12 September 2026 has tag `v2026.09.12.0.9.0` and GitHub title `anb v2026.09.12.0.9.0`. Another version on the same day uses its own package version, not a sequence counter. Archive names include the same tag; npm versions remain ordinary semantic versions. Previously published tags, release titles and changelog entries keep their original names.
 
 ## Prepare the release
 
@@ -19,16 +21,16 @@ Update the Cargo workspace version, every npm package version and the launcher's
 sh scripts/release/check-versions.sh
 ```
 
-Write the release entry in `CHANGELOG.md` under a heading such as `## agent-notebook v2026.09.06`. Start with what the release changes for a user, use the applicable `New`, `Improved` and `Fixed` sections with pull request references, and name the package version. The workflow extracts this entry as the release notes and refuses a tag without one. Inspect the extraction before tagging:
+Write the release entry in `CHANGELOG.md` under a heading such as `## agent-notebook v2026.09.12.0.9.0`. Start with what the release changes for a user, use the applicable `New`, `Improved`, `Fixed` and `Upgrade notes` sections, and name the package version. Include pull request references when available. The workflow extracts this entry as the release notes and refuses a tag without one. Inspect the extraction before tagging:
 
 ```sh
-sh scripts/release/changelog-notes.sh v2026.09.06
+sh scripts/release/changelog-notes.sh v2026.09.12.0.9.0
 ```
 
-Tag the merged commit with the day's tag and push it. The workflow refuses a tag of another shape, and the same check answers beforehand:
+After the pull request passes CI and merges, tag that commit and push the tag. The workflow refuses an invalid tag or one whose package version differs from `Cargo.toml`. Run the same check before tagging:
 
 ```sh
-sh scripts/release/check-tag.sh v2026.09.06.1
+sh scripts/release/check-tag.sh v2026.09.12.0.9.0
 ```
 
 The workflow builds each platform, packages the release assets, checks version agreement and runs the npm launcher against the Linux binary. It publishes platform packages before the launcher so a newly installed launcher can resolve its dependencies.
@@ -40,10 +42,10 @@ The repository variable `RELEASE_DRY_RUN` must equal `false` for npm publication
 Check the build, GitHub release and npm publish jobs separately. Confirm that the release has all platform archives and checksums and that the launcher and platform packages are available at the intended version. From an empty directory, run the published launcher at that explicit version:
 
 ```sh
-npx -y @supolka/agent-notebook@0.2.0 --version
+npx -y @supolka/agent-notebook@0.9.0 --version
 ```
 
-The numbers above illustrate a published release; substitute the version being released.
+Substitute the version being released in these examples.
 
 A rerun keeps an existing GitHub release and replaces its assets. npm publication has no equivalent resume behavior: the loop starts from the first platform package and stops on failure, including an already-published version. If publication stopped halfway, inspect which packages reached the registry before choosing a recovery. The workflow cannot roll them back, and rerunning the whole job is not a way to skip them.
 
