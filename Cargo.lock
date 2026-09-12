@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "anb"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anb-core",
  "clap",
@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "anb-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "proptest",
  "serde_json",
