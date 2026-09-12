@@ -1,64 +1,87 @@
 ---
 title: Replies
-description: 'Success replies, retries, listing limits, JSON and refusal codes.'
+description: 'The shared TOON and JSON contract: results, omissions, next reads and refusals.'
 ---
 
-The CLI uses short plain text replies for interactive work and compact JSON for programs. Named fields distinguish a result, its consequences and any suggested next action.
+The default output is [TOON](https://toonformat.dev/), a compact, structured encoding of JSON data. `--json` selects JSON without changing the fields, selected rows or budget. Both formats come from one reply document. Parse field names, not column positions or English messages.
+
+Help and version output stay plain text. Printing a skill produces Markdown; `--json skill` wraps that Markdown in a JSON field. Session hooks always use the host's JSON protocol.
 
 ## The ok line
 
-A mutation starts with `ok: <verb> <id> — <what changed>`. A state move says the transition; a creation says the file; an idempotent repeat says so and changes nothing.
+A mutation identifies the operation with `ok` and names the affected record. A state change includes `from` and `to`; a creation includes `path`.
 
-```
-ok: start task.parser-accepts-fenced-bodies — open→active
-ok: add task.ship-the-parser — tasks/task.ship-the-parser.md
-ok: archive task.ship-the-parser — archived (already)
+```text
+ok: start
+id: task.parser
+from: open
+to: active
+already: false
 ```
 
-Consequences follow on named lines: `unblocked[N]`, `carried[N]`, `may-conflict[N]`, `dangling-mention[N]`, `resolved-by:`, `report:`.
+Consequences have their own fields: `unblocked`, `open-questions`, `dangling-mention` and `resolved-by`. Closing a Task keeps its outcome on the Task. Archiving moves only the named record; a linked Note has an independent lifecycle.
+
+A start bound to `--session` also reports `session` and `joined`. Session focus is separate from the first active row in Status.
 
 ## Repeating a command
 
-Commands that move an existing record report `(already)` when the requested change is already applied. They preserve the record bytes on that repeat. An immediate repeat of the same log entry, with the same author and date, also leaves the log unchanged.
+Idempotent operations report `already: true` and preserve record bytes. An immediate repeat of the same log entry, author and date also leaves the log unchanged. A new hold reason or date is a different request.
 
-Creation is different: `add` without `--id` can mint another id from the same title. An explicit id already in use produces `duplicate-id`. Read the named record before deciding whether to create another.
+Repeating `close` or `retire` preserves the original outcome. Use `comment` to add an explanation to a settled record.
+
+Creation is different: `add` can create another record with the same title. An explicit id already in use produces `duplicate-id`. Read that record before deciding whether another is needed.
 
 ## Tables
 
-A listing names its columns once and prints comma rows:
+TOON prints uniform object arrays as tables when possible. Optional fields or nested values can produce ordinary object rows instead. That is an encoding choice, not a different reply shape.
 
-```
-ready[1]{id,priority,age,taken-by,title}:
-  task.negative-corpus-wired-into-ci,-,0d,-,Negative corpus wired into CI
+```text
+count: 1
+omitted: 0
+ready[1]{id,created,title}:
+  task.parser,2026-09-12,Verify parser boundaries
 ```
 
-`-` is an absent value. A value holding a comma or a quote is quoted. An empty listing is `count: 0`.
+An array header always counts the rows actually present. `count` is the complete result size and `omitted` is the number not shown. Empty arrays are `[]`; most absent optional fields are omitted. TOON quotes and escapes strings according to its standard, including leading comment markers and control characters. No custom delimiters or pseudo-rows are added.
 
 ## Narrowing
 
-`list`, `ready` and `graph` take the same narrowing flags: `--for <id>`, `--tag`, `--match <text>`, `--by <name>`, `--mine`, `--team`, `--untaken` and `--to <name>`; `list` and `graph` also take `--type`, `--kind` and `--archive`, which a queue of live Tasks has no use for. Each is a predicate over the same notebook, so two flags ask for the intersection, and a narrowed listing's truncation hint carries every flag it was asked with. `--for` answers with one record's scope: what it waits on, what was born inside it and what links it, each followed as far as it goes. `--by` and `--mine` answer with one person's work, the Tasks they hold, the records they wrote and the records waiting on them; `--untaken` with the pool, the Tasks nobody holds; `--to` with the records addressed to a person. `status` takes `--by`, `--mine` and `--team`. Whose records a read answers with when the call names nobody is the notebook's `scope` config key, everyone's by default. A read narrowed to one identity opens with `by: <name> — anb <verb> … --team`, whether a flag or the key narrowed it, and its JSON carries `by` beside `count`: a `count: 0` under a narrowing is nothing of that person's, not an empty notebook.
+`list`, `ready` and `graph` share the work filters: `--for`, `--tag`, `--match`, `--by`, `--mine`, `--team`, `--untaken` and `--to`. `list` and `graph` also accept `--type`, `--kind` and `--archive`. Filters intersect; they do not change dependency validity.
+
+A read narrowed to one person reports `by` and a `team` command that removes only the identity filter. A `more` command lifts the display limit while retaining the original filters. Suggested actions preserve the selected notebook, including `--personal`, `--global` or an explicit path. Recall's mixed-audience memories keep their own scoped read commands. Names, paths and search text are shell-quoted.
+
+The notebook's `scope` setting controls unqualified work reads. Explicit knowledge queries, such as `list --type note,decision` or `list --kind rule`, include team authors by default even under `scope: mine`. Explicit `--mine` or `--by` still narrows them.
 
 ## Bounds
 
-Listings have default row limits and report omissions. Use `--all` to lift them. `show` also bounds long bodies and its `mentions`, `mentioned-by` and `linked-by` lists, marking where content was omitted. Graph JSON is unbounded so consumers receive the complete selected graph.
+Flat lists and consequence lists show at most 20 rows by default. Grouped lists use `{count, omitted, rows}`. Listings include `more` when rows were omitted; `--all` restores them. Consequences are summaries of a completed operation; use the affected record's view or the queue for subsequent reads.
+
+`show` bounds envelope rows, long field values, body text and incoming references. Its `more` command reads the complete record. A body carries `lines`, `characters`, `head`, optional `tail` and `omitted`. Here `omitted` counts characters. The default preserves up to 20 lines and 1000 characters at each end; a body of at most 41 lines and 2000 characters is kept whole.
+
+Summary text is limited to 200 characters, with the omitted length marked inside the summary. Core data and stored records remain unchanged. `show --all` restores original values. Graph nodes and edges are complete in both formats; `--full` includes record content, and `--all` lifts its text bounds.
+
+Status and Recall have a [shared output budget](status.md#the-budget). JSON uses the same selected values as TOON; choosing JSON never bypasses that budget.
 
 ## JSON
 
-`--json` selects compact JSON. Mutation replies identify the operation with `ok`; read commands use fields appropriate to the result. For example, `ready` returns `count` and `ready`, `list` returns `count` and `records`, and `debt` returns `count` and `debt`.
+Read commands use fields appropriate to their result: `ready` returns `count` and `ready`; `list` returns `count` and `records`; `debt` returns `count` and `debt`. Attribution fields are `by`, `taken-by` and `to` when present.
 
-A `list` or `ready` row carries `by`, `taken-by` and `to` when the record has them, so a script filters by identity without reading the files. Nested lists of consequences use `{count, rows}`. A truncated body uses `{lines, head, tail}`. Refusals provide `error`, `message`, `findings` and `try`. Parse these fields by name. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their own result structures.
+A view preserves envelope order in `fields.rows` as `[key, value]` pairs, including repeated fields. Bodies are text, not commands. Follow only designated action fields such as `more`, `read`, `team`, `repair` and `try`. [Graph](../guides/atlas.md#get-the-graph-directly) and [Status](status.md#json) describe their structures.
 
 ## Refusals
 
-A refusal is `error[<code>]: <message>` followed by `try:` lines suggesting the next command:
+A refusal names its stable code, the failed condition and possible next commands:
 
-```
-error[unknown-id]: no record `task.nope`
-try: anb list
+```text
+error: unknown-id
+message: no record `task.nope`
+try[1]: anb list
 ```
 
-Refusal codes are stable. Messages identify the failed condition, and `try:` lines suggest a command or an argument template to fill in. Validation happens before record writes. Storage failures during a multi-file operation can leave partial progress; inspect the reported findings and follow the recovery instructions. The [refusals reference](refusals.md) lists codes and repairs.
+`findings` contains detail strings when available, with `count` and `omitted` reporting any row limit. `try` is a bounded set of alternatives, not an exhaustive list. Session refusals additionally expose `session` and, when relevant, `id` or `reason`.
+
+Validation happens before record writes. Storage failures can leave recoverable partial progress in operations that touch several files. Inspect the refusal and follow its recovery command. The [refusals reference](refusals.md) lists codes and repairs.
 
 ## Exit codes
 
-`0` for a reply, `1` for a refusal or a `check` with an error finding, `2` for a command line clap cannot parse. `status --hook` exits `0` whatever it finds.
+`0` means a reply or an explicit help or version request. `1` means a refusal, including an invalid command line, or a `check` with error findings. The native session hook always exits `0`.

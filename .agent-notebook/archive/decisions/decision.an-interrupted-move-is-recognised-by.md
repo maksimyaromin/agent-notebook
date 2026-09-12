@@ -1,12 +1,13 @@
 ---
 id: decision.an-interrupted-move-is-recognised-by
 type: decision
-state: active
+state: superseded
 kind: rule
 title: An interrupted move is recognised by identity, never by bytes
 by: Maksim Yaromin
+superseded-by: decision.move-recovery
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-09-12
 ---
 
 When a move into the archive finds a file already at its destination, identity decides whether the move may go on — never whether it must write.

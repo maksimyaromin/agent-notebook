@@ -1,16 +1,17 @@
 ---
 id: decision.a-task-belongs-to-who-holds-it-mine-is
 type: decision
-state: active
+state: superseded
 kind: rule
-title: A Task belongs to who holds it: mine is taken-by, and the pool is one read
+title: "A Task belongs to who holds it: mine is taken-by, and the pool is one read"
 by: Maksim Yaromin
 via: claude-code
 from: task.mine-is-what-i-hold-a-task-belongs-to
 tags: identity, tasks, read-side
 supersedes: decision.a-task-is-taken-never-assigned-start
+superseded-by: decision.work-responsibility
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-12
 ---
 
 Work belongs to who holds it; authorship is a different fact. A Task's taken-by names its holder and by its author. For a Task, mine is taken-by and nothing else: a Task one person wrote and handed to another is the other's in every read, and a Task nobody holds is nobody's, however many people wrote or planned it. by keeps meaning mine for a Question, a Note or a Decision, which nobody holds. So --by <name>, --mine and scope: mine answer with one person's work, the Tasks they hold and the records they wrote, and Record::belongs_to is the one home of that rule in the Core.

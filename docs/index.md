@@ -16,21 +16,18 @@ hero:
 
 A coding session leaves more than code behind. There are decisions to explain, findings worth keeping and unfinished work to return to. agent-notebook gives agents a way to record these as they work and find them again in a later session.
 
-The CLI handles record changes and checks that their states and relationships are valid. The supplied skills describe the working method: how to resume a Task, record what was learned and close the work with a report. By default, records live in `.agent-notebook/` at the repository root and the agent commits them with the code.
+The CLI handles record changes and checks that their states and relationships are valid. The supplied skills describe the working method: how to resume work, keep useful knowledge and record an outcome on the Task. Shared records live in `.agent-notebook/` at the repository root, ready to review with the code. Personal practices stay outside the repository.
 
-The skills can be changed independently of the CLI. For example, you can keep memory somewhere else, require review before closing a Task, or give each agent its own work. The [customization guide](guides/customization.md) shows how to set this up.
+Setup connects the supplied method to your agent. Keep project-specific instructions in `.agents/anb.md`; upgrades preserve that file, so there is no skill to fork. Each session can continue its own Task while people share definitions, constraints and decisions. The [customization guide](guides/customization.md) explains the available controls.
 
-At the start of a session, the agent reads a summary:
+At the start of a session, the agent recalls its work, relevant project knowledge and personal practices:
 
-```
-$ anb status
-ok: notebook — 1 task, 1 decision, 0 notes, 0 questions
-active: task.parser-accepts-fenced-bodies "Parser accepts fenced bodies"
-log: "- 2026-09-05 Alex: fences parse; the indented-body case is next"
-budget: ~65/1500 tokens
+```sh
+anb recall
+anb start
 ```
 
-The notebook stores Tasks, Decisions, Notes and Questions in plain Markdown files. Status summarizes what needs attention; commands let an agent follow the detail and update it without editing files by hand. Sharing through git, personal knowledge across projects and interactive maps are available when your workflow needs them.
+The notebook stores Tasks, Decisions, Notes and Questions in plain Markdown files. `recall` provides a bounded starting context; `status` shows the work queue. Both expose what was omitted and how to read more. Other agents and people can read the files without installing anything. Keep tickets and full documentation in their existing systems, and link to them from the concise context that helps the next session act.
 
 agent-notebook uses the same tool and skills for its own development. Its notebook is public with the source; the [development guide](contributing/development.md) explains where to find the work and the decisions behind it.
 

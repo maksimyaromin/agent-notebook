@@ -1,3 +1,60 @@
+mod divergent_copies {
+    use crate::*;
+
+    fn assert_both_copies_survive(
+        move_record: impl FnOnce(&mut Notebook<'_>) -> Result<(), NotebookError>,
+        holder: &str,
+    ) {
+        let live = record_file(
+            "task.demo",
+            "task",
+            "closed",
+            &[],
+            "Alex: browser verification passed.\n",
+        );
+        let archived = record_file(
+            "task.demo",
+            "task",
+            "closed",
+            &[],
+            "Grace: privacy verification passed.\n",
+        );
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &live),
+            ("archive/tasks/task.demo.md", &archived),
+        ]);
+
+        assert_eq!(
+            move_record(&mut Notebook::new(&mut storage)).unwrap_err(),
+            NotebookError::DuplicateId {
+                id: "task.demo".to_owned(),
+                holder: holder.to_owned(),
+            }
+        );
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), live);
+        assert_eq!(
+            storage.read("archive/tasks/task.demo.md").unwrap(),
+            archived
+        );
+    }
+
+    #[test]
+    fn archive_never_overwrites_a_different_same_id_copy() {
+        assert_both_copies_survive(
+            |notebook| notebook.archive("task.demo").map(|_| ()),
+            "archive/tasks/task.demo.md",
+        );
+    }
+
+    #[test]
+    fn restore_never_discards_a_different_same_id_copy() {
+        assert_both_copies_survive(
+            |notebook| notebook.restore("task.demo").map(|_| ()),
+            "tasks/task.demo.md",
+        );
+    }
+}
+
 mod delete_verb {
     use crate::*;
 
@@ -309,15 +366,39 @@ mod archive_verb {
     use crate::*;
 
     #[test]
+    fn archiving_an_origin_preserves_its_linked_knowledge_byte_for_byte() {
+        let task = task_file("closed", &["link: note note.learning"]);
+        let note = record_file(
+            "note.learning",
+            "note",
+            "active",
+            &["from: task.demo", "kind: guide"],
+            "Keep the reusable result after this Task ends.\n",
+        );
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task),
+            ("notes/note.learning.md", &note),
+        ]);
+
+        Notebook::new(&mut storage).archive("task.demo").unwrap();
+
+        assert_eq!(storage.read("notes/note.learning.md").unwrap(), note);
+        assert_eq!(storage.read("archive/tasks/task.demo.md").unwrap(), task);
+        assert!(matches!(
+            storage.read("archive/notes/note.learning.md"),
+            Err(StorageError::NotFound { .. })
+        ));
+        assert!(Notebook::new(&mut storage).check().unwrap().is_empty());
+    }
+
+    #[test]
     fn a_settled_task_moves_to_the_archive_byte_identical() {
         // Warnings only — BOM, a CRLF line, quirky spacing — so the move is
         // legal and byte-exactness is observable: a canonicalizing copy
         // would rewrite this file.
         let text = "\u{feff}---\nid: task.demo\ntype:  task\r\nstate: closed\ntitle: A demo record\ncreated: 2026-08-24\n---\nbody\n";
         let mut storage = storage_with(&[("tasks/task.demo.md", text)]);
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
+        let moved = Notebook::new(&mut storage).archive("task.demo").unwrap();
         assert_eq!(moved.from, "tasks/task.demo.md");
         assert_eq!(moved.to, "archive/tasks/task.demo.md");
         assert!(!moved.already);
@@ -387,7 +468,7 @@ mod archive_verb {
                 "archive/questions/question.q.md",
             ),
         ] {
-            let moved = Notebook::new(&mut storage).archive(id, TODAY).unwrap();
+            let moved = Notebook::new(&mut storage).archive(id).unwrap();
             assert!(!moved.already, "{id} settles and must move");
             assert!(storage.read(to).is_ok(), "{id} must land in the archive");
             assert!(
@@ -397,164 +478,7 @@ mod archive_verb {
         }
     }
 
-    #[test]
-    fn archiving_a_record_carries_the_report_it_closed_with() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &["link: note note.report"]),
-            ),
-            (
-                "notes/note.report.md",
-                &record_file(
-                    "note.report",
-                    "note",
-                    "active",
-                    &["from: task.demo"],
-                    "What the work came to.\n",
-                ),
-            ),
-        ]);
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
-        assert_eq!(moved.carried, ["note.report"]);
-        assert!(matches!(
-            storage.read("notes/note.report.md"),
-            Err(StorageError::NotFound { .. })
-        ));
-        let filed = storage.read("archive/notes/note.report.md").unwrap();
-        assert!(
-            filed.contains("state: retired") && filed.contains("What the work came to."),
-            "a carried report is settled where it lands: {filed}"
-        );
-    }
-
-    /// A report is the record's own output: linked as evidence and born
-    /// inside it. Either half alone leaves the Note where it is.
-    #[test]
-    fn only_a_report_born_inside_the_record_is_carried() {
-        for (case, links, origin) in [
-            ("a Note born from another Task", true, "task.other"),
-            ("a Note this record never linked", false, "task.demo"),
-        ] {
-            let task_lines: &[&str] = if links {
-                &["link: note note.report"]
-            } else {
-                &[]
-            };
-            let path = "notes/note.report.md";
-            let mut storage = storage_with(&[
-                ("tasks/task.demo.md", &task_file("closed", task_lines)),
-                (
-                    path,
-                    &record_file(
-                        "note.report",
-                        "note",
-                        "active",
-                        &[&format!("from: {origin}")],
-                        "",
-                    ),
-                ),
-            ]);
-            let moved = Notebook::new(&mut storage)
-                .archive("task.demo", TODAY)
-                .unwrap();
-            assert!(
-                moved.carried.is_empty(),
-                "{case} is not this record\'s report"
-            );
-            assert!(storage.read(path).is_ok(), "{case} must stay live");
-        }
-    }
-
-    /// The cascade is judged whole before it starts, so a report the
-    /// notebook cannot move refuses the archive and leaves every record
-    /// where it was — the repair is on the Note, and the move is one call
-    /// away.
-    #[test]
-    fn a_report_that_cannot_be_judged_refuses_the_move_and_keeps_every_byte() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &["link: note note.report"]),
-            ),
-            (
-                "notes/note.report.md",
-                &record_file("note.report", "note", "wrong", &["from: task.demo"], ""),
-            ),
-        ]);
-
-        let refusal = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap_err();
-        assert!(
-            matches!(&refusal, NotebookError::InvalidRecord { path, .. } if path == "notes/note.report.md"),
-            "{refusal:?}"
-        );
-        assert!(
-            storage.read("tasks/task.demo.md").is_ok()
-                && matches!(
-                    storage.read("archive/tasks/task.demo.md"),
-                    Err(StorageError::NotFound { .. })
-                ),
-            "the record the caller named must not move on a refused cascade"
-        );
-
-        storage
-            .write(
-                "notes/note.report.md",
-                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
-            )
-            .unwrap();
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
-        assert_eq!(moved.carried, ["note.report"]);
-    }
-
-    /// The cascade decides before it writes, so a report whose archived
-    /// home is taken by other bytes refuses the move with every record
-    /// untouched — including the state of the report itself.
-    #[test]
-    fn a_report_whose_home_is_taken_refuses_before_anything_is_retired() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &["link: note note.report"]),
-            ),
-            (
-                "notes/note.report.md",
-                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
-            ),
-            (
-                "archive/notes/note.report.md",
-                &record_file("note.report", "note", "retired", &[], "Older bytes.\n"),
-            ),
-        ]);
-
-        let refusal = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap_err();
-        assert!(
-            matches!(&refusal, NotebookError::DuplicateId { id, .. } if id == "note.report"),
-            "{refusal:?}"
-        );
-        assert!(
-            storage
-                .read("notes/note.report.md")
-                .unwrap()
-                .contains("state: active"),
-            "a refused cascade retires nothing"
-        );
-        assert!(storage.read("tasks/task.demo.md").is_ok());
-    }
-
-    /// A link target is free text until the grammar says otherwise, and a
-    /// target that is no Note id is never spelled into a path. The proof is
-    /// a file waiting at exactly the path an unguarded cascade would build
-    /// from each shape: one that climbs out of the notes directory, one
-    /// whose case is wrong, and one that names another type.
+    /// Archiving follows no links, including targets that resemble paths.
     #[test]
     fn a_link_target_that_is_no_note_id_is_never_turned_into_a_path() {
         for (target, reachable_only_unguarded) in [
@@ -571,13 +495,20 @@ mod archive_verb {
                     reachable_only_unguarded,
                     &record_file("note.report", "note", "active", &["from: task.demo"], ""),
                 ),
+                (
+                    "tasks/task.report.md",
+                    &record_file(
+                        "task.report",
+                        "task",
+                        "open",
+                        &[],
+                        "A separate task, not a report Note.",
+                    ),
+                ),
             ]);
 
-            let moved = Notebook::new(&mut storage)
-                .archive("task.demo", TODAY)
-                .unwrap();
+            Notebook::new(&mut storage).archive("task.demo").unwrap();
 
-            assert!(moved.carried.is_empty(), "`{target}` names no report");
             assert!(
                 storage.read(reachable_only_unguarded).is_ok(),
                 "`{target}` left the file it would have named where it lies"
@@ -585,142 +516,12 @@ mod archive_verb {
         }
     }
 
-    /// The reports move first, so an interruption leaves the record live
-    /// and the next call finishes the job: what is already filed is no
-    /// longer carriable, and the record follows it.
-    #[test]
-    fn an_interrupted_cascade_is_finished_by_the_next_call() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &["link: note note.report"]),
-            ),
-            (
-                "archive/notes/note.report.md",
-                &record_file("note.report", "note", "retired", &["from: task.demo"], ""),
-            ),
-        ]);
-
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
-        assert!(!moved.already && moved.carried.is_empty());
-        assert!(storage.read("archive/tasks/task.demo.md").is_ok());
-    }
-
-    /// A crash between a report's write and the removal of its live copy
-    /// leaves both files standing. The filed copy is retired and stamped
-    /// with the day it moved, so it can never equal the live bytes: only
-    /// recognising it for what it is lets the next call finish the move
-    /// instead of condemning the id forever.
-    #[test]
-    fn a_report_written_but_not_yet_removed_is_finished_not_condemned() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &["link: note note.report"]),
-            ),
-            (
-                "notes/note.report.md",
-                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
-            ),
-            (
-                "archive/notes/note.report.md",
-                &record_file("note.report", "note", "retired", &["from: task.demo"], ""),
-            ),
-        ]);
-
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
-
-        assert_eq!(moved.carried, vec!["note.report".to_owned()]);
-        assert!(storage.read("notes/note.report.md").is_err());
-        assert!(storage.read("archive/tasks/task.demo.md").is_ok());
-    }
-
-    /// The live copy is the report, and the copy an interrupted run left
-    /// is only where it was going: whatever was written into the report
-    /// since must survive the move, so finishing it writes the live bytes
-    /// rather than keeping what it found.
-    #[test]
-    fn a_report_corrected_after_an_interrupted_move_keeps_the_correction() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &["link: note note.report"]),
-            ),
-            (
-                "notes/note.report.md",
-                &record_file(
-                    "note.report",
-                    "note",
-                    "active",
-                    &["from: task.demo"],
-                    "The findings, corrected after review.\n",
-                ),
-            ),
-            (
-                "archive/notes/note.report.md",
-                &record_file(
-                    "note.report",
-                    "note",
-                    "retired",
-                    &["from: task.demo"],
-                    "The findings as first written.\n",
-                ),
-            ),
-        ]);
-
-        Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
-
-        let filed = storage.read("archive/notes/note.report.md").unwrap();
-        assert!(filed.contains("corrected after review"), "{filed}");
-    }
-
-    /// Another record wearing the report's id is not an interrupted move,
-    /// however retired it looks: the origin is what makes it this record's
-    /// history.
-    #[test]
-    fn a_foreign_record_at_the_reports_destination_refuses_the_move() {
-        let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &task_file("closed", &["link: note note.report"]),
-            ),
-            (
-                "notes/note.report.md",
-                &record_file("note.report", "note", "active", &["from: task.demo"], ""),
-            ),
-            (
-                "archive/notes/note.report.md",
-                &record_file("note.report", "note", "retired", &["from: task.other"], ""),
-            ),
-        ]);
-
-        let refusal = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap_err();
-
-        assert!(
-            matches!(refusal, NotebookError::DuplicateId { ref id, .. } if id == "note.report"),
-            "{refusal:?}"
-        );
-        assert!(storage.read("tasks/task.demo.md").is_ok());
-    }
-
     #[test]
     fn a_replayed_archive_answers_already_and_changes_nothing() {
         let text = task_file("closed", &[]);
         let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
-        Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
-        let replay = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
+        Notebook::new(&mut storage).archive("task.demo").unwrap();
+        let replay = Notebook::new(&mut storage).archive("task.demo").unwrap();
         assert!(replay.already);
         assert_eq!(storage.read("archive/tasks/task.demo.md").unwrap(), text);
     }
@@ -734,7 +535,7 @@ mod archive_verb {
             let mut storage =
                 storage_with(&[("archive/tasks/task.demo.md", &task_file(state, &[]))]);
             let refusal = Notebook::new(&mut storage)
-                .archive("task.demo", TODAY)
+                .archive("task.demo")
                 .unwrap_err();
             match refusal {
                 NotebookError::InvalidRecord { path, findings } => {
@@ -777,7 +578,7 @@ mod archive_verb {
             ("decision.d", "active", vec!["retire"]),
         ] {
             assert_eq!(
-                notebook.archive(id, TODAY).unwrap_err(),
+                notebook.archive(id).unwrap_err(),
                 NotebookError::InvalidTransition {
                     id: id.to_owned(),
                     state: state.to_owned(),
@@ -793,49 +594,52 @@ mod archive_verb {
         let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
         assert!(matches!(
             Notebook::new(&mut storage)
-                .archive("task.demo", TODAY)
+                .archive("task.demo")
                 .unwrap_err(),
             NotebookError::InvalidRecord { .. }
         ));
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
     }
 
-    /// The live copy is the record, and the copy an interrupted run left is
-    /// only where it was going: whatever was written into the record since
-    /// must survive the move, so finishing it writes the live bytes rather
-    /// than keeping what it found.
     #[test]
-    fn a_record_corrected_after_an_interrupted_move_keeps_the_correction() {
+    fn a_live_correction_requires_reconciliation_before_archiving() {
+        let corrected = record_file(
+            "task.demo",
+            "task",
+            "closed",
+            &[],
+            "\nThe log, corrected after review.\n",
+        );
+        let original = record_file(
+            "task.demo",
+            "task",
+            "closed",
+            &[],
+            "\nThe log as first written.\n",
+        );
         let mut storage = storage_with(&[
-            (
-                "tasks/task.demo.md",
-                &record_file(
-                    "task.demo",
-                    "task",
-                    "closed",
-                    &[],
-                    "\nThe log, corrected after review.\n",
-                ),
-            ),
-            (
-                "archive/tasks/task.demo.md",
-                &record_file(
-                    "task.demo",
-                    "task",
-                    "closed",
-                    &[],
-                    "\nThe log as first written.\n",
-                ),
-            ),
+            ("tasks/task.demo.md", &corrected),
+            ("archive/tasks/task.demo.md", &original),
         ]);
 
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
+        assert!(matches!(
+            Notebook::new(&mut storage).archive("task.demo"),
+            Err(NotebookError::DuplicateId { .. })
+        ));
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), corrected);
+        assert_eq!(
+            storage.read("archive/tasks/task.demo.md").unwrap(),
+            original
+        );
 
-        assert!(!moved.already, "the live copy stood, so the move finished");
-        let filed = storage.read("archive/tasks/task.demo.md").unwrap();
-        assert!(filed.contains("corrected after review"), "{filed}");
+        storage
+            .write("archive/tasks/task.demo.md", &corrected)
+            .unwrap();
+        Notebook::new(&mut storage).archive("task.demo").unwrap();
+        assert_eq!(
+            storage.read("archive/tasks/task.demo.md").unwrap(),
+            corrected
+        );
         assert!(matches!(
             storage.read("tasks/task.demo.md"),
             Err(StorageError::NotFound { .. })
@@ -854,7 +658,7 @@ mod archive_verb {
         ]);
 
         let refusal = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
+            .archive("task.demo")
             .unwrap_err();
 
         assert!(
@@ -871,37 +675,38 @@ mod archive_verb {
 
     #[test]
     fn a_move_interrupted_after_its_write_loses_nothing_and_replays_clean() {
-        let text = task_file("closed", &[]);
-        let mut storage = RemoveFails(storage_with(&[("tasks/task.demo.md", &text)]));
-        assert!(
-            Notebook::new(&mut storage)
-                .archive("task.demo", TODAY)
-                .is_err()
+        let text = task_file("closed", &["link: note note.learning"]);
+        let note = record_file(
+            "note.learning",
+            "note",
+            "active",
+            &["from: task.demo"],
+            "Reusable knowledge.\n",
         );
+        let mut storage = RemoveFails(storage_with(&[
+            ("tasks/task.demo.md", &text),
+            ("notes/note.learning.md", &note),
+        ]));
+        assert!(Notebook::new(&mut storage).archive("task.demo").is_err());
         assert_eq!(
             storage.read("archive/tasks/task.demo.md").unwrap(),
             text,
             "the copy landed before the failure"
         );
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
+        assert_eq!(storage.read("notes/note.learning.md").unwrap(), note);
 
-        let mut storage = storage_with(&[
-            ("tasks/task.demo.md", &text),
-            ("archive/tasks/task.demo.md", &text),
-        ]);
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
+        let mut storage = storage.0;
+        let moved = Notebook::new(&mut storage).archive("task.demo").unwrap();
         assert!(!moved.already, "the identical copy is the crash replay");
         assert!(matches!(
             storage.read("tasks/task.demo.md"),
             Err(StorageError::NotFound { .. })
         ));
+        assert_eq!(storage.read("notes/note.learning.md").unwrap(), note);
+        assert!(Notebook::new(&mut storage).check().unwrap().is_empty());
     }
-    /// A record whose `link` names itself is a hand edit, and carrying it
-    /// as its own report would file it twice — the second write landing on
-    /// a source the first had already removed, so a completed move
-    /// reported a storage failure.
+    /// A hand-written self-link must not make archive visit the record twice.
     #[test]
     fn a_record_linking_itself_is_filed_once() {
         let mut storage = storage_with(&[(
@@ -915,24 +720,16 @@ mod archive_verb {
             ),
         )]);
 
-        let moved = Notebook::new(&mut storage)
-            .archive("note.loop", TODAY)
-            .unwrap();
+        let moved = Notebook::new(&mut storage).archive("note.loop").unwrap();
 
-        assert_eq!(
-            moved.carried,
-            Vec::<String>::new(),
-            "it is not its own report"
-        );
+        assert!(!moved.already);
         assert!(storage.read("archive/notes/note.loop.md").is_ok());
         assert!(storage.read("notes/note.loop.md").is_err());
     }
 
-    /// A link hand-edited into duplicates names one report, and the
-    /// cascade files it once: a move per line would have the second one
-    /// fail on a source the first had already removed.
+    /// Duplicate link values do not give archive ownership of another record.
     #[test]
-    fn a_report_linked_twice_is_carried_once() {
+    fn a_note_linked_twice_keeps_its_location_and_state() {
         let mut storage = storage_with(&[
             (
                 "tasks/task.demo.md",
@@ -947,10 +744,12 @@ mod archive_verb {
             ),
         ]);
 
-        let moved = Notebook::new(&mut storage)
-            .archive("task.demo", TODAY)
-            .unwrap();
+        let moved = Notebook::new(&mut storage).archive("task.demo").unwrap();
 
-        assert_eq!(moved.carried, ["note.report"]);
+        assert!(!moved.already);
+        assert_eq!(
+            storage.read("notes/note.report.md").unwrap(),
+            record_file("note.report", "note", "active", &["from: task.demo"], "")
+        );
     }
 }

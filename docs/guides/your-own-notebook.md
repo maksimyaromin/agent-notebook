@@ -1,49 +1,59 @@
 ---
-title: Your own notebook
-description: 'Keep personal rules and practices across repositories with the global notebook.'
+title: Personal knowledge
+description: 'Keep project-specific and cross-project practices private, and recall them without remembering their location.'
 ---
 
-Some practices belong to you across projects: how you review a change, how you name things, or what a good handoff includes. `--global` stores these in `.agent-notebook/` in your home directory. It uses the same record format and CLI as a project notebook.
+A project rule and a personal preference have different audiences. Shared domain knowledge belongs in the project even when one person wrote it. A preference about how an agent should work for you belongs outside the shared notebook.
 
-```text
-$ anb add note "Review in two passes" --kind guide --tag skill --global --body "First the diff against the tests, then the tests against the promise."
-ok: add note.review-in-two-passes — notes/note.review-in-two-passes.md
+## Choose the audience
+
+| Audience | Option | Typical content |
+|---|---|---|
+| Project | No audience flag | Domain models, team decisions and project work |
+| Personal project | `--personal` | How you want the agent to work for you on this project |
+| Personal across projects | `--global` | Practices you deliberately reuse across repositories |
+
+Personal notebooks hold Notes and Decisions. Tasks and Questions stay in a project, where assignments and unfinished work are visible in their context. Use another project notebook location if you need a private working backlog, as described under [private project memory](customization.md#keep-project-memory-private).
+
+```sh
+anb add note "Ask before the slow suite" --personal --kind guide --body "For my work on this project, ask before running the full integration suite. Focused tests can run normally."
+anb add note "Review behavior first" --global --kind guide --body "Review observable behavior before formatting and naming."
 ```
 
-## Keep knowledge here, work in the project
+The agent can make these choices from ordinary requests. “For me here” means personal project knowledge; “across my projects” means global knowledge. A team-wide rule needs team-wide authority. The tool does not infer that authority from who wrote the record.
 
-The global notebook accepts Decisions and Notes. Tasks and Questions belong to the project where the work happens:
+## Recall without locating the file
 
-```text
-$ anb add task "Tidy the desk" --global
-error[invalid-argument]: add: the user's notebook holds decisions and notes — work stays in the project
-try: anb add task "<title>"
+`anb recall` combines shared project knowledge, your project-specific practices and your cross-project practices. Each memory includes its audience and a read command that selects the right notebook. Different notebooks may contain the same id without becoming the same record.
+
+```sh
+anb recall "review"
+anb show note.review-practice --personal
+anb show note.review-practice --global
 ```
 
-Knowledge commands work in either scope. Add `--global` to create, read, correct or retire a personal record.
+The example ids in `show` stand for ids returned by creation or recall. Add the same audience flag when correcting or retiring a personal record.
 
-## Find a practice by name
+A private practice does not silently override a shared rule. The agent considers their wording, authority and scope. Tags and citations do not prove a contradiction, so the CLI does not label related records as conflicting.
 
-Tag a guide Note with `skill` when you want agents to find it as a reusable practice:
+## Where personal knowledge lives
 
-```text
-$ anb list --match review --global
-records[1]{id,state,priority,title}:
-  note.review-in-two-passes,active,-,Review in two passes
-```
+Cross-project records live under `.agent-notebook/` in your home directory. Project-specific practices live under its `projects/<project-key>/` directory. These paths are outside the repository and are not committed with its shared notebook.
 
-Read it with `anb show note.review-in-two-passes --global`. Tell your agent to use the named practice; the supplied skill teaches it to resolve that request through the global notebook. The Note is not automatically loaded into every session.
+The project key is a SHA-256 digest of the canonical local project path, or the common Git directory for a repository. Linked Git worktrees share personal practices. Independent clones do not inherit preferences merely because their directory names or remotes match. Moving a project changes its local key; move the personal notebook deliberately if its practices should follow. No remote URL, username or project title is written into a shared record to provide this mapping.
 
-## Make project exceptions explicit
+Recall reads configured sources without modifying them. A missing personal notebook is an empty source; an unreadable or malformed source is not. Storage errors remain visible.
 
-When a project Decision overrides a global Decision, cite the global id in the project's record. Debt reads the global notebook and reports the pair as a `shadow` signal, counted on Status and listed by `anb debt`. The agent can then see the project exception and the personal rule together. The tool detects the citation, not a semantic disagreement, and leaves the global Decision unchanged.
+## Shared records remain portable
 
-## Choose a notebook location
+A shared typed link must resolve within the shared notebook. Do not make it depend on an id that exists only in your private notebook. Summarize the shared constraint or cite an appropriate canonical source instead.
 
-Without an override, `anb` walks up from the working directory to the nearest existing `.agent-notebook/` or repository root. A new notebook is created at that root on the first record write, so commands work from project subdirectories too. Outside a repository, with no existing notebook above it, the working directory becomes the root.
+Private evidence stays private. A shared conclusion may cite a public or team-accessible source, but should not copy secrets or personal details from a private practice.
 
-`ANB_NOTEBOOK` selects a notebook for the shell; relative values are anchored to the project. `--notebook <path>` selects one for a single call. Both `--notebook` and `--global` take precedence over the environment variable, and the two flags cannot be combined.
+## Select another project notebook
 
-You can commit a project notebook, ignore it in git, or store it elsewhere. The global notebook stays in your home directory unless you arrange to share its files yourself.
+Without an override, `anb` finds the nearest existing `.agent-notebook/` or repository root. Outside a repository it uses the working directory.
 
-For a project notebook that stays private, follow [the `.tmp/xxx` recipe](customization.md#keep-project-memory-private). It keeps Tasks and Questions in project scope while excluding their files from git.
+`ANB_NOTEBOOK` selects a project notebook for the shell; relative values start at the project root. `--notebook <path>` selects one for a single call; relative values start at the current working directory. `--personal` and `--global` override the environment selection and cannot be combined with each other or `--notebook`.
+
+A custom project notebook can be committed, ignored or stored elsewhere. Selecting a different path does not turn project Tasks into cross-project personal knowledge.

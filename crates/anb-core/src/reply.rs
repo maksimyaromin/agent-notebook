@@ -1,5 +1,4 @@
-//! The values a verb answers with: the vocabulary every host renders, and
-//! the one rendering the hosts share.
+//! The values returned by notebook operations, independent of output encoding.
 //!
 //! They sit below the Notebook and below every derivation over it, so a
 //! surface that computes one — Debt, Status, Check — never reaches up into
@@ -8,10 +7,39 @@
 use crate::finding::Finding;
 use crate::record::{Record, RecordType};
 use crate::request::GraphSlice;
-use crate::resolve::path_stem;
-use crate::{date, encode};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
+
+/// A checked batch of record files, either previewed or written.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FileBatch {
+    pub paths: Vec<String>,
+    pub unchanged: usize,
+    pub check: bool,
+    /// The migration journal containing the original bytes, if one was written.
+    pub backup: Option<String>,
+}
+
+/// Maintained knowledge and the invalid files excluded from recall.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Knowledge {
+    pub records: Vec<Memory>,
+    pub invalid: Vec<String>,
+}
+
+/// A recalled record. The source notebook supplies its audience; `by` is
+/// provenance. Bodies and external links retain the recorded evidence.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Memory {
+    pub id: String,
+    pub path: String,
+    pub record_type: RecordType,
+    pub kind: Option<String>,
+    pub title: String,
+    pub body: String,
+    pub by: Option<String>,
+    pub links: Vec<String>,
+    pub related: bool,
+}
 
 /// A state move; on a replay `already` is true and `from` equals `to`.
 #[derive(Debug, PartialEq, Eq)]
@@ -43,12 +71,9 @@ pub struct Closed {
     pub transition: Transitioned,
     pub open_questions: Vec<String>,
     pub unblocked: Vec<String>,
-    /// The Note this close ingested its report into, when it did.
-    pub report_note: Option<String>,
     /// The Decision or Task a Question resolved into, when it did.
     pub resolved_by: Option<String>,
-    /// The ingested report's own dangling citations; a report names ids as
-    /// freely as any body, and the nudge belongs at the write.
+    /// Unresolved citations in the outcome or reason written by this close.
     pub dangling_mentions: Vec<String>,
 }
 
@@ -96,65 +121,7 @@ pub struct ReadyTask {
     pub priority: Option<u8>,
     pub created: String,
     pub attribution: Attribution,
-    /// The Task's title, cut by [`encode::bounded_text`] like every other
-    /// text a derived reply carries.
     pub title: String,
-}
-
-impl ReadyTask {
-    /// The ready table — header and the first `shown` rows, ages derived
-    /// from `today_day`. The caller owns its own truncation hint. The row
-    /// carries who holds the Task and not who wrote it, because a reader
-    /// picking work asks whether a Task is already somebody's.
-    #[must_use]
-    pub fn table(rows: &[ReadyTask], shown: usize, today_day: i64) -> String {
-        let mut out = format!("ready[{}]{{id,priority,age,taken-by,title}}:\n", rows.len());
-        for row in rows.iter().take(shown) {
-            let priority = row
-                .priority
-                .map_or_else(|| "-".to_owned(), |priority| priority.to_string());
-            let _ = writeln!(
-                out,
-                "  {},{priority},{}d,{},{}",
-                row.id,
-                age_days(&row.created, today_day),
-                encode::absent_or(row.attribution.taken_by.as_deref()),
-                encode::quoted_if_delimited(&row.title)
-            );
-        }
-        out
-    }
-}
-
-/// Whole days from `created` to `today_day`, floored at zero; an unreadable
-/// date counts as today.
-pub(crate) fn age_days(created: &str, today_day: i64) -> i64 {
-    date::day_number(created).map_or(0, |day| (today_day - day).max(0))
-}
-
-/// One record cited on a Debt surface, with the attribution the undeclared
-/// conflict posture requires: the tool prints both sides and stops.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Cited {
-    pub id: String,
-    pub by: Option<String>,
-    pub via: Option<String>,
-}
-impl Cited {
-    pub(crate) fn of(record: &Record) -> Cited {
-        Cited {
-            id: path_stem(record.path()).to_owned(),
-            by: record.file().field("by").map(str::to_owned),
-            via: record.file().field("via").map(str::to_owned),
-        }
-    }
-
-    /// The record's [`encode::author`]: the reader judges the pair, so a
-    /// side is never blank.
-    #[must_use]
-    pub fn author(&self) -> String {
-        encode::author(self.by.as_deref(), self.via.as_deref())
-    }
 }
 
 /// A record created, with the computed consequences its reply must not
@@ -164,7 +131,6 @@ pub struct Created {
     pub id: String,
     pub path: String,
     pub superseded: Option<String>,
-    pub may_conflict: Vec<Cited>,
     pub dangling_mentions: Vec<String>,
 }
 
@@ -216,9 +182,6 @@ pub struct Archived {
     pub id: String,
     pub from: String,
     pub to: String,
-    /// The report Notes this call filed alongside, in the order the record
-    /// names them.
-    pub carried: Vec<String>,
     pub already: bool,
 }
 
@@ -248,7 +211,6 @@ pub struct ListedRecord {
     pub state: String,
     pub priority: Option<u8>,
     pub attribution: Attribution,
-    /// Cut by [`encode::bounded_text`], as `ReadyTask`'s is.
     pub title: Option<String>,
 }
 
@@ -517,78 +479,12 @@ pub enum Repair {
     Clear(&'static str),
     /// Erase the dependency edge on the finding's line.
     Unblock(String),
+    /// Erase the link on the finding's line.
+    Unlink(String),
     /// Erase the hold the finding's line is half of.
     Unhold,
     /// File the settled record where it belongs.
     Archive,
     /// Bring the record back where the verbs can reach it.
     Restore,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn row(id: &str, priority: Option<u8>, created: &str, title: &str) -> ReadyTask {
-        ReadyTask {
-            id: id.to_owned(),
-            priority,
-            created: created.to_owned(),
-            attribution: Attribution::default(),
-            title: title.to_owned(),
-        }
-    }
-
-    #[test]
-    fn a_row_derives_its_age_and_quotes_a_delimited_title() {
-        let rows = [row(
-            "task.demo",
-            None,
-            "2026-08-24",
-            "Degrades sections, keeps Budget",
-        )];
-        let today_day = date::day_number("2026-08-28").unwrap();
-        assert_eq!(
-            ReadyTask::table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,taken-by,title}:\n  task.demo,-,4d,-,\"Degrades sections, keeps Budget\"\n"
-        );
-    }
-
-    #[test]
-    fn an_unreadable_created_date_counts_as_today() {
-        let rows = [row("task.demo", Some(1), "", "A demo record")];
-        assert_eq!(
-            ReadyTask::table(&rows, 1, 20_000),
-            "ready[1]{id,priority,age,taken-by,title}:\n  task.demo,1,0d,-,A demo record\n"
-        );
-    }
-
-    /// A clock behind the notebook's own dates would otherwise age a record
-    /// backwards; nothing is younger than new.
-    #[test]
-    fn a_record_created_after_today_is_no_age_at_all() {
-        let rows = [row("task.demo", None, "2026-08-30", "A demo record")];
-        let today_day = date::day_number("2026-08-28").unwrap();
-        assert_eq!(
-            ReadyTask::table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,taken-by,title}:\n  task.demo,-,0d,-,A demo record\n"
-        );
-    }
-
-    /// A terminal obeys the escape sequences in a title, so a row must not
-    /// carry one: `\r` alone reprints the line as another record's row.
-    #[test]
-    fn a_control_character_in_a_title_is_escaped_into_its_own_cell() {
-        let rows = [row(
-            "task.demo",
-            None,
-            "2026-08-28",
-            "Harmless\u{1b}[2K\rShipped",
-        )];
-        let today_day = date::day_number("2026-08-28").unwrap();
-        assert_eq!(
-            ReadyTask::table(&rows, 1, today_day),
-            "ready[1]{id,priority,age,taken-by,title}:\n  task.demo,-,0d,-,\"Harmless\\u001b[2K\\rShipped\"\n"
-        );
-    }
 }

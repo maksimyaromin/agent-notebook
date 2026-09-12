@@ -1,10 +1,8 @@
 mod listing {
     use crate::*;
 
-    /// A listing row is derived, and a title is a record's own text: the
-    /// row carries as much of it as a reply affords, whatever a hand wrote.
     #[test]
-    fn a_long_title_is_cut_in_a_listing_row_and_in_the_ready_queue() {
+    fn listing_and_ready_preserve_full_titles_for_the_host_to_render() {
         let wall_of_words = "word ".repeat(400);
         let mut storage = storage_with(&[(
             "tasks/task.demo.md",
@@ -28,11 +26,7 @@ mod listing {
             .unwrap()
             .title;
         for title in [listed, queued] {
-            assert!(
-                title.chars().count() <= anb_core::encode::TEXT_BOUND,
-                "unbounded title: {title}"
-            );
-            assert!(title.contains("more characters"), "no hint: {title}");
+            assert_eq!(title, wall_of_words.trim_end());
         }
     }
 
@@ -1277,25 +1271,22 @@ mod task_map {
         assert_eq!(graph.degrees().get("note.self"), Some(&0));
     }
 
-    /// A record's scope reaches what links it, as far as the links go:
-    /// the schema's documents, and what declares itself part of one of
-    /// them. The focus walks the same edge.
     #[test]
-    fn a_scope_and_a_focus_reach_the_records_that_link_the_record() {
+    fn membership_follows_origins_while_focus_also_follows_contextual_links() {
         let mut storage = a_schema_and_its_documents();
         assert_eq!(
             map_of(&mut storage, &inside("note.schema")),
+            vec!["note.schema"]
+        );
+        assert_eq!(
+            map_of(&mut storage, &around("note.schema", 1)),
             vec![
                 "note.credits",
-                "note.glossary",
+                "note.prose",
                 "note.sample",
                 "note.schema",
                 "note.tenancy"
             ]
-        );
-        assert_eq!(
-            map_of(&mut storage, &around("note.schema", 1)),
-            vec!["note.credits", "note.sample", "note.schema", "note.tenancy"]
         );
         let listed: Vec<String> = Notebook::new(&mut storage)
             .list(&within("note.credits"))
@@ -1303,7 +1294,7 @@ mod task_map {
             .into_iter()
             .map(|row| row.id)
             .collect();
-        assert_eq!(listed, vec!["note.credits", "note.glossary"]);
+        assert_eq!(listed, vec!["note.credits"]);
     }
 
     /// A web reads by weight, and weight is how much of the slice meets at
@@ -1345,14 +1336,16 @@ mod task_map {
         );
     }
 
-    /// A focus asks what has to settle before a Task and what its settling
-    /// releases. Another Task hanging off the same blocker answers neither.
     #[test]
-    fn a_focus_walks_the_line_of_work_and_not_across_it() {
+    fn a_focus_reaches_a_shared_blockers_other_task_at_two_edges() {
         let mut storage = a_chain();
-        assert!(
-            !map_of(&mut storage, &around("task.b", 2)).contains(&"task.sibling".to_owned()),
-            "a Task waiting on the same blocker is beside this line of work, not on it"
+        assert_eq!(
+            map_of(&mut storage, &around("task.b", 1)),
+            ["task.a", "task.b", "task.c"]
+        );
+        assert_eq!(
+            map_of(&mut storage, &around("task.b", 2)),
+            ["task.a", "task.b", "task.c", "task.d", "task.sibling"]
         );
     }
 

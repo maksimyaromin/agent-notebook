@@ -9,7 +9,12 @@ rust-version.workspace = true
 anb-core.workspace = true
 clap.workspace = true
 jiff.workspace = true
+getrandom.workspace = true
+sha2.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+reddb-io-toon = "=0.29.8"
+shlex = "2.0.1"
 
 [dev-dependencies]
 insta.workspace = true

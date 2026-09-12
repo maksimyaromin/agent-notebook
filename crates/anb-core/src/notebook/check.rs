@@ -2,7 +2,7 @@
 //! it finds, where, and what erases it — the cross-record rules no single
 //! record can carry, beside each record's own findings.
 
-use super::{Notebook, NotebookError, user_scope};
+use super::{Notebook, NotebookError};
 use crate::config::{CONFIG_PATH, Config};
 use crate::encode;
 use crate::finding::{Finding, FindingCode, Severity};
@@ -29,8 +29,6 @@ impl Notebook<'_> {
         let corpus = self.whole_corpus()?;
         let records = &corpus.records;
         let resolvable = corpus.resolver();
-        let user_corpus = user_scope(self.user);
-        let behind = user_corpus.resolver();
         // Live before archived, so a finding on a name two files claim
         // points at the one a reader can still edit.
         let mut by_stem: BTreeMap<&str, &Record> = BTreeMap::new();
@@ -43,7 +41,7 @@ impl Notebook<'_> {
             for finding in record.findings() {
                 located.push(FileFinding::on(record.path(), finding.clone()));
             }
-            check_refs(record, &resolvable, &behind, &mut located);
+            check_refs(record, &resolvable, &mut located);
             check_supersession_pair(record, &by_stem, &mut located);
         }
         check_duplicate_ids(records, &mut located);
@@ -122,6 +120,11 @@ fn repair_of(finding: &Finding, record: &Record) -> Option<Repair> {
 fn eraser_of(record: &Record, line: usize) -> Option<Repair> {
     let file = record.file();
     let sits_on = |key: &str| file.field_entries(key).any(|(_, at)| at == Some(line));
+    if let Some((link, _)) = file.field_entries("link").find(|(_, at)| *at == Some(line))
+        && grammar::split_link(link).is_some_and(|(kind, target)| grammar::is_link(kind, target))
+    {
+        return Some(Repair::Unlink(link.to_owned()));
+    }
     // `unblock` and `unhold` refuse a record that is not a Task, so a line
     // a record should not carry at all is not theirs to erase.
     if record.record_type() == Some(RecordType::Task) {
@@ -158,22 +161,11 @@ fn finding_order(located: &FileFinding) -> (u8, &str, usize, &'static str) {
     )
 }
 
-/// The envelope edges are this notebook's own structure — an origin the
-/// clocks key on, a supersession the tool writes both halves of, a block the
-/// queue follows — so each must be answered here. A `link` points outward by
-/// nature, at a pull request, a commit, a path or a record, so a record the
-/// user's notebook holds is within its reach.
-fn check_refs(
-    record: &Record,
-    resolvable: &Resolver<'_>,
-    behind: &Resolver<'_>,
-    out: &mut Vec<FileFinding>,
-) {
-    let mut dangling = |key, target: &str, line, reaches_the_user: bool| {
-        if grammar::id_error(target).is_some()
-            || resolvable.resolves(target)
-            || (reaches_the_user && behind.resolves(target))
-        {
+/// Record references resolve within their notebook, including its archive.
+/// Validation must not change when a colleague has different personal files.
+fn check_refs(record: &Record, resolvable: &Resolver<'_>, out: &mut Vec<FileFinding>) {
+    let mut dangling = |key, target: &str, line| {
+        if grammar::id_error(target).is_some() || resolvable.resolves(target) {
             return;
         }
         out.push(FileFinding::on(
@@ -183,14 +175,12 @@ fn check_refs(
     };
     for key in REF_KEYS {
         for (target, line) in record.file().field_entries(key) {
-            dangling(key, target, line, false);
+            dangling(key, target, line);
         }
     }
-    // A proof carried as a Note is a reference like any other: the whole
-    // point of ingesting the report was that a reader could reach it.
     for (link, line) in record.file().field_entries("link") {
         if let Some(target) = linked_record(link) {
-            dangling("link", target, line, true);
+            dangling("link", target, line);
         }
     }
 }

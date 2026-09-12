@@ -18,8 +18,8 @@ pub struct Filter {
     pub kinds: Vec<String>,
     /// Only records carrying every one of these tags.
     pub tags: Vec<String>,
-    /// One record's scope: the hub, what it waits on, what was born
-    /// inside it, and what links it.
+    /// One subject and its transitive origin descendants. Prerequisites
+    /// and contextual links do not imply membership.
     pub hub: Option<String>,
     /// One identity's work: the Tasks it holds, the other records it
     /// wrote, and the records waiting on it.
@@ -113,30 +113,6 @@ impl Link {
     /// reads it, never byte for byte.
     pub(crate) fn matches(&self, line: &str) -> bool {
         crate::grammar::split_link(line) == Some((self.kind.as_str(), self.target.trim()))
-    }
-}
-
-/// The auditable evidence a close carries. `Waived` is the explicit
-/// override: the caller states there is no proof rather than omitting it.
-#[derive(Debug)]
-pub enum Proof {
-    Pr(String),
-    Sha(String),
-    Report(String),
-    /// A Note holding the report, so the proof travels with the notebook.
-    Note(String),
-    Waived,
-}
-
-impl Proof {
-    pub(crate) fn link_value(&self) -> Option<String> {
-        match self {
-            Proof::Pr(target) => Some(format!("pr {target}")),
-            Proof::Sha(target) => Some(format!("sha {target}")),
-            Proof::Report(target) => Some(format!("report {target}")),
-            Proof::Note(target) => Some(format!("note {target}")),
-            Proof::Waived => None,
-        }
     }
 }
 

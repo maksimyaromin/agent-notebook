@@ -21,11 +21,13 @@ fn anb(root: &Path, line: &[&str]) -> std::process::Output {
 /// in the case's own directory.
 fn spawn(root: &Path, line: &[&str]) -> Child {
     Command::new(env!("CARGO_BIN_EXE_anb"))
-        .args(["--notebook", root.to_str().unwrap()])
+        .args(["--notebook", root.to_str().unwrap(), "--json"])
         .args(line)
         .current_dir(root.parent().unwrap_or(root))
         .env("HOME", root)
         .env_remove("ANB_NOTEBOOK")
+        .env_remove("ANB_SESSION")
+        .env_remove("CODEX_THREAD_ID")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -46,7 +48,10 @@ fn ended(writer: Child) -> String {
 /// processes at once.
 fn notebook_with_a_task(dir: &TempDir) -> std::path::PathBuf {
     let root = dir.path().join("nb");
-    let added = anb(&root, &["add", "task", "Contended"]);
+    let added = anb(
+        &root,
+        &["add", "task", "Contended", "--id", "task.contended"],
+    );
     assert!(added.status.success(), "the fixture's Task is created");
     root
 }
@@ -89,8 +94,8 @@ fn twenty_concurrent_adds_each_mint_their_own_record() {
         .into_iter()
         .map(|writer| {
             let reply = ended(writer);
-            // `ok: add <id> — <path>`
-            reply.split_whitespace().nth(2).unwrap().to_owned()
+            let value: serde_json::Value = serde_json::from_str(&reply).unwrap();
+            value["id"].as_str().unwrap().to_owned()
         })
         .collect();
 
@@ -134,8 +139,7 @@ fn a_writer_waits_for_a_reader_and_a_reader_does_not() {
     );
 }
 
-/// A settling verb moves several files in turn, so a reader let in
-/// mid-move would report the half-finished state as corruption.
+/// A reader cannot inspect a writer's intermediate state.
 #[test]
 fn a_reader_waits_for_a_writer() {
     let dir = TempDir::new().unwrap();
@@ -198,7 +202,7 @@ fn the_lock_is_taken_by_every_writing_verb_and_by_no_reading_one() {
         &["add", "task", "Fresh"][..],
         &["start", "task.absent"],
         &["submit", "task.absent"],
-        &["close", "task.absent", "--no-proof"],
+        &["close", "task.absent", "--body", "Completed and checked."],
         &["reopen", "task.absent"],
         &["hold", "task.absent", "--reason", "waiting"],
         &["unhold", "task.absent"],
@@ -214,6 +218,8 @@ fn the_lock_is_taken_by_every_writing_verb_and_by_no_reading_one() {
         &["restore", "task.absent"],
         &["delete", "task.absent"],
         &["edit", "task.absent", "--title", "New"],
+        &["import", "absent.json"],
+        &["migrate"],
     ];
     let reads = [
         &["ready"][..],
@@ -225,6 +231,10 @@ fn the_lock_is_taken_by_every_writing_verb_and_by_no_reading_one() {
         &["graph"],
         &["setup"],
         &["skill"],
+        &["recall"],
+        &["hook"],
+        &["import", "absent.json", "--check"],
+        &["migrate", "--check"],
     ];
     every_verb_is_classified(&writes, &reads);
 
@@ -271,11 +281,12 @@ fn the_lock_is_no_record_of_the_notebook() {
     );
 
     let checked = anb(&root, &["check"]);
+    let value: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
     assert_eq!(
-        String::from_utf8_lossy(&checked.stdout).trim(),
-        "count: 0",
+        value["count"], 0,
         "neither leaving is a file the notebook verifies"
     );
+    assert_eq!(value["findings"], serde_json::json!([]));
 }
 
 mod the_notebooks_own_ignore_file {

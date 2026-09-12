@@ -3,9 +3,9 @@
 //!
 //! Write-time invariants live here, and they bind every author equally: a
 //! declared supersession writes the back-pointer and flips the victim, a
-//! Question closes into what resolved it or with a stated reason, a close
-//! carries its proof. A verb that moves a record already in the notebook is
-//! idempotent — a replayed call answers `already: true` and leaves every
+//! Question closes into what resolved it or with a stated reason, and a
+//! completed Task records its outcome. A verb that moves a record already
+//! in the notebook is idempotent: a replayed call answers `already: true` and leaves every
 //! byte of every file unchanged. Creating and expunging are not replays of
 //! anything: a second `add` of the same title mints a second record, and a
 //! second `delete` names an id the notebook no longer holds.
@@ -28,10 +28,13 @@
 mod check;
 mod error;
 mod gate;
+mod memory;
 mod query;
+mod transfer;
 mod write;
 
 pub use error::NotebookError;
+pub use memory::recall;
 
 use crate::config::{CONFIG_PATH, Config};
 use crate::debt::{self, DebtSignal, DebtSources};
@@ -42,13 +45,13 @@ use crate::graph;
 use crate::mention;
 use crate::record::{
     REF_KEYS, Record, RecordType, TaskAction, TaskState, Transition, dangling_finding,
-    not_utf8_finding,
+    linked_record, not_utf8_finding,
 };
 use crate::reply::{
     Archived, CitedProof, Closed, Commented, Created, Deleted, Edged, Edited, Graph, Held,
     ListedRecord, ReadyTask, Restored, Transitioned, View,
 };
-use crate::request::{Draft, Edit, Filter, Focus, GraphSlice, Link, Proof};
+use crate::request::{Draft, Edit, Filter, Focus, GraphSlice, Link};
 use crate::resolve::{
     Resolver, archive_of, archived_among, canonical_paths, is_archived, is_record_file, path_stem,
     record_path, resolvable_id,
@@ -58,21 +61,8 @@ use crate::storage::{Storage, StorageError};
 use gate::LoadedLive;
 use std::collections::BTreeSet;
 
-/// A report landed in the notebook, and what its body cited.
-struct IngestedReport {
-    id: String,
-    dangling_mentions: Vec<String>,
-}
-
 pub struct Notebook<'a> {
     storage: &'a mut dyn Storage,
-    /// The user's notebook standing behind this one, read and never
-    /// written — the shared reference keeps that a fact of the type. An id
-    /// it holds is no dangling citation and no dangling `link` target, and
-    /// its standing rules are what a project rule shadows. `None` names no
-    /// such root; a root that cannot be read counts as one, since a second
-    /// notebook is consulted for a hint and never fails a write or the gate.
-    user: Option<&'a dyn Storage>,
     /// The accountable identity this notebook is worked under: what a new
     /// record's `by` and a log entry's signature carry unless a request
     /// names another, who `start` records as having taken the Task, and
@@ -85,21 +75,26 @@ impl<'a> Notebook<'a> {
     pub fn new(storage: &'a mut dyn Storage) -> Self {
         Notebook {
             storage,
-            user: None,
             identity: None,
         }
-    }
-
-    /// The same notebook with the user's own standing behind it.
-    #[must_use]
-    pub fn with_user(self, user: Option<&'a dyn Storage>) -> Self {
-        Notebook { user, ..self }
     }
 
     /// The same notebook worked under `identity`.
     #[must_use]
     pub fn with_identity(self, identity: Option<&'a str>) -> Self {
         Notebook { identity, ..self }
+    }
+
+    /// Read maintained knowledge with the same selection rules as [`recall`].
+    ///
+    /// # Errors
+    /// A storage failure, or an unknown focus record.
+    pub fn recall(
+        &self,
+        text: Option<&str>,
+        focus: Option<&str>,
+    ) -> Result<crate::Knowledge, NotebookError> {
+        recall(self.storage, text, focus)
     }
 
     /// The identity as a record may carry it: one non-empty line. A host
@@ -220,15 +215,10 @@ impl<'a> Notebook<'a> {
     /// Read the archived records `wanted` names, and those they name in
     /// turn, beside the `kin` already read.
     ///
-    /// The walk leaves the live notebook along declared edges, so it costs
-    /// the history still connected to today rather than the archive's size
-    /// — how much that is, is how much of the archive the live records
-    /// still point at. And it follows edges the way they are written: an
-    /// archived record that only *carries* an Origin into the walk, one
-    /// born inside a member and named by nothing live, is never reached,
-    /// and a live record waiting on it alone falls outside the scope.
-    /// Finding it would mean opening the archive to read Origins backwards,
-    /// which is the cost this avoids.
+    /// Follow declared references into archived history without opening
+    /// unrelated archived files. Live origin descendants remain connected
+    /// through an archived ancestor. Archived descendants unnamed by any
+    /// live record join only an explicit archive query.
     fn kin_closure(
         &self,
         archived: &Resolver<'_>,
@@ -243,28 +233,13 @@ impl<'a> Notebook<'a> {
             if !seen.insert(id.clone()) {
                 continue;
             }
-            let Some(record) = self.archived_record(&id)? else {
+            let Some(record) = read_archived_record(self.storage, &id)? else {
                 continue;
             };
             wanted.extend(archived_among(query::kin_of(&record), archived));
             kin.push(record);
         }
         Ok(kin)
-    }
-
-    /// One archived record by id; `None` when the archive holds no such
-    /// file, or the id names no type at all.
-    fn archived_record(&self, id: &str) -> Result<Option<Record>, NotebookError> {
-        let Ok(record_type) = write::parsed_type(id) else {
-            return Ok(None);
-        };
-        let path = record_path(id, record_type, true);
-        match self.storage.read(&path) {
-            Ok(text) => Ok(Some(Record::parse(&path, &text))),
-            Err(StorageError::NotUtf8 { .. }) => Ok(Some(Record::unreadable(&path))),
-            Err(StorageError::NotFound { .. }) => Ok(None),
-            Err(error) => Err(error.into()),
-        }
     }
 
     /// The session-start dashboard under `budget`, gated: one quiet line
@@ -302,7 +277,6 @@ impl<'a> Notebook<'a> {
             .collect();
         let identity = self.identity;
         let inputs = StatusInputs {
-            identity: identity.map(str::to_owned),
             by: by.map(str::to_owned),
             counts: query::live_counts(records),
             active: query::active_tasks(&scoped, identity),
@@ -312,7 +286,6 @@ impl<'a> Notebook<'a> {
             untaken: query::ready_rows(records, &resolvable, query::is_untaken).len(),
             questions: query::open_questions(&scoped, identity),
             debt: debt.len(),
-            today_day,
         };
         Ok(status::assemble(inputs, budget))
     }
@@ -332,8 +305,7 @@ impl<'a> Notebook<'a> {
         self.decay(&self.live_corpus()?, today_day, settle)
     }
 
-    /// Every sign of decay over the live records, the user's notebook
-    /// standing behind them.
+    /// Every sign of decay over this notebook's live records.
     fn decay(
         &self,
         corpus: &Corpus,
@@ -344,14 +316,11 @@ impl<'a> Notebook<'a> {
         let records = &corpus.records;
         let resolvable = corpus.resolver();
         let lost = settle(&query::cited_proofs(records));
-        let behind = user_scope(self.user);
         let sources = DebtSources {
             records,
             resolvable: &resolvable,
             today_day,
             lost_proofs: &lost,
-            user_records: &behind.records,
-            user_archived: &behind.archived,
         };
         Ok(debt::signals(&sources, &thresholds))
     }
@@ -541,10 +510,8 @@ impl<'a> Notebook<'a> {
     /// and signing it with the notebook's identity unless the draft names
     /// its own. A draft declaring `supersedes` performs the whole supersession: the
     /// new record is written first, then the victim gains the back-pointer
-    /// and flips to its superseded state — a rule recorded as replaced can
-    /// never be read as live. A Decision declaring none is answered with
-    /// the standing Decisions it may conflict with — a nudge in the reply,
-    /// never a block.
+    /// and flips to its superseded state. Links and tags do not imply a
+    /// conflict between records.
     ///
     /// # Errors
     /// [`NotebookError::InvalidArgument`] on a malformed draft,
@@ -553,18 +520,6 @@ impl<'a> Notebook<'a> {
     /// by supersession, [`NotebookError::DuplicateId`] on a taken id, or a
     /// storage failure.
     pub fn create(&mut self, draft: &Draft, today: &str) -> Result<Created, NotebookError> {
-        self.create_minting(draft, today, || write::title_id(draft))
-    }
-
-    /// [`Notebook::create`] with the id minted on the base `minted` names
-    /// when the draft carries none: a Note born as a Task's report is named
-    /// after the Task, every other record after its title.
-    fn create_minting(
-        &mut self,
-        draft: &Draft,
-        today: &str,
-        minted: impl FnOnce() -> Result<String, NotebookError>,
-    ) -> Result<Created, NotebookError> {
         write::guard_today(today)?;
         write::validate_draft(draft)?;
         let by = write::guarded_name("by", draft.by.as_deref().or(self.identity))?;
@@ -579,8 +534,7 @@ impl<'a> Notebook<'a> {
         let corpus = self.live_corpus()?;
         let records = &corpus.records;
         let claims = write::id_claims(records, &corpus.archived);
-        let id = write::resolve_draft_id(draft, &claims, minted)?;
-        let may_conflict = query::conflict_candidates(draft, records, &corpus.resolver());
+        let id = write::resolve_draft_id(draft, &claims, || write::title_id(draft))?;
         let path = record_path(&id, draft.record_type, false);
         self.storage
             .write(&path, &write::render_draft(draft, &id, by, today))?;
@@ -595,7 +549,6 @@ impl<'a> Notebook<'a> {
             id,
             path,
             superseded: draft.supersedes.clone(),
-            may_conflict,
             dangling_mentions,
         })
     }
@@ -622,15 +575,18 @@ impl<'a> Notebook<'a> {
     /// deliberately with `edit --taken-by` — and so is a replay against
     /// it, since answering `already` would tell a second person the work
     /// is theirs. A host that knows nobody takes nothing and is refused
-    /// any held Task the same way.
+    /// any held Task the same way. Unfinished dependencies do not prevent
+    /// accepting responsibility; they gate readiness and completion.
     ///
     /// # Errors
-    /// [`NotebookError::Taken`] naming who took it, plus the refusals of
-    /// [`Notebook::close`]; `start` carries no proof.
+    /// [`NotebookError::Taken`] naming who took it,
+    /// [`NotebookError::InvalidTransition`], or the resolution errors of
+    /// [`Notebook::close`].
     pub fn start(&mut self, id: &str, today: &str) -> Result<Transitioned, NotebookError> {
         write::guard_today(today)?;
         let identity = self.guarded_identity()?;
         let loaded = self.load_live(id, &[RecordType::Task])?;
+        let resuming_review = loaded.task_state() == TaskState::Review;
         let transition = decided(&loaded, TaskAction::Start)?;
         if let Some(taken_by) = loaded.record.taken_by()
             && Some(taken_by) != identity
@@ -644,7 +600,39 @@ impl<'a> Notebook<'a> {
             if let Some(me) = identity {
                 file.set_field("taken-by", me);
             }
+            if resuming_review {
+                file.remove_field("to");
+            }
         })
+    }
+
+    /// Start the next eligible Task, preferring this identity's work over
+    /// unclaimed work. Readiness uses the complete dependency graph before
+    /// applying `filter`. `excluded` names Tasks reserved by the host.
+    ///
+    /// # Errors
+    /// The refusals of [`Notebook::ready`] and [`Notebook::start`]. An
+    /// empty eligible queue returns `None` without writing a record.
+    pub fn start_next(
+        &mut self,
+        filter: &Filter,
+        excluded: &BTreeSet<String>,
+        today: &str,
+    ) -> Result<Option<Transitioned>, NotebookError> {
+        let identity = self.guarded_identity()?;
+        let ready = self.ready(filter)?;
+        let eligible = |task: &&ReadyTask| !excluded.contains(&task.id);
+        let own = ready
+            .iter()
+            .filter(eligible)
+            .find(|task| identity.is_some() && task.attribution.taken_by.as_deref() == identity);
+        let next = own.or_else(|| {
+            ready
+                .iter()
+                .filter(eligible)
+                .find(|task| task.attribution.taken_by.is_none())
+        });
+        next.map(|task| self.start(&task.id, today)).transpose()
     }
 
     /// `active → review`: hand the work to a human for acceptance, `to`
@@ -653,7 +641,7 @@ impl<'a> Notebook<'a> {
     ///
     /// # Errors
     /// [`NotebookError::InvalidArgument`] on an empty or multi-line name,
-    /// plus the refusals of [`Notebook::close`]; `submit` carries no proof.
+    /// plus the refusals of [`Notebook::close`].
     pub fn submit(
         &mut self,
         id: &str,
@@ -670,33 +658,57 @@ impl<'a> Notebook<'a> {
         })
     }
 
-    /// `active | review → closed`, stamping the close date and the proof
-    /// link. Replies name the still-open Questions born from this Task, so
-    /// a close never buries deferred findings.
+    /// Close a completed Task and append its outcome in one record write.
+    /// Repeating the close leaves the original outcome unchanged; use
+    /// [`Notebook::comment`] to add a correction. Replies name remaining
+    /// Questions and newly unblocked Tasks. Successful completion requires
+    /// every dependency to be closed; cancellation does not.
     ///
     /// # Errors
-    /// [`NotebookError::InvalidArgument`] on a malformed proof,
-    /// [`NotebookError::InvalidTransition`] naming the valid commands,
-    /// [`NotebookError::WrongType`], [`NotebookError::UnknownId`],
+    /// [`NotebookError::InvalidArgument`] on an empty outcome or malformed
+    /// signature, [`NotebookError::UnfinishedDependencies`] naming unfinished
+    /// prerequisites, [`NotebookError::InvalidTransition`] naming the valid
+    /// commands, [`NotebookError::WrongType`], [`NotebookError::UnknownId`],
     /// [`NotebookError::Archived`], [`NotebookError::InvalidRecord`], or a
     /// storage failure.
-    pub fn close(&mut self, id: &str, proof: &Proof, today: &str) -> Result<Closed, NotebookError> {
-        write::guard_proof(proof)?;
-        let transition = self.task_transition(id, TaskAction::Close, today, |file| {
-            file.set_field("closed", today);
-            if let Some(link) = proof.link_value() {
-                file.append_field("link", &link);
+    pub fn close(
+        &mut self,
+        id: &str,
+        via: Option<&str>,
+        outcome: &str,
+        today: &str,
+    ) -> Result<Closed, NotebookError> {
+        let entry = self.authored_entry("close", via, outcome, today)?;
+        let dangling_mentions = self.dangling_mentions(outcome)?;
+        write::guard_today(today)?;
+        let loaded = self.load_live(id, &[RecordType::Task])?;
+        let transition = decided(&loaded, TaskAction::Close)?;
+        if matches!(transition, Transition::Move { .. }) {
+            let blockers = query::unfinished_dependencies(&self.live_corpus()?.records, id);
+            if !blockers.is_empty() {
+                return Err(NotebookError::UnfinishedDependencies {
+                    id: id.to_owned(),
+                    blockers,
+                });
             }
+        }
+        let transition = self.transitioned(loaded, transition, today, |file| {
+            file.set_field("closed", today);
+            file.append_body(&entry);
         })?;
-        self.closed(id, transition, Vec::new(), None)
+        let dangling_mentions = if transition.already {
+            Vec::new()
+        } else {
+            dangling_mentions
+        };
+        self.closed(id, transition, dangling_mentions, None)
     }
 
-    /// `open | active | review → closed` without work or without a record:
-    /// the Task or Question ends stating why. The reason lands in the
-    /// envelope as `reason` and the close date is stamped, but no proof link
-    /// is written — a proof would vouch for work that did not happen. The
-    /// state is the same `closed`, so dependents unblock and an epic counts
-    /// it like any close; the envelope carries the distinction.
+    /// End a Task or Question with a reason, including an unstarted Task.
+    /// The reason lands in the envelope as `reason` with the close date.
+    /// The record reaches `closed`, so dependents unblock and an epic
+    /// counts it like any close. Unfinished dependencies do not prevent
+    /// cancellation and are not changed by it.
     ///
     /// # Errors
     /// [`NotebookError::InvalidArgument`] on an empty or multi-line reason,
@@ -743,110 +755,20 @@ impl<'a> Notebook<'a> {
             transition,
             open_questions: query::open_questions_from(records, &resolvable, id),
             unblocked: query::unblocked_by_close(records, &resolvable, id),
-            report_note: None,
             resolved_by,
             dangling_mentions,
         })
     }
 
-    /// Close carrying `report` as its proof: the text becomes a Note born
-    /// from the Task and signed with the notebook's identity, and the close
-    /// links that Note. One motion, and the proof travels with the notebook
-    /// instead of pointing out of it.
-    ///
-    /// The Note is minted only when the close is a real move, so a replay
-    /// creates nothing; the one Note this call will ever reuse is the one
-    /// its own interrupted run left behind, recognised by the link the
-    /// Task already carries.
+    /// `closed → open`, dropping the close date and previous review recipient.
+    /// Existing links and outcomes remain as history.
     ///
     /// # Errors
-    /// [`NotebookError::InvalidArgument`] on an empty report — a proof with
-    /// nothing in it is not a proof — plus the refusals of
-    /// [`Notebook::close`] and the draft refusals of [`Notebook::create`].
-    pub fn close_with_report(
-        &mut self,
-        id: &str,
-        report: &str,
-        today: &str,
-    ) -> Result<Closed, NotebookError> {
-        if report.trim().is_empty() {
-            return Err(NotebookError::InvalidArgument {
-                reason: "note: the report is empty; a close carries a proof or waives one"
-                    .to_owned(),
-            });
-        }
-        let task = self.load_live(id, &[RecordType::Task])?;
-        let moves = TaskState::from_word(task.state_word()).is_some_and(|state| {
-            matches!(
-                state.transition(TaskAction::Close),
-                Ok(Transition::Move { .. })
-            )
-        });
-        if !moves {
-            // Nothing will be written, so nothing may be minted. `close`
-            // owns the transition rules: it answers a replay with `already`
-            // and anything else with its refusal, and the waiver claims
-            // nothing because no proof is ever reached.
-            return self.close(id, &Proof::Waived, today);
-        }
-        let title = write::report_note_title(task.record.file().field("title").unwrap_or(id));
-        let note = self.ingest_report(id, &title, report, today)?;
-        let mut closed = self.close(id, &Proof::Note(note.id.clone()), today)?;
-        closed.report_note = Some(note.id);
-        closed.dangling_mentions = note.dangling_mentions;
-        Ok(closed)
-    }
-
-    /// The Note holding `report`, recovered if this call already wrote it,
-    /// created otherwise.
-    fn ingest_report(
-        &mut self,
-        origin: &str,
-        title: &str,
-        report: &str,
-        today: &str,
-    ) -> Result<IngestedReport, NotebookError> {
-        if let Some(id) = self.standing_report(origin, report)? {
-            return Ok(IngestedReport {
-                id,
-                dangling_mentions: Vec::new(),
-            });
-        }
-        let mut draft = Draft::new(RecordType::Note, title);
-        draft.from = Some(origin.to_owned());
-        report.clone_into(&mut draft.body);
-        let created = self.create_minting(&draft, today, || Ok(write::report_note_id(origin)))?;
-        Ok(IngestedReport {
-            id: created.id,
-            dangling_mentions: created.dangling_mentions,
-        })
-    }
-
-    /// The Note an interrupted [`Notebook::close_with_report`] left behind,
-    /// if this is that call resuming.
-    ///
-    /// Only one shape can be that Note: live, born from this Task, and
-    /// holding this very report. Each condition rules out a record that
-    /// merely resembles it — an archived one is history a new close must
-    /// not revive, and a differing body is an earlier report that a reopened
-    /// Task is now replacing, which is why the id is never recomputed to
-    /// find it.
-    fn standing_report(&self, origin: &str, report: &str) -> Result<Option<String>, NotebookError> {
-        let wanted = write::edited_body(report);
-        Ok(read_records_in(self.storage, RecordType::Note.directory())?
-            .into_iter()
-            .find(|note| note.origin() == Some(origin) && note.file().body() == wanted)
-            .map(|note| path_stem(note.path()).to_owned()))
-    }
-
-    /// `closed → open`, dropping the close date; the proof links stay as
-    /// history.
-    ///
-    /// # Errors
-    /// See [`Notebook::close`]; `reopen` carries no proof.
+    /// See [`Notebook::close`].
     pub fn reopen(&mut self, id: &str, today: &str) -> Result<Transitioned, NotebookError> {
         self.task_transition(id, TaskAction::Reopen, today, |file| {
             file.remove_field("closed");
+            file.remove_field("to");
         })
     }
 
@@ -927,17 +849,14 @@ impl<'a> Notebook<'a> {
         })
     }
 
-    /// Append one dated log entry to a Task's body — the append-only
-    /// progress trail, in the log convention `- <date> <author>: <text>`,
-    /// the author being the notebook's identity and `via`, the acting hand,
-    /// in the `by/via` form a cited record is attributed in. The Task's
-    /// state does not gate the verb: the trail may narrate a close as well
-    /// as the work. Replaying the trail's tail answers `already: true` and
-    /// changes no byte.
+    /// Append a dated entry to any live record, signed by the notebook's
+    /// identity and optional agent tool. Continuation lines are indented
+    /// under the entry so quoted log lines cannot forge another author.
+    /// Repeating the final entry with the same date and signature changes
+    /// no bytes. Settled records accept comments until they are archived.
     ///
     /// # Errors
-    /// [`NotebookError::InvalidArgument`] on an empty or multi-line entry or
-    /// a multi-line signature, [`NotebookError::WrongType`],
+    /// [`NotebookError::InvalidArgument`] on an empty entry or invalid signature,
     /// [`NotebookError::UnknownId`], [`NotebookError::Archived`],
     /// [`NotebookError::InvalidRecord`], or a storage failure.
     pub fn comment(
@@ -948,22 +867,13 @@ impl<'a> Notebook<'a> {
         today: &str,
     ) -> Result<Commented, NotebookError> {
         write::guard_today(today)?;
-        let text = text.trim();
-        write::guard_single_line("comment", text)?;
-        if text.is_empty() {
-            return Err(NotebookError::InvalidArgument {
-                reason: "comment: the text must not be empty".to_owned(),
-            });
-        }
-        let by = self.guarded_identity()?;
-        let via = write::guarded_name("via", via)?;
-
-        let entry = write::log_entry(today, by, via, text);
-        let loaded = self.load_live(id, &[RecordType::Task])?;
+        let entry = self.authored_entry("comment", via, text, today)?;
+        let loaded = self.load_live(id, &RecordType::ALL)?;
         // A replay carries the nudge too: the entry is the trail's tail, so
         // its citations stand in the body either way.
         let dangling_mentions = self.dangling_mentions(text)?;
-        if query::last_log_line(&loaded.record).as_deref() == Some(entry.as_str()) {
+        let body = loaded.record.file().body().trim_end();
+        if body == entry || body.ends_with(&format!("\n{entry}")) {
             return Ok(Commented {
                 id: id.to_owned(),
                 already: true,
@@ -979,6 +889,24 @@ impl<'a> Notebook<'a> {
             already: false,
             dangling_mentions,
         })
+    }
+
+    fn authored_entry(
+        &self,
+        verb: &str,
+        via: Option<&str>,
+        text: &str,
+        today: &str,
+    ) -> Result<String, NotebookError> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(NotebookError::InvalidArgument {
+                reason: format!("{verb}: the text must not be empty"),
+            });
+        }
+        let by = self.guarded_identity()?;
+        let via = write::guarded_name("via", via)?;
+        Ok(write::log_entry(today, by, via, text))
     }
 
     /// Write a dependency edge: this Task waits on `on`. An edge that would
@@ -1123,6 +1051,31 @@ impl<'a> Notebook<'a> {
     /// [`NotebookError::InvalidTransition`] from a settled state, plus the
     /// resolution errors of [`Notebook::close`].
     pub fn retire(&mut self, id: &str, today: &str) -> Result<Transitioned, NotebookError> {
+        self.retire_record(id, None, today)
+    }
+
+    /// Append an attributed outcome and retire a Decision or Note in one
+    /// record write. A repeated retirement leaves the outcome unchanged.
+    ///
+    /// # Errors
+    /// The refusals of [`Notebook::comment`] and [`Notebook::retire`].
+    pub fn retire_with_outcome(
+        &mut self,
+        id: &str,
+        via: Option<&str>,
+        outcome: &str,
+        today: &str,
+    ) -> Result<Transitioned, NotebookError> {
+        let entry = self.authored_entry("retire", via, outcome, today)?;
+        self.retire_record(id, Some(&entry), today)
+    }
+
+    fn retire_record(
+        &mut self,
+        id: &str,
+        entry: Option<&str>,
+        today: &str,
+    ) -> Result<Transitioned, NotebookError> {
         write::guard_today(today)?;
         let loaded = self.load_live(id, &[RecordType::Decision, RecordType::Note])?;
         let state = loaded.state_word();
@@ -1138,6 +1091,9 @@ impl<'a> Notebook<'a> {
         }
         let mut file = loaded.record.into_file();
         file.set_field("state", "retired");
+        if let Some(entry) = entry {
+            file.append_body(entry);
+        }
         file.set_field("updated", today);
         self.storage.write(&loaded.path, &file.render())?;
         Ok(Transitioned {
@@ -1148,40 +1104,26 @@ impl<'a> Notebook<'a> {
         })
     }
 
-    /// Move a settled record into the archive, and carry its reports with
-    /// it: same filename, same bytes, so `git log --follow` keeps its
-    /// history and the round-trip contract holds. Each archive copy lands
-    /// before its live file goes — a failure between the two leaves a loud
-    /// `duplicate-id`, never a lost record.
-    ///
-    /// The reports are the record's own history, so filing one without the
-    /// other is a split no reader can act on; carried along, the live
-    /// notebook stays the size of the work still open. Everything else a
-    /// record spawned stays where it is — an open Question born inside a
-    /// closed Task is a debt the dashboard raises, not history.
+    /// Move one settled record into the archive without rewriting its
+    /// bytes. Linked records keep their state and location. The archive
+    /// copy is written before the live file is removed, so an interrupted
+    /// move leaves recoverable copies rather than losing the record.
     ///
     /// # Errors
     /// [`NotebookError::InvalidTransition`] on a record still live, naming
-    /// the commands that settle it; [`NotebookError::InvalidRecord`] or
-    /// [`NotebookError::DuplicateId`] on a report that cannot be filed, and
-    /// [`NotebookError::DuplicateId`] on a destination held by anything but
-    /// this record's own copy — both answered before anything moves; plus
-    /// the resolution errors of [`Notebook::close`].
-    pub fn archive(&mut self, id: &str, today: &str) -> Result<Archived, NotebookError> {
-        write::guard_today(today)?;
+    /// the commands that settle it; [`NotebookError::DuplicateId`] on a
+    /// destination whose bytes differ from the source; plus the
+    /// resolution errors of [`Notebook::close`].
+    pub fn archive(&mut self, id: &str) -> Result<Archived, NotebookError> {
         let record_type = write::parsed_type(id)?;
         let mut moved = Archived {
             id: id.to_owned(),
             from: record_path(id, record_type, false),
             to: record_path(id, record_type, true),
-            carried: Vec::new(),
             already: false,
         };
         let loaded = match self.resolve_live(id, record_type) {
             Ok(loaded) => loaded,
-            // The record is already where it belongs, and whatever
-            // travelled with it travelled then: a second call is a
-            // question, not a move.
             Err(NotebookError::Archived { .. }) => {
                 moved.already = true;
                 self.replayed_archive(&moved)?;
@@ -1196,49 +1138,33 @@ impl<'a> Notebook<'a> {
                 valid: error::settling_commands(record_type, loaded.state_word()),
             });
         }
-        let reports = self.carriable_reports(&loaded.record)?;
-        // An archive move rewrites nothing, so a resume finds the record
-        // under its own name, answering for its own id.
-        self.guard_destination_free(&moved.to, |standing| standing.id() == Some(id))?;
-        // The reports move first, so a run interrupted inside the cascade
-        // leaves the record live and the next call finishes it.
-        for report in reports {
-            moved.carried.push(self.file_report(report, today)?);
+        let source = loaded.record.file().render();
+        match self.held_at(&moved.to)? {
+            Holding::Absent => self.storage.write(&moved.to, &source)?,
+            Holding::Bytes(standing) if source == standing => {}
+            _ => {
+                return Err(NotebookError::DuplicateId {
+                    id: id.to_owned(),
+                    holder: moved.to,
+                });
+            }
         }
-        self.storage
-            .write(&moved.to, &loaded.record.file().render())?;
         self.storage.remove(&moved.from)?;
         Ok(moved)
     }
 
-    /// Move an archived record back into the working set: the move
-    /// `archive` makes, made back — same filename, same bytes, the record
-    /// alone. The reports the archive move carried are retired history and
-    /// stay history.
+    /// Move one archived record back into the working set with the same
+    /// filename and bytes. Linked records keep their state and location.
     ///
-    /// No verb that corrects a record resolves an archived id — `delete`
-    /// reaches the archive only to delete — so this move is how a finding
-    /// on an archived record becomes repairable at all. The bytes travel
-    /// unjudged past one bar, readability: a broken record must be able to
-    /// come back to where the repairing verbs are, but this verb promises
-    /// residence and cannot vouch it over bytes no parse can read — on
-    /// either side of the move, and on the replay, whose `already`
-    /// otherwise stands on the live file's existence alone, findings and
-    /// all.
-    ///
-    /// A live file under this id keeps its bytes whatever happens: the
-    /// live directory is the only editable home, so what stands there is
-    /// the record's current truth. When the archive also holds the id —
-    /// the leftover of a move interrupted in either direction — this call
-    /// finishes the move by removing that leftover, provided both files
-    /// answer for this record — the resume test `leftover_is_own` carries
-    /// the two tiers and their reasons; anything else holds the
-    /// destination, and the move refuses rather than guess.
+    /// Invalid but readable records can return for repair. When both homes
+    /// hold a file, only byte-identical copies permit the move to resume.
+    /// Divergent copies stay untouched: an id cannot establish which one
+    /// contains all changes made by other contributors.
     ///
     /// # Errors
     /// [`NotebookError::UnknownId`] when neither home holds the id,
     /// [`NotebookError::DuplicateId`] on a live destination taken by a
-    /// file this move cannot call its own, [`NotebookError::InvalidRecord`]
+    /// file whose bytes differ, [`NotebookError::InvalidRecord`]
     /// on bytes that cannot cross the seam, or a storage failure.
     pub fn restore(&mut self, id: &str) -> Result<Restored, NotebookError> {
         let record_type = write::parsed_type(id)?;
@@ -1263,9 +1189,7 @@ impl<'a> Notebook<'a> {
                 self.storage.remove(&moved.from)?;
                 Ok(moved)
             }
-            (Holding::Bytes(source), Holding::Bytes(standing))
-                if leftover_is_own(&moved, &source, &standing) =>
-            {
+            (Holding::Bytes(source), Holding::Bytes(standing)) if source == standing => {
                 self.storage.remove(&moved.from)?;
                 Ok(moved)
             }
@@ -1287,119 +1211,15 @@ impl<'a> Notebook<'a> {
         }
     }
 
-    /// The reports `filed` carries that this move may take with it, each
-    /// read and judged before a single byte moves — the whole cascade is
-    /// decided first, so a report the notebook cannot move refuses the
-    /// archive instead of interrupting it.
-    ///
-    /// A report is a Note this record links and that was born inside it:
-    /// the record's own output, which is what makes it that record's
-    /// history rather than knowledge outliving it. A link naming anything
-    /// else — a Note born elsewhere, one already filed, a target that is no
-    /// record id at all — is left alone, because a link is evidence and
-    /// evidence is not a licence to move another record.
-    fn carriable_reports(&self, filed: &Record) -> Result<Vec<Report>, NotebookError> {
-        let origin = path_stem(filed.path());
-        let mut reports = Vec::new();
-        for id in query::note_links(filed) {
-            // A record that links itself is a hand edit, and carrying it as
-            // its own report would file it twice: once here and once by the
-            // move that called this, whose second write would then fail on
-            // a source it had already removed.
-            if id == origin {
-                continue;
-            }
-            let path = record_path(&id, RecordType::Note, false);
-            let Ok(text) = self.storage.read(&path) else {
-                continue;
-            };
-            let record = Record::parse(&path, &text);
-            if record.origin() != Some(origin) {
-                continue;
-            }
-            if record.has_errors() {
-                return Err(NotebookError::InvalidRecord {
-                    path,
-                    findings: record.error_findings(),
-                });
-            }
-            let destination = record_path(&id, RecordType::Note, true);
-            // A report is retired as it is filed, so a resume finds this
-            // origin's own Note already wearing the state the move gave it.
-            self.guard_destination_free(&destination, |standing| {
-                standing.origin() == Some(origin) && standing.state() == Some("retired")
-            })?;
-            reports.push(Report {
-                path,
-                record,
-                destination,
-            });
-        }
-        Ok(reports)
-    }
-
-    /// Refuse a place in the archive another record holds, and admit one
-    /// holding this very move's own copy, left where a run crashed between
-    /// its write and its remove. `is_this_moves_own` names what makes the
-    /// standing record that copy.
-    ///
-    /// Identity is the whole admission test, and it settles only whether
-    /// the move may go on — never whether it must write. The file being
-    /// moved from is the authoritative one: it can carry a correction made
-    /// since the interrupted run, and a move that trusted what it found
-    /// would delete that correction unread. Bytes cannot serve as the test
-    /// either, in both directions: filing a report restamps it, so a sound
-    /// resume never matches, and a record corrected since its interrupted
-    /// move stops matching a twin that is its own.
-    fn guard_destination_free(
-        &self,
-        destination: &str,
-        is_this_moves_own: impl Fn(&Record) -> bool,
-    ) -> Result<(), NotebookError> {
-        let standing = match self.storage.read(destination) {
-            Ok(text) => Record::parse(destination, &text),
-            Err(StorageError::NotFound { .. }) => return Ok(()),
-            // Bytes no parse can read stand for a record that is not this
-            // one, which is the refusal below.
-            Err(StorageError::NotUtf8 { .. }) => Record::unreadable(destination),
-            Err(error) => return Err(error.into()),
-        };
-        if !standing.has_errors() && is_this_moves_own(&standing) {
-            return Ok(());
-        }
-        Err(NotebookError::DuplicateId {
-            id: path_stem(destination).to_owned(),
-            holder: destination.to_owned(),
-        })
-    }
-
-    /// Retire a report and file it in one move: a Note is current knowledge
-    /// until something ends it, and what ends this one is the record it
-    /// reports on becoming history. Only the Note this call already judged
-    /// moves — a report of its own is not followed, so the cascade is one
-    /// record deep.
-    fn file_report(&mut self, report: Report, today: &str) -> Result<String, NotebookError> {
-        let id = path_stem(&report.path).to_owned();
-        let mut file = report.record.into_file();
-        file.set_field("state", "retired");
-        file.set_field("updated", today);
-        self.storage.write(&report.destination, &file.render())?;
-        self.storage.remove(&report.path)?;
-        Ok(id)
-    }
-
-    /// Judge the copy already in the archive before calling the move done.
-    /// Only a clean one proves this very move happened; on any error finding
-    /// — the same gate every write passes — answering `already` would report
-    /// a corruption as a success.
-    fn replayed_archive(&self, moved: &Archived) -> Result<Record, NotebookError> {
+    /// A replay succeeds only if the archived copy has no error findings.
+    fn replayed_archive(&self, moved: &Archived) -> Result<(), NotebookError> {
         let record = match self.storage.read(&moved.to) {
             Ok(text) => Record::parse(&moved.to, &text),
             Err(StorageError::NotUtf8 { .. }) => Record::unreadable(&moved.to),
             Err(error) => return Err(error.into()),
         };
         if !record.has_errors() {
-            return Ok(record);
+            return Ok(());
         }
         Err(NotebookError::InvalidRecord {
             path: moved.to.clone(),
@@ -1447,8 +1267,8 @@ impl<'a> Notebook<'a> {
     /// Apply the deliberate corrections of [`Edit`] to a live record of any
     /// state — a closed record's title is as correctable as an open one's.
     /// `changed` names what moved in the file; a requested value equal to
-    /// the standing one moves nothing, though a non-canonical line is a move
-    /// even when its value stands. A new body carries the quotation rule's
+    /// the standing one moves nothing, including a non-canonical spelling.
+    /// A new body carries the quotation rule's
     /// dangling-mention nudge, like every body-writing verb.
     ///
     /// # Errors
@@ -1626,43 +1446,33 @@ impl<'a> Notebook<'a> {
                 }
             }
         }
+        for (link, line) in record.file().field_entries("link") {
+            if let Some(target) = linked_record(link)
+                && self.holder_path(target)?.is_none()
+            {
+                errors.push(dangling_finding("link", target, line));
+            }
+        }
         Ok(errors)
     }
 
-    /// The write-time half of the quotation rule: the bare ids `text` cites
-    /// that neither this notebook nor the user's holds, live or archived. A
-    /// nudge for the reply, never a gate — a forward reference is legal and
-    /// the text lands as given.
+    /// Bare ids cited in `text` that this notebook does not hold. These
+    /// are informational hints; forward references do not prevent a write.
     fn dangling_mentions(&self, text: &str) -> Result<Vec<String>, NotebookError> {
         let mut dangling = Vec::new();
         for target in mention::mentions(text) {
-            if self.holder_path(target)?.is_none() && !self.user_holds(target) {
+            if self.holder_path(target)?.is_none() {
                 dangling.push(target.to_owned());
             }
         }
         Ok(dangling)
     }
 
-    /// Whether the user's notebook holds `id` at a canonical path. A root
-    /// that cannot answer holds nothing: the hint is dropped, the write goes
-    /// on.
-    fn user_holds(&self, id: &str) -> bool {
-        let Some(user) = self.user else {
-            return false;
-        };
-        canonical_paths(id).any(|path| user.exists(&path).unwrap_or(false))
-    }
-
-    /// A link whose target is shaped like an id names a record, and a
-    /// record it names must exist: here, or in the user's notebook, which a
-    /// link reaches as `check` reads it. Any other target points outside
-    /// the notebook and is taken as given.
+    /// Record-shaped links resolve in this notebook. Other targets are
+    /// external references whose availability is not a record invariant.
     fn guard_link_target(&self, link: &Link) -> Result<(), NotebookError> {
         let target = link.target.trim();
-        if grammar::id_error(target).is_some()
-            || self.holder_path(target)?.is_some()
-            || self.user_holds(target)
-        {
+        if grammar::id_error(target).is_some() || self.holder_path(target)?.is_some() {
             return Ok(());
         }
         Err(NotebookError::DanglingRef {
@@ -1858,19 +1668,6 @@ fn read_live_corpus(storage: &dyn Storage) -> Result<Corpus, NotebookError> {
     Ok(Corpus { records, archived })
 }
 
-/// The user's notebook standing behind a project's, read by the same rules
-/// as any other: its live records, and the ids its archive holds.
-///
-/// A second root is read for a hint on somebody else's dashboard, a nudge
-/// in somebody else's reply, or the reach of a `link` in somebody else's
-/// gate, so a root that cannot be read leaves the hint out instead of
-/// taking those down. What is wrong with that notebook is what a `check`
-/// against it reports.
-pub(super) fn user_scope(user: Option<&dyn Storage>) -> Corpus {
-    user.and_then(|storage| read_live_corpus(storage).ok())
-        .unwrap_or_else(Corpus::empty)
-}
-
 /// One directory's records, invalid ones included: an invalid record is a
 /// visible first-class state, never a silent drop.
 fn read_records_in(storage: &dyn Storage, dir: &str) -> Result<Vec<Record>, NotebookError> {
@@ -1896,6 +1693,21 @@ fn read_records_in(storage: &dyn Storage, dir: &str) -> Result<Vec<Record>, Note
     Ok(records)
 }
 
+/// Read one archived record; `None` means its canonical file is absent or
+/// the id cannot name a record path.
+fn read_archived_record(storage: &dyn Storage, id: &str) -> Result<Option<Record>, NotebookError> {
+    let Ok(record_type) = write::parsed_type(id) else {
+        return Ok(None);
+    };
+    let path = record_path(id, record_type, true);
+    match storage.read(&path) {
+        Ok(text) => Ok(Some(Record::parse(&path, &text))),
+        Err(StorageError::NotUtf8 { .. }) => Ok(Some(Record::unreadable(&path))),
+        Err(StorageError::NotFound { .. }) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// The records one query reads, beside the ids the archive holds. The two
 /// are separate because they cost differently: a record is a file opened,
 /// an archived id is a name in a listing.
@@ -1905,20 +1717,11 @@ pub(super) struct Corpus {
 }
 
 impl Corpus {
-    /// The notebook a caller was handed no root for.
-    fn empty() -> Corpus {
-        Corpus {
-            records: Vec::new(),
-            archived: BTreeSet::new(),
-        }
-    }
-
     fn resolver(&self) -> Resolver<'_> {
         Resolver::of(&self.records, &self.archived)
     }
 }
 
-/// A report an archive move carries, judged before the first byte moves.
 /// What one home holds, as [`Notebook::held_at`] reads it.
 enum Holding {
     Absent,
@@ -1933,27 +1736,6 @@ fn unreadable_record(path: &str) -> NotebookError {
         path: path.to_owned(),
         findings: vec![not_utf8_finding()],
     }
-}
-
-/// The resume test for a restore that finds its id in both homes: the two
-/// files are the same record when they are byte-identical — an untouched
-/// interrupted copy, however broken — or when each answers for the id on
-/// its own. The standing file answers by parsing clean, because a
-/// canonical live path admits no clean record but the id's own and `add`
-/// refuses an id the archive claims; the leftover answers by declaring the
-/// id in its bytes, because bytes under this filename that declare another
-/// record are somebody's only copy, and removing them unread would destroy
-/// it.
-fn leftover_is_own(moved: &Restored, source: &str, standing: &str) -> bool {
-    source == standing
-        || (!Record::parse(&moved.to, standing).has_errors()
-            && Record::parse(&moved.from, source).id() == Some(&moved.id))
-}
-
-struct Report {
-    path: String,
-    record: Record,
-    destination: String,
 }
 
 struct Victim {

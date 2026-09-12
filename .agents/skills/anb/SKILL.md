@@ -1,124 +1,105 @@
 ---
 name: anb
-description: Use when working in a repository with .agent-notebook, capturing or shaping an idea, modeling a domain, planning or continuing Tasks and epics, recording project knowledge, reviewing status, or when a session hook reports active work.
+description: Recall and maintain project memory in repositories using agent-notebook. Use for continuing work, recording decisions or domain knowledge, and applying personal practices across sessions.
 metadata:
   managed-by: anb
 ---
 
 # anb
 
-## Overview
+Keep the context that makes the next decision easier. The notebook connects work, domain knowledge and personal practices; it does not replace the project's tracker, documentation or source code. Use the CLI for notebook changes. Plain Markdown remains readable without this skill.
 
-Keep the problem, the reasoning and the work connected so another session can continue without reconstructing the conversation. Use the CLI for every notebook change; it maintains record state and relationships together.
+## Recall before acting
 
-## When to use
+Run `anb recall` at the start of a session, unless a hook has already supplied it. It brings together current work, shared project knowledge and your private practices, with their audiences labelled. Open `.agents/anb.md` if present for the project's workflow extensions; do not copy or fork this installed skill to customize it.
 
-Use this method when capturing a request, shaping an idea, maintaining domain knowledge, planning delivery or continuing project work. For a status question, read and answer; a read does not need a new Task. Follow the user's chosen notebook location, workflow and sharing policy.
+Follow the user's subject. `anb recall --for <id>` prioritizes a record's context; `anb recall "phrase"` searches knowledge across all three audiences. Read the relevant records with `show`, using `--all` when the reply reports omitted content. Read referenced source material when the decision depends on it. A remembered conclusion is evidence with a scope, not permission to ignore the current request, code or source.
 
-## Core pattern
+## Find the work before starting
 
-Start a new change with an `idea` Note, or resume the existing idea. Keep the source, intended improvement, constraints, agreement status and next uncertainty in its body. Link the source with `--link "doc <path-or-url>"`; record missing evidence explicitly. Capturing a request does not authorize implementation or changes to its source.
+Creating work does not assign it. A named request needs three steps:
 
-Keep the idea when Tasks emerge: one proposal can lead to several deliveries. Create records `--from` what produced them, cite supporting records by bare id, and use `block` for execution prerequisites. An origin answers why a record exists; a mention supplies context; a dependency controls readiness; a `--link "<kind> <id>"` declares a relation of your own, such as the schema a document follows, and `show`, `graph` and `--for` walk it back from the record it names.
+1. Find the intended result. Search with `anb list --match "<words>" --team`, using the domain's vocabulary, and read plausible matches and their origins. An idea may have several deliveries; ask if the intended one remains ambiguous. Use `list --for <id> --team --all --archive` to inspect its composition, including completed, unassigned and other people's work. Dependencies and contextual links are not constituent work.
+2. Agree the responsibility before changing assignments or state. For a whole result, any unfinished part assigned to another person requires a coordination question. Ask whether to coordinate the result or take a separate part; keep assignments and state unchanged until the answer. A request for one specific Task does not claim its siblings. Joining another session's Task also needs agreement. An explicit collaboration instruction can supply that agreement; a generic request to begin the result cannot.
+3. Start the agreed work. For the whole result, start its Task, inspect `ready --for <id> --team` and explicitly start the chosen child; `start --next` would otherwise resume the active parent. The parent records accountability for the outcome, while each child keeps its own assignment and the session focuses on the step being executed. Do not start every child or assign every related record. Close the parent only after its required parts and overall acceptance are verified.
 
-For an agreed small change, the idea and one Task are enough:
+`anb start` resumes this session's focus when the host supplies a session identity. `anb start <id>` starts the named Task, and `anb start --next` takes eligible work. For the next part of a larger task, use `anb start --next --for <hub>`. Without an unambiguous focus, inspect `status` and ask which active Task the user means. Do not silently choose the most recently updated Task.
 
-```sh
-anb add note "Name the CSV download" --id note.csv-download --kind idea --via codex --body "Agreed: rename Export to Download CSV so the label states the format. Preserve behavior and file contents. Implementation is queued for later."
-anb add task "Rename the CSV download button" --id task.csv-download --from note.csv-download --via codex --body "Implement note.csv-download. Verify the label and that the same action produces unchanged CSV content."
-anb check
-```
+A session has one focus; a person may have several sessions and active Tasks. Switching this session does not put another session's work on hold. A hold means the work is waiting for something, not that an agent changed its attention. If this session already has active, unheld work within the requested scope, `start --next` resumes it; finish or explicitly switch that focus before taking more. An explicit `--for` can select a different scope.
 
-These explicit ids make the example runnable. In ordinary work, use the ids returned by the CLI, including collision suffixes. Add `--via` to every agent `add` and `comment`, using your actual tool name, such as `codex` or `claude-code`. Leave `by` to the accountable person: the CLI signs it from `ANB_BY` or the git identity, and a comment is signed `by/via`, so the person stays in the trail beside the tool. Other verbs do not accept `--via`.
+## Choose what deserves memory
 
-## Quick reference
+Save information when it changes future action and would otherwise be expensive or unreliable to recover. Search before creating a second account of the same fact. Keep the smallest record that explains the conclusion, its scope and the evidence or source behind it.
 
-Choose by what a later reader needs, with an explicit `--kind` for Notes and Decisions.
+| What must survive | Where it belongs |
+|---|---|
+| Current result, failed attempt or next action | A comment on the relevant record |
+| Work with a checkable outcome | A Task |
+| An unresolved choice that blocks or changes future work | A Question |
+| A settled constraint or choice, with its reason | A Decision |
+| Reusable evidence, vocabulary, a model or a procedure | A Note |
+| A canonical ticket, document or web source | A link plus the useful local conclusion |
 
-| Need | Record | Why keep it separately |
-|---|---|---|
-| Deliver or investigate a checkable result | Task | Progress and completion belong to the work |
-| Settle an uncertainty that changes the work | Question | An unanswered choice must remain visible |
-| Preserve an agreed requirement | Decision `rule` | Later work must respect its scope and reason |
-| Explain a chosen design | Decision `shape` | Alternatives and the deciding constraint prevent repeated debate |
-| Allow an agreed exception | Decision `drift` | The affected rule and revisit condition bound the departure |
-| Reuse an observation | Note `fact` | Evidence and limits distinguish a finding from a guess |
-| Define a word in context | Note `term` | Ambiguous vocabulary changes how requirements are read |
-| Repeat a procedure | Note `guide` | Conditions and verification make it reusable |
-| Develop a possibility | Note `idea` | Motivation outlives any one delivery |
-| Explain a domain | Note `model` | Ownership, relationships and invariants need more than definitions |
-| Specify expected behavior | Note `spec` | Scope, exclusions and acceptance criteria guide delivery |
+A small request can be one Task. A brief read or explanation needs no Task. Create an idea Note when a proposal must outlive individual deliveries; a spec when maintained acceptance criteria need their own home; an investigation Task when research itself has a deliverable. None is a compulsory stage.
 
-## Working method
+Use Note kinds to help retrieval: `fact`, `term`, `model`, `guide`, `idea` or `spec`. Decision kinds distinguish a standing `rule`, a design `shape` and an agreed exception `drift`. A Note's active state means it is maintained, not that its proposal is approved. Preserve uncertainty explicitly.
 
-### Orient
+Progress is episodic: append what happened and what it changes. Reusable knowledge is consolidated: update the maintained explanation when evidence supports it. A repeated observation is not automatically a rule. When evidence contradicts a record, inspect the source and scope, then clarify, supersede or retire it; do not delete history merely because it is old. There are no invented confidence scores or automatic forgetting schedules.
 
-Read `anb status` unless the hook supplied it. Status is the work: the active Tasks with the last log line of the first, work in review or on hold, the queue, the open Questions and a count of Debt. Follow the requested subject; otherwise resume the active Task, or take the top of `ready`; when the user's own queue is empty and Status counts the pool on its `untaken:` line, take the top of `ready --untaken`. Before the work, read the standing rules with `anb list --type decision --kind rule` and open the ones its subject touches, then the knowledge the Task cites and the relevant code. Search before creating records: `anb list --match <text>` matches ids, titles, tags, the people named in the envelope and bodies, and `--archive` reaches history. Use `show --all` for a truncated body and narrowed lists for larger work; loading the whole notebook obscures the immediate decision.
+Before consolidating, read the existing explanation and relevant alternatives alongside the new evidence. Integrate the supported change without discarding still-valid constraints. A new observation can refine an established model; a different ruling needs explicit supersession. Review knowledge when evidence, scope or a user request calls for it, not merely because it was retrieved.
 
-Every listing narrows the same way: `--for <hub>`, `--tag`, `--match <text>`, `--by <name>`, `--mine`, `--team`, `--untaken` and `--to <name>` compose on `list`, `ready` and `graph`, and `--type`, `--kind` and `--archive` on `list` and `graph`, each answering with the records every flag admits. `list --type note --tag domain-model` is the domain language; `ready --tag parser` is one area's queue; `anb debt` is the Debt that Status counts. Whose question the user asks decides the flag:
+Write for a reader who has no notebook tool or skill. Give the record a searchable title in the project's vocabulary. Open its body with the subject and useful conclusion, then include the scope, reason and source needed to act correctly. Name an important related record in prose as well as linking its id; an opaque id is not an explanation. Mark proposals, exceptions and superseded claims explicitly. Avoid “as discussed,” unexplained abbreviations and conclusions recoverable only from a chat transcript. Keep maintained knowledge separate from the chronological log of attempts.
 
-| The user asks | Read | Why |
-|---|---|---|
-| What is mine, where do I continue | `--mine`, or nothing under `scope: mine` | Yours is what you hold, what you wrote and what waits on you |
-| What is Grace doing, what waits on her | `--by Grace` | Her Tasks, her records and what is addressed to her |
-| Where the epic or the team stands | `--for <hub> --team`, `--team` | A hub and a team are nobody's, and `scope: mine` narrows a read to yours |
-| What can I take | `--untaken` | The pool is what nobody holds |
-| Why my Task is not in the queue | `list --mine`, then `graph --focus <id>` | The queue is what can start; the graph names the blocker and who holds it |
+## Choose the audience
 
-A read narrowed to one identity opens with `by: <name> — anb <verb> … --team`, whether a flag or the `scope` key narrowed it, so a `count: 0` under it is nothing of that person's, not an empty notebook.
+The default notebook is shared project memory. Authorship records who contributed; it does not make a project rule private. Shared knowledge is recalled regardless of who wrote it. Work views share the notebook's configured `scope`: `mine` follows the current person's assignments, while the default `team` shows everyone's work. Explicit audience flags override that default for the current request.
 
-Several people can share one notebook, and a Task belongs to whoever holds it: `taken-by` names the holder, `by` the author, and a Task nobody holds is nobody's, whoever wrote it. `start` takes an untaken Task for the user and refuses one another person holds. A planner hands a Task over as it is written with `add task --taken-by <name>`, or later with `edit <id> --taken-by <name>`, both decided by the user, never by the agent; `add task --mine` takes a Task for the user, for a follow-up the user will do. Status lists the user's own active Tasks first and marks another person's with their name, so resume only an unmarked line. In `ready`, the `taken-by` column names each Task's holder, and `ready --untaken` is the pool, the Tasks anyone may take. A Question put to a person with `add question --to <name>` and a review handed to one with `submit --to <name>` wait on that person, and their Status shows them beside their own; the `to` column of the review and questions tables says whom each waits on. A notebook whose config sets `scope: mine` answers every read with the Tasks the user holds, the records the user wrote and the records waiting on the user; Status then counts the pool on its `untaken:` line, and `--team` widens one call to the whole project.
+Use `--personal` for this person's practices in this project and `--global` for practices across projects. Both stay outside the repository and hold Notes and Decisions, not Tasks or Questions. For “work this way for me here,” choose personal; for “always do this for me,” choose global. A team rule belongs in the project only when its team-wide authority is established. Ask if that distinction would materially change the instruction.
 
-### Shape the idea
+Record only the reusable instruction and its scope. Do not copy credentials, private customer evidence or personal details into shared memory. Private sources remain labelled during recall; they do not silently override a project requirement. If practices conflict, explain the relevant constraint instead of resolving it by audience rank.
 
-Let the next uncertainty choose the investigation. Compare alternatives against the same outcome and constraints. Save reusable evidence as facts, unresolved choices as Questions, and settled choices as Decisions, each with its actual origin. Keep local progress in the Task log. Bring the user your findings, recommendation and the remaining question the evidence cannot answer.
+Shared typed links resolve within the shared notebook. A colleague's `check` must not depend on private files. Link external systems with their canonical URL or project-relative path, for example `--link "doc <url>"`; retain provenance without copying the whole source. A notebook record does not authorize edits or messages in the linked system.
 
-For sustained research, start an investigation Task from the idea, with evidence or a discussable design as its result. For brief intake, leave the next step in the idea; Status can be quiet without an active Task. An idea or spec must state whether its direction is proposed or agreed and what establishes that agreement: a Note's `active` state means maintained, not approved or implemented.
+## Carry out the user's intent
 
-Create a spec when expected behavior needs its own maintained document. Preserve canonical sources when importing existing material: record the useful conclusion and link to the original, keeping private evidence under the chosen sharing policy. Judge how much structure the work needs; a fixed set of documents adds maintenance without answering a question.
+Before an unfamiliar operation, read `anb <command> --help`. Use the returned id rather than reconstructing it from the title. Set `--via` to your actual agent tool on additions and attributed comments or outcomes; leave the accountable person's identity to the host.
 
-### Model the domain
+| The user asks | Operation |
+|---|---|
+| “Change that wording” | `edit <id> --title "…"` or `edit <id> --body-file <path>` |
+| “Add this finding” | `comment <id> --body "…"` |
+| “Assign it to Grace” | `edit <id> --taken-by Grace` |
+| “Put it back in the shared queue” | `edit <id> --clear taken-by` |
+| “Ask Grace” | A Question with `--to Grace`; do not send an external message without authorization |
+| “What is on my list?” | `status --mine`, or `ready --mine` for eligible work |
+| “See what the team is doing” | `status --team`, or `ready --for <hub> --team` |
+| “What is Grace doing?” | `status --by Grace` |
+| “These need to happen first” | `block <task> <prerequisite>` |
+| “This is waiting on an answer” | `hold <id> --reason "…"`; use `unhold` when it can resume |
+| “It is done” | Verify, then `close <id> --body "Result, evidence and limits."` |
+| “That work is no longer needed” | `close <id> --reason "…"` |
+| “This knowledge no longer applies” | `retire <id> --body "What changed and where to look now."` |
 
-Start from concrete scenarios and check them against the code. Explain who owns state, which changes must agree, what may happen and what information crosses contexts. Distinguish existing behavior from a proposed model. A directory or class name alone does not establish an aggregate or bounded context.
+Body flags have the same meaning on add, edit, comment and outcome commands: `--body` supplies text; `--body-file <path>` reads a file; `--body-file -` reads standard input. Editing a body replaces it, so read the existing record first and preserve unrelated content. Comments append without replacing it.
 
-| A term defines | A model explains | Why the distinction matters |
-|---|---|---|
-| A candidate operation | Who approves it, what approval changes and what happens after rejection | Definitions alone cannot establish allowed behavior |
-| A package within one context | How each context uses it and translates information for another | The same word need not describe the same concept |
+Make a Task's result and completion evidence clear. Connect records only for a reason: `--from` identifies their origin, `block` expresses a prerequisite, a bare id in prose supplies context, and `--link "<kind> <target>"` declares a typed relationship. Related work is not necessarily blocked work. For a larger outcome, a hub Task can have children created `--from` it; block the hub on deliverables whose completion it actually requires.
 
-Keep local definitions in the model; extract terms when they need independent lookup or reuse. Split models where language or responsibility differs. A context map cites those models and explains integration direction and meaning. Tag models `domain-model` and related records by context so search finds them. Cite governing Decisions from models and models from specs and Tasks; keep each ruling in one place. Write a model or a spec of several paragraphs from a file with `--body-file model.md`, or from a pipe with `--body-file -`; a document does not belong on a command line, and `edit --body-file` replaces a body without reading the record file by hand.
+Do not take a colleague's Task just because you can edit its assignment. An explicit reassignment request authorizes that change; otherwise choose your own work or the untaken queue. Use `start <id> --join` only for intentional collaboration on the same Task.
 
-### Plan and execute
+## Keep a shared domain language
 
-Make each Task a reviewable result with constraints, behavior to preserve and completion evidence. For an epic, create a hub `--from` the idea, tag it `epic`, create children `--from` the hub, and `block <hub> <child>` for each deliverable. Add child dependencies only where one result is required by another. Read `ready --for <hub>` to choose work. A ready hub still needs verification of the overall outcome.
+Build models from concrete scenarios and check them against the system. Explain who owns state, which changes must agree, what is allowed and what crosses a context boundary. Separate current behavior from proposals. A class name alone does not establish a domain concept.
 
-Keep one Task in flight per person by default. Start it before work; when switching subjects, log the handoff and hold unfinished work with a reason, or hand the Task over with `edit --taken-by`. Comment with the result, evidence and next step, using `--via`. Update models and specs when their meaning changes. Supersede a Decision when its ruling changes; edit it when clarifying the same ruling. A Decision that cites another as context declares the relationship once, on `add` or later with `edit`: `--link "within decision.x"` for a rule that is part of a wider one, `--link "departs-from decision.x"` for a drift. `may-conflict` then names only the pair nobody has judged; read those records before deciding whether a conflict exists.
+Keep local definitions in the model; extract a term when independent lookup is useful. Where roles or contexts give a word different meanings, explain the translation rather than imposing one misleading definition. Link models to governing Decisions and relevant Tasks. Product, design, support and engineering can contribute scenarios, constraints and evidence to the same model without adopting an engineering-only workflow.
 
-Close answered Questions with `--resolved-by <decision-or-task>`, or `--reason` citing a Note when knowledge answers them, then archive. A genuine review date can be set on a drift Decision with `edit --review-by`; leave it unset when none is known.
+Keep each maintained claim in one place. Summarize the part needed for current work and link to its canonical source. A tracker still owns delivery commitments; documentation still owns published explanations; the notebook remembers how those sources affect this work.
 
-### Verify and leave a continuation
+## Verify and leave a continuation
 
-Verify the promised result before closing. If review is required, `submit` and wait for acceptance. Otherwise close with `--note <report.md>` by default: state the result, evidence and limits. Archive the Task immediately; its report travels with it. Keep reusable knowledge live. Cancel work with `--reason`; hold work that awaits something, naming what will unblock it.
+Close work only after verifying its promised outcome. A concise outcome in the Task is enough; attach a separate report only when its length or reuse warrants one. Use `submit --to <name>` when acceptance belongs to someone else. Close answered Questions with `--resolved-by <id>` or `--reason`. Archive finished records when they no longer belong in the working set; keep reusable knowledge live.
 
-Run `anb check`, address findings and recheck. When no CLI repair exists, report the obstruction. Leave unfinished work's result and next action in its log, or in the idea for brief shaping. Commit the notebook with the code by default, within the user's sharing policy and commit authorization.
+Before leaving unfinished work, comment with the result, evidence and next concrete action. Run `anb check` after notebook changes and resolve relevant findings. A structured refusal supplies a code, cause and recovery action; correct the cause before retrying. If a write's result is uncertain, inspect the record before repeating creation. Commit only within the user's sharing policy and authorization.
 
-## Common mistakes
+The default replies use TOON, a standard compact representation of the same data returned by `--json`. Counts describe the total, omissions are explicit, and `more` gives the command that expands the same read. Recall reports omissions per audience in `sources`; inspect missing practices or context before relying on an incomplete read. A failed read is not an empty notebook.
 
-| Temptation | Use instead | Reason |
-|---|---|---|
-| Put the whole proposal in a Task to save time | Keep the idea and create work from it | Archiving one delivery must not hide the proposal |
-| Record a plausible answer as a Decision | Keep a Question until the choice is settled | Future agents treat Decisions as governing knowledge |
-| Use a guide as a one-off handoff | Put the next step in the Task log or idea | Guides describe repeatable procedures |
-| Turn related subjects into blockers | Cite bare ids for context; block real prerequisites | Artificial dependencies hide work that can start |
-| Quote an id intended as a relationship | Cite it outside backticks | Quoted examples do not create mentions |
-| Retry a refused command unchanged | Read its `try:` instruction and fill its placeholders | Refusals explain the required correction |
-| Repeat `add` after an uncertain result | Inspect the notebook first | Creation without an explicit id can produce duplicates |
-| Start a Task marked as another person's | Take one from `ready --untaken`, or ask the user before `edit --taken-by` | Two people working one Task learn of it from a merge conflict |
-| Leave a Task in the pool when its doer is already known | `add task --mine` for the user, `--taken-by <name>` for a colleague | A Task nobody holds enters nobody's queue |
-| Start work straight from Status | Read `list --type decision --kind rule` first | Status is the work; a rule is read before the work it binds |
-
-## References
-
-Before an unfamiliar command, read `anb <verb> --help` or [commands](references/commands.md). Read [the worked session](references/session.md) for literal replies and [refusals](references/refusals.md) when recovery is unclear. Use `--json` for programmatic reads; `list` and `ready` rows carry `by` and `taken-by` there, and Status carries the pool as `untaken.count`. Use the installed `anb-atlas` skill for a visual review.
-
-For a named personal practice, `list --match <name> --global` finds it and `show <id> --global` reads it; guides tagged `skill` are reusable practices. Global scope holds Decisions and Notes, while Tasks and Questions stay in the project. Cite a global rule's id when a project Decision departs from it so the relationship remains visible.
+Read [commands](references/commands.md) for the full surface, [the worked session](references/session.md) for literal replies, or [refusals](references/refusals.md) when a recovery instruction needs context. Load only the reference relevant to the current operation.

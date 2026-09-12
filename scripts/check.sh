@@ -23,3 +23,4 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --document-p
 cargo run --quiet --locked -- skill .agents/skills/anb --check
 # Two docs pages are renderings of the binary as well.
 ./scripts/docs-reference.sh --check
+sh scripts/release/test-tags.sh

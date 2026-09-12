@@ -88,16 +88,22 @@ fn check_exits_failing_on_an_error_and_cleanly_on_a_warning() {
 }
 
 /// The hook runs before a session and must never be the reason one does not
-/// start: whatever it meets, it answers with silence and a clean exit.
+/// start: a failed read is context for the agent and a clean exit for the host.
 #[test]
-fn the_session_hook_stays_silent_over_a_notebook_it_cannot_use() {
+fn the_session_hook_explains_an_unusable_notebook_without_blocking_the_host() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("not-a-notebook");
     fs::write(&file, "a file where a notebook was named").unwrap();
 
-    let hooked = anb(&file, &["status", "--hook"]);
+    let hooked = anb(&file, &["hook"]);
     assert!(hooked.status.success(), "{:?}", hooked.status);
-    assert!(hooked.stdout.is_empty(), "{:?}", hooked.stdout);
+    let payload: serde_json::Value = serde_json::from_slice(&hooked.stdout).unwrap();
+    assert!(
+        payload["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("recall is unavailable")
+    );
     assert!(hooked.stderr.is_empty(), "{:?}", hooked.stderr);
 
     let asked = anb(&file, &["status"]);
@@ -119,6 +125,27 @@ fn an_unknown_verb_answers_in_the_format_the_caller_asked_for() {
     let parsed: serde_json::Value =
         serde_json::from_str(payload.trim()).unwrap_or_else(|_| panic!("not JSON: {payload}"));
     assert_eq!(parsed["error"], "unknown-command");
+}
+
+#[test]
+fn invalid_arguments_return_json_and_a_failure_exit_without_writing_records() {
+    let dir = TempDir::new().unwrap();
+    for args in [
+        vec!["--json", "start"],
+        vec!["--json", "show", "task.demo", "--body"],
+    ] {
+        let refused = anb(dir.path(), &args);
+        assert_eq!(refused.status.code(), Some(1));
+        assert!(refused.stdout.is_empty());
+        let parsed: serde_json::Value = serde_json::from_slice(&refused.stderr).unwrap();
+        assert_eq!(parsed["error"], "invalid-argument");
+        assert!(
+            parsed["try"]
+                .as_array()
+                .is_some_and(|commands| !commands.is_empty())
+        );
+    }
+    assert!(!dir.path().join("tasks").exists());
 }
 
 /// A reader that stops early — `anb show <id> | head` — closes the pipe
@@ -180,6 +207,8 @@ fn a_body_file_of_dash_reads_standard_input() {
             "add",
             "note",
             "The download spec",
+            "--id",
+            "note.the-download-spec",
             "--kind",
             "spec",
             "--body-file",
@@ -206,7 +235,7 @@ fn the_identity_in_the_environment_signs_and_takes() {
 
     let added = Command::new(env!("CARGO_BIN_EXE_anb"))
         .args(["--notebook", root.to_str().unwrap()])
-        .args(["add", "task", "A demo record"])
+        .args(["add", "task", "A demo record", "--id", "task.a-demo-record"])
         .env("HOME", dir.path())
         .env("ANB_BY", "Grace Hopper")
         .output()

@@ -17,7 +17,7 @@ mod status;
 
 use anb_core::{
     Blocker, Budget, CitedProof, DebtSignal, Draft, Edit, Epic, Filter, FindingCode, GraphSlice,
-    Link, MemoryStorage, Notebook, NotebookError, Proof, RecordType, Repair, Storage, StorageError,
+    Link, MemoryStorage, Notebook, NotebookError, RecordType, Repair, Storage, StorageError,
     Transitioned,
 };
 
@@ -97,38 +97,6 @@ impl Storage for RemoveFails {
             path: path.to_owned(),
             detail: "refused".to_owned(),
         })
-    }
-}
-
-/// A root that is there and cannot be served: a medium that names no
-/// missing file, only a failure. What a notebook read behind another does
-/// with it is what every case posing it asks.
-struct UnreadableNotebook;
-
-impl Storage for UnreadableNotebook {
-    fn list(&self, dir: &str) -> Result<Vec<String>, StorageError> {
-        Err(Self::failure(dir))
-    }
-
-    fn read(&self, path: &str) -> Result<String, StorageError> {
-        Err(Self::failure(path))
-    }
-
-    fn write(&mut self, path: &str, _content: &str) -> Result<(), StorageError> {
-        Err(Self::failure(path))
-    }
-
-    fn remove(&mut self, path: &str) -> Result<(), StorageError> {
-        Err(Self::failure(path))
-    }
-}
-
-impl UnreadableNotebook {
-    fn failure(path: &str) -> StorageError {
-        StorageError::Io {
-            path: path.to_owned(),
-            detail: "the medium answered nothing".to_owned(),
-        }
     }
 }
 

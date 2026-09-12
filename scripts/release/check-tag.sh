@@ -1,13 +1,17 @@
 #!/bin/sh
-# Refuse a release tag of the wrong shape:
-#   scripts/release/check-tag.sh v2026.09.06.1
-# A tag names the day of the release, vYYYY.MM.DD, and a later release on the same day appends .N, counting from 1:
-# v2026.09.06 is the day's first release and v2026.09.06.1 its second. Exit 1 for anything else.
+# Check the release date and package version before publication.
 set -eu
-tag=$1
-if printf '%s\n' "$tag" | grep -Eq '^v[0-9]{4}\.(0[1-9]|1[0-2])\.(0[1-9]|[12][0-9]|3[01])(\.[1-9][0-9]*)?$'; then
-  echo "ok: $tag names a day"
-else
-  echo "$tag is not a release tag: the day's first release is vYYYY.MM.DD and each further release that day appends .N, counting from 1" >&2
+cd "$(dirname "$0")/../.."
+tag=${1:-}
+if ! printf '%s\n' "$tag" | grep -Eq '^v[0-9]{4}\.(0[1-9]|1[0-2])\.(0[1-9]|[12][0-9]|3[01])\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+  echo "$tag is not a release tag: use vYYYY.MM.DD.MAJOR.MINOR.PATCH with the package version" >&2
   exit 1
 fi
+
+cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+tag_version=$(printf '%s\n' "$tag" | cut -d. -f4-)
+if [ "$tag_version" != "$cargo_version" ]; then
+  echo "$tag names package version $tag_version, but Cargo.toml is at $cargo_version; use the version being released" >&2
+  exit 1
+fi
+echo "ok: $tag names package version $cargo_version"

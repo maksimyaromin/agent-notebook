@@ -3,7 +3,7 @@
 //! changes nothing — answering `already: true`, or refusing a move that was
 //! never valid to repeat.
 
-use anb_core::{CitedProof, MemoryStorage, Notebook, NotebookError, Proof, Storage};
+use anb_core::{CitedProof, MemoryStorage, Notebook, NotebookError, Storage};
 use proptest::prelude::*;
 const TODAY: &str = "2026-08-27";
 
@@ -39,7 +39,7 @@ fn apply(storage: &mut MemoryStorage, verb: Verb) -> Result<bool, NotebookError>
         Verb::Start => notebook.start(id, TODAY).map(|reply| reply.already),
         Verb::Submit => notebook.submit(id, None, TODAY).map(|reply| reply.already),
         Verb::Close => notebook
-            .close(id, &Proof::Sha("f00dfeed".to_owned()), TODAY)
+            .close(id, None, "Verified f00dfeed.", TODAY)
             .map(|reply| reply.transition.already),
         Verb::CloseWithReason => notebook
             .close_with_reason(id, "overtaken", TODAY)
@@ -210,7 +210,7 @@ mod status_fits_its_budget {
 
     proptest! {
         #[test]
-        fn any_notebook_fits_any_ceiling_or_stands_on_the_floor(
+        fn any_budget_preserves_the_complete_status_model(
             open_tasks in 0usize..40,
             active_tasks in 0usize..20,
             aged_questions in 0usize..30,
@@ -246,29 +246,15 @@ mod status_fits_its_budget {
             let status = notebook
                 .status(TODAY, Budget::Tokens(ceiling), None, no_lost_proofs)
                 .unwrap();
-            // The floor is counts, the first active line, what the rest
-            // of it came to, and the budget line.
-            let at_floor = status.text.lines().count() <= 4
-                && status.text.lines().all(|line| {
-                    line.starts_with("ok: notebook")
-                        || line.starts_with("active: ")
-                        || line.starts_with("  \u{2026} ")
-                        || line.starts_with("budget: ")
-                });
-            prop_assert!(
-                status.spent <= ceiling || at_floor,
-                "over ~{} of {ceiling} tokens without reaching the floor:\n{}",
-                status.spent,
-                status.text
-            );
-            let default = notebook
-                .status(TODAY, Budget::Tokens(Budget::DEFAULT_TOKENS), None, no_lost_proofs)
-                .unwrap();
-            prop_assert!(
-                !default.text.contains("cut:"),
-                "the default ceiling had to degrade a bounded dashboard:\n{}",
-                default.text
-            );
+            prop_assert_eq!(status.budget, Budget::Tokens(ceiling));
+            prop_assert_eq!(status.active.len(), active_tasks);
+            prop_assert_eq!(status.ready.len(), open_tasks);
+            prop_assert_eq!(status.questions.len(), aged_questions);
+            prop_assert_eq!(status.counts.tasks, open_tasks + active_tasks + epics.min(open_tasks));
+            let unbounded = notebook.status(TODAY, Budget::Unbounded, None, no_lost_proofs).unwrap();
+            prop_assert_eq!(status.active, unbounded.active);
+            prop_assert_eq!(status.ready, unbounded.ready);
+            prop_assert_eq!(status.questions, unbounded.questions);
         }
     }
 }

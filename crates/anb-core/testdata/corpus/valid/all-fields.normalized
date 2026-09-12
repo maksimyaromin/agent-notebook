@@ -8,12 +8,14 @@ by: supolka
 via: claude-code
 from: question.why-demo
 tags: core, parser
-link: doc docs/record-format.md
-link: pr https://example.com/pull/7
+link:
+  - doc docs/record-format.md
+  - pr https://example.com/pull/7
 supersedes: task.old-demo
 superseded-by: task.new-demo
-blocked-by: task.other-work
-blocked-by: task.more-work
+blocked-by:
+  - task.other-work
+  - task.more-work
 resolved-by: question.why-demo
 reason: a demo reason
 priority: 3

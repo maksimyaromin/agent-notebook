@@ -168,8 +168,8 @@ impl TaskState {
 
 /// The Task transitions, named as an agent asks for them. `start` also
 /// takes a Task back from review. `CloseWithReason` is `close --reason`:
-/// the Task ends without work, so it may end from `open`, where a close
-/// carrying a proof is refused.
+/// the Task ends without work, so it may end from `open`, where a completed
+/// close is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskAction {
     Start,

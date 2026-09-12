@@ -1,6 +1,6 @@
 #!/bin/sh
 # Print the CHANGELOG.md entry of one release, the notes of its GitHub release:
-#   scripts/release/changelog-notes.sh v2026.09.05
+#   scripts/release/changelog-notes.sh v2026.09.12.0.9.0
 # The entry is the section whose heading ends with the tag. Exit 1 when there is none, so a tag without an entry is refused.
 set -eu
 cd "$(dirname "$0")/../.."

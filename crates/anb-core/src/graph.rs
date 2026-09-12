@@ -36,13 +36,18 @@ impl TaskGraph {
     /// outside the graph blocks nothing: whether it
     /// dangles is validity, judged elsewhere.
     pub fn is_blocked(&self, id: &str) -> bool {
-        let Some(node) = self.nodes.get(id) else {
-            return false;
-        };
-        node.blocked_by.iter().any(|target| {
-            self.nodes
-                .get(target)
-                .is_some_and(|blocker| !blocker.closed)
+        self.unfinished(id).next().is_some()
+    }
+
+    /// Direct dependencies that have not closed, in declared order.
+    pub fn unfinished<'a>(&'a self, id: &str) -> impl Iterator<Item = &'a str> + use<'a> {
+        self.nodes.get(id).into_iter().flat_map(|node| {
+            node.blocked_by.iter().filter_map(|target| {
+                self.nodes
+                    .get(target)
+                    .is_some_and(|blocker| !blocker.closed)
+                    .then_some(target.as_str())
+            })
         })
     }
 

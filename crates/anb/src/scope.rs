@@ -1,26 +1,25 @@
 //! Which notebook a call acts on, and what may be done there.
 //!
-//! The user's notebook holds knowledge that outlives a repository:
-//! decisions and notes, and nothing to work on. So a verb that can only
-//! create or move a task or a question is refused the global scope — work
-//! is always project work. Every other verb reads or writes whatever the
-//! notebook it is pointed at happens to hold, and behaves the same in
-//! either scope. Where the two roots sit on disk is `fs_storage`'s.
+//! Personal and global notebooks hold private Decisions and Notes.
+//! Tasks and Questions belong to the shared project notebook, so commands
+//! that only create or move work are refused in either private scope.
+//! Knowledge commands use the selected notebook without changing their
+//! behavior. `fs_storage` resolves the three audience roots.
 
 use crate::cli::Command;
 use crate::recovery::subject;
 use anb_core::{NotebookError, RecordType};
 
-/// Why `command` cannot act on the user's notebook, when `global` names it
-/// and the verb has nothing to reach there.
+/// Why `command` cannot act on a personal or global notebook when
+/// `private` selects either audience.
 #[must_use]
-pub fn refused_globally(command: &Command, global: bool) -> Option<NotebookError> {
-    if !global {
+pub fn refused_privately(command: &Command, private: bool) -> Option<NotebookError> {
+    if !private {
         return None;
     }
     if matches!(command, Command::Setup { .. }) {
         return Some(NotebookError::InvalidArgument {
-            reason: "setup: installs into the project, where a session starts — the user's notebook needs no hook".to_owned(),
+            reason: "setup: installs into the project; personal and global notebooks need no separate hook".to_owned(),
         });
     }
     if !writes_work(command) {
@@ -29,13 +28,13 @@ pub fn refused_globally(command: &Command, global: bool) -> Option<NotebookError
     let verb = subject(command).verb;
     Some(NotebookError::InvalidArgument {
         reason: format!(
-            "{verb}: the user's notebook holds decisions and notes — work stays in the project"
+            "{verb}: personal and global notebooks hold Decisions and Notes; work stays in the project"
         ),
     })
 }
 
 /// Whether the call can only create or move a task or a question, and so
-/// can act on nothing the user's notebook holds. Matched whole, so a verb
+/// can act on nothing a private notebook holds. Matched whole, so a verb
 /// added later is placed rather than assumed; `add` is judged by the type
 /// it creates.
 fn writes_work(command: &Command) -> bool {
@@ -48,9 +47,13 @@ fn writes_work(command: &Command) -> bool {
         | Command::Hold { .. }
         | Command::Unhold { .. }
         | Command::Block { .. }
-        | Command::Unblock { .. }
-        | Command::Comment { .. } => true,
-        Command::Retire { .. }
+        | Command::Unblock { .. } => true,
+        Command::Comment { .. }
+        | Command::Import { .. }
+        | Command::Migrate { .. }
+        | Command::Recall { .. }
+        | Command::Hook
+        | Command::Retire { .. }
         | Command::Show { .. }
         | Command::List { .. }
         | Command::Ready { .. }
