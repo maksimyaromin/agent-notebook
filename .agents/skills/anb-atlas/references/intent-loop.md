@@ -7,7 +7,7 @@ metadata:
 
 # The intent loop
 
-The page collects the reader's decisions; apply them through the CLI under the `anb` method. Keep the notebook selector, captured record ids and processed batch with the review context. Graph `slice` does not identify the notebook: reuse the same `--notebook` or `--global` on every read and mutation, resolving an environment-selected location before the review. The HTML needs no filesystem access.
+The page collects the reader's decisions; apply them through the CLI under the `anb` method. Keep the notebook selector, captured record ids and processed batch with the review context. Graph `slice` does not identify the notebook: reuse the same `--notebook`, `--personal` or `--global` selection on every read and mutation, preserving the project context for a personal notebook. Resolve an environment-selected location before the review. The HTML needs no filesystem access.
 
 ## Comments are addressed
 
@@ -40,16 +40,16 @@ For each unprocessed comment, in the order given:
 
 | Intent | Action | Why |
 |---|---|---|
-| Start this Task | Read Status; log and hold a different active Task with the handoff reason, then start the selected Task | The author method keeps one Task in flight |
+| Start this Task | Read current Status and start the selected Task; use `--join` only for intentional collaboration | A session has one focus, but one person may have several sessions; switching attention does not put other work on hold |
 | Hold until X | `hold <id> --reason "<X>"` | The reason identifies what permits resumption |
 | This Task or Question duplicates Y | Close with a reason citing Y, then archive | Cancellation records why no further work is needed |
-| This Note or Decision duplicates Y | Confirm the surviving record covers it, preserve the existing body and append the reason and Y with `edit --body`, then retire and archive | Knowledge has a different lifecycle from work |
+| This Note or Decision duplicates Y | Confirm the surviving record covers it, then `retire <id> --body "<reason and Y>"` and archive | Retirement appends the explanation without replacing existing knowledge |
 | Clarify this model, spec or ruling | Edit the existing record when its meaning remains the same | A wording correction does not create a new choice |
 | Replace this ruling | Create the accepted replacement Decision with `--supersedes <old>`; if the replacement is unspecified, ask what should change | An obsolete ruling must retain its successor and rationale |
-| This Task or epic is done | Check the promised outcome and its evidence, satisfy any required review, then close with proof and archive | Closed children alone do not prove the overall result |
-| Explore this possibility | Create or update an idea Note from the commented record; add investigation work when needed | A possibility can develop without committing to delivery |
+| This Task or epic is done | Verify the promised outcome, satisfy any required review, then `close <id> --body "<result, evidence and limits>"`; archive if it no longer belongs in the working set | Closed children alone do not prove the overall result; linked knowledge stays live |
+| Explore this possibility | Investigate within the authorized scope; use a comment for a brief finding, an idea Note for a durable proposal, or a Task for sustained investigation | Exploration does not require a document pipeline or authorize delivery |
 
-Use `--via` with your actual tool name on every `add` and `comment`. Use the commented record as origin when it produced a new record, and bare ids for supporting context. Keep existing origins when merely editing knowledge.
+Use `--via` with your actual tool name on additions, comments and outcomes. Use the commented record as origin when it produced a new record, and bare ids for supporting context. Keep existing origins when merely editing knowledge. A personal or global notebook holds Notes and Decisions, not project work; a map comment does not authorize silently moving its content into the project.
 
 Then run `anb check`, and draw a fresh page if the reader wants to see the result. The picture is regenerated, never patched.
 

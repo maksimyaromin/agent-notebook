@@ -1,12 +1,16 @@
 //! The binary: wire the real world — cwd, clock, identity — to the shell
 //! and print one reply.
 
+mod actions;
+mod ids;
+mod locations;
+
 use anb::cli::{Cli, Command};
-use anb::fs_storage::{FsStorage, NOTEBOOK_ENV, notebook_root, unusable_root, user_root};
+use anb::fs_storage::FsStorage;
 use anb::lock;
 use anb::reconcile::lost_proofs;
 use anb::reply::{Host, execute};
-use anb::scope::refused_globally;
+use anb::scope::refused_privately;
 use anb::{json, text};
 use anb_core::{NotebookError, StorageError};
 use clap::Parser;
@@ -44,10 +48,10 @@ fn emitted(stream: &mut impl Write, payload: &str, exit: ExitCode) -> ExitCode {
     }
 }
 
-/// An unknown verb joins the recovery-payload contract; everything else
-/// clap refuses (or serves, like `--help`) keeps clap's rendering.
+/// Parser failures use the same recovery payload as command failures.
+/// Explicit help and version requests keep clap's rendering.
 fn parse_refused(error: &clap::Error) -> ExitCode {
-    let Some(recovery) = anb::recovery::unknown_command_recovery(error) else {
+    let Some(recovery) = anb::recovery::parse_recovery(error) else {
         error.exit();
     };
     // The command line failed to parse, so the `--json` flag is read raw —
@@ -64,94 +68,100 @@ fn parse_refused(error: &clap::Error) -> ExitCode {
 /// payload for stderr.
 fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     let subject = anb::recovery::subject(&cli.command);
-    let hook = matches!(cli.command, Command::Status { hook: true, .. });
-    let render_failure = |error: &NotebookError| {
-        if cli.json {
-            json::render_error(error, &subject)
-        } else {
-            text::render_error(error, &subject)
-        }
+    let native = matches!(cli.command, Command::Hook);
+    let json_output = cli.json;
+    let actions = actions::Actions::new(&cli);
+    let private_refusal = refused_privately(&cli.command, cli.global || cli.personal);
+    let result = match private_refusal {
+        Some(ref error) => Err(error.clone()),
+        None => invoked(cli, &actions),
     };
-
-    // A session starts whatever state the notebook is in, so the hook's
-    // fail-soft reaches the wiring below as well as the verb: everything
-    // between here and `execute` can fail before a reply exists to soften.
-    let stopped = |error: &NotebookError| -> Result<(String, ExitCode), String> {
-        if hook {
-            return Ok((String::new(), ExitCode::SUCCESS));
-        }
-        Err(render_failure(error))
-    };
-
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
+    match result {
+        Ok(answer) => Ok(answer),
         Err(error) => {
-            return stopped(&NotebookError::Storage(StorageError::Io {
-                path: ".".to_owned(),
-                detail: error.to_string(),
-            }));
+            let mut document =
+                json::recovery_value(&anb::recovery::Recovery::new(&error, &subject));
+            if private_refusal.is_none() {
+                actions.qualify(&mut document);
+            }
+            if native {
+                return Ok((anb::hook::payload(&document), ExitCode::SUCCESS));
+            }
+            Err(if json_output {
+                document.to_string()
+            } else {
+                json::toon(&document)
+            })
         }
-    };
-    let root = match notebook_root(
-        &cwd,
-        cli.notebook.as_deref(),
-        cli.global,
-        std::env::home_dir().as_deref(),
-        std::env::var_os(NOTEBOOK_ENV).as_deref(),
-    ) {
-        Ok(root) => root,
-        Err(reason) => return stopped(&NotebookError::InvalidArgument { reason }),
-    };
-    if let Some(refusal) = refused_globally(&cli.command, cli.global) {
-        return stopped(&refusal);
     }
-    if let Some(reason) = unusable_root(&root) {
-        return stopped(&NotebookError::InvalidArgument { reason });
-    }
-    let mut storage = FsStorage::new(root.clone());
-    // The user's notebook is held to the same rules as any other root, and
-    // a root that cannot hold a notebook is no root: every surface that
-    // reads behind the project — the Status pairs, the write-time nudge,
-    // the reach of a link under check — then reads nothing rather than a
-    // directory the seam would refuse to serve.
-    let user = user_root(std::env::home_dir().as_deref())
-        .ok()
-        .filter(|user| unusable_root(user).is_none())
-        .map(FsStorage::new);
+}
+
+fn invoked(mut cli: Cli, actions: &actions::Actions) -> Result<(String, ExitCode), NotebookError> {
+    let native = matches!(cli.command, Command::Hook);
+    let session = if native {
+        anb::hook::session(cli.session.clone())?
+    } else {
+        anb::session::resolve(cli.session.clone())?
+    };
+    let locations = locations::Locations::resolve(&cli)?;
+    let mut storage = FsStorage::new(locations.root.clone());
+    let user = locations
+        .global
+        .as_ref()
+        .map(|path| FsStorage::new(path.clone()));
+    let personal = locations
+        .personal
+        .as_ref()
+        .map(|path| FsStorage::new(path.clone()));
+    // Named guards keep every participating notebook locked through rendering.
+    let _lock = lock::taken(&locations.root, &cli.command)?;
+    let _recall_locks = locations
+        .global
+        .iter()
+        .chain(locations.personal.iter())
+        .map(|path| lock::shared(path))
+        .collect::<Result<Vec<_>, _>>()?;
     let today = jiff::Zoned::now().date().to_string();
-
-    // Bound to a name, so the claim lives until the command has answered;
-    // `let _ =` would release it before the first read.
-    let _lock = match lock::taken(&root, &cli.command) {
-        Ok(lock) => lock,
-        Err(error) => return stopped(&NotebookError::Storage(error)),
-    };
-
-    let lost = |cited: &[anb_core::CitedProof]| lost_proofs(&root, cited);
+    let lost = |cited: &[anb_core::CitedProof]| lost_proofs(&locations.root, cited);
     let host = Host {
+        session: session.as_deref(),
         identity: anb::identity::name,
         read_file: &read_file,
         lost_proofs: &lost,
-        user_notebook: user.as_ref().map(|user| user as &dyn anb_core::Storage),
-        project_dir: &cwd,
+        user_notebook: user.as_ref().map(|source| source as &dyn anb_core::Storage),
+        personal_notebook: personal
+            .as_ref()
+            .map(|source| source as &dyn anb_core::Storage),
+        audience: locations.audience,
+        project_dir: &locations.cwd,
         today: &today,
     };
-    match execute(cli.command, &mut storage, host) {
-        Ok(reply) => {
-            let exit = if reply.failed() {
-                ExitCode::FAILURE
-            } else {
-                ExitCode::SUCCESS
-            };
-            let output = if cli.json {
-                json::render(&reply)
-            } else {
-                text::render(&reply, &today)
-            };
-            Ok((output, exit))
-        }
-        Err(error) => Err(render_failure(&error)),
+    ids::assign(&mut cli.command)?;
+    let reply = execute(cli.command, &mut storage, host)?;
+    let exit = if reply.failed() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    };
+    if !cli.json
+        && let anb::reply::Reply::Skill(anb::reply::SkillReply::Printed(skill)) = &reply
+    {
+        return Ok((skill.clone(), exit));
     }
+    let document = json::value_with(&reply, |document| {
+        actions.qualify(document);
+        if native {
+            document["session"] = serde_json::json!(session);
+        }
+    });
+    let output = if native {
+        anb::hook::payload(&document)
+    } else if cli.json {
+        document.to_string()
+    } else {
+        json::toon(&document)
+    };
+    Ok((output, exit))
 }
 
 /// The compact-JSON renderings carry no newline of their own; the terminal

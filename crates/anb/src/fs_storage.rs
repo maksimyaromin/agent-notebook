@@ -1,18 +1,46 @@
 //! The filesystem adapter behind the Storage seam, and where the notebook
 //! root lives on disk.
 //!
-//! Writes are atomic — a temp file in the target directory, then a rename —
-//! so a reader never sees a half-written record.
+//! Writes sync a new temporary file before replacing the target. Unix
+//! hosts also sync directory entries, including newly created parents.
+//! A sync error after rename can mean the write is visible but not durable;
+//! callers reconcile exact bytes before retrying a multi-file operation.
+//! Private `.tmp` directories exclude their contents from Git before a
+//! metadata write, independently of the notebook's own ignore rules.
 //!
 //! A symlink is never a record, wherever it points: the seam cannot vouch
 //! for a file it did not write, and following one would let a link
 //! committed to a project decide what a later reader's `show` prints.
 
 use anb_core::{ARCHIVE_DIR, RecordType, Storage, StorageError};
+use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
+use std::fmt::Write as _;
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Private practices for a local project. Linked worktrees use their common
+/// Git directory as identity; unrelated checkouts and non-Git directories do
+/// not share personal preferences just because their names match.
+///
+/// # Errors
+/// A project path that cannot be resolved.
+pub fn personal_root(project: &Path, user: &Path) -> Result<PathBuf, StorageError> {
+    let anchor = project_anchor(project);
+    let identity = crate::git::common_dir(anchor).unwrap_or_else(|| anchor.to_path_buf());
+    let identity = identity.canonicalize().map_err(|error| StorageError::Io {
+        path: identity.display().to_string(),
+        detail: error.to_string(),
+    })?;
+    let digest = Sha256::digest(identity.as_os_str().as_encoded_bytes());
+    let mut key = String::with_capacity(64);
+    for byte in digest {
+        let _ = write!(key, "{byte:02x}");
+    }
+    Ok(user.join("projects").join(key))
+}
 
 /// The project `start` belongs to: the nearest ancestor already holding a
 /// notebook or a repository, else `start` itself. A directory above `.git`
@@ -81,7 +109,7 @@ pub fn notebook_root(
 }
 
 /// The user's own notebook root inside `home`: the notebook `--global`
-/// names, and the one a project Status reads behind its own.
+/// names, and the one Recall may include as an explicit personal audience.
 ///
 /// # Errors
 /// The reason, when there is no absolute home to name one in.
@@ -113,6 +141,8 @@ pub fn unusable_root(root: &Path) -> Option<String> {
         ));
     }
     record_directories()
+        .chain(std::iter::once(".migrations.tmp".to_owned()))
+        .chain(std::iter::once(crate::session::DIRECTORY.to_owned()))
         .map(|relative| root.join(relative))
         .find(|directory| is_symlink(directory))
         .map(|directory| {
@@ -191,6 +221,52 @@ impl FsStorage {
             detail: error.to_string(),
         }
     }
+
+    fn ignore_private_directory(&self, path: &str) -> Result<(), StorageError> {
+        let Some(directory) = private_directory(path) else {
+            return Ok(());
+        };
+        let absolute = self.absolute(directory);
+        if is_symlink(&absolute) {
+            return Err(self.failed(directory, &symlink_refused()));
+        }
+        let ignore = format!("{directory}/.gitignore");
+        match self.read(&ignore) {
+            Ok(content) if matches!(content.as_str(), "*" | "*\n") => Ok(()),
+            Ok(_) => Err(self.failed(&ignore, &std::io::Error::new(
+                ErrorKind::InvalidInput,
+                "private metadata needs an internal .gitignore containing only '*'; preserve and inspect the existing file",
+            ))),
+            Err(StorageError::NotFound { .. }) => self.write_atomically(&ignore, "*\n"),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn write_atomically(&self, path: &str, content: &str) -> Result<(), StorageError> {
+        let target = self.absolute(path);
+        if is_symlink(&target) {
+            return Err(self.failed(path, &symlink_refused()));
+        }
+        let directory = target.parent().expect("a joined path has a parent");
+        create_directory_tree(directory).map_err(|error| self.failed(path, &error))?;
+        let permissions = match fs::metadata(&target) {
+            Ok(metadata) => Some(metadata.permissions()),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => return Err(self.failed(path, &error)),
+        };
+        let (mut pending, mut file) =
+            Pending::create(&target).map_err(|error| self.failed(path, &error))?;
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)
+                .map_err(|error| self.failed(path, &error))?;
+        }
+        file.write_all(content.as_bytes())
+            .map_err(|error| self.failed(path, &error))?;
+        file.sync_all().map_err(|error| self.failed(path, &error))?;
+        fs::rename(&pending.path, &target).map_err(|error| self.failed(path, &error))?;
+        pending.persisted = true;
+        sync_directory(directory).map_err(|error| self.failed(path, &error))
+    }
 }
 
 impl Storage for FsStorage {
@@ -200,9 +276,16 @@ impl Storage for FsStorage {
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(self.failed(dir, &error)),
         };
+        let private = private_directory(&format!("{dir}/")).is_some();
         let mut paths = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| self.failed(dir, &error))?;
+            if private && is_symlink(&entry.path()) {
+                return Err(StorageError::Io {
+                    path: entry.path().display().to_string(),
+                    detail: "a symlink is not private metadata".to_owned(),
+                });
+            }
             if !names_a_file(&entry) {
                 continue;
             }
@@ -219,6 +302,9 @@ impl Storage for FsStorage {
     fn read(&self, path: &str) -> Result<String, StorageError> {
         let absolute = self.absolute(path);
         if is_symlink(&absolute) {
+            if private_directory(path).is_some() {
+                return Err(self.failed(path, &symlink_refused()));
+            }
             return Err(StorageError::NotFound {
                 path: path.to_owned(),
             });
@@ -238,17 +324,8 @@ impl Storage for FsStorage {
     }
 
     fn write(&mut self, path: &str, content: &str) -> Result<(), StorageError> {
-        let target = self.absolute(path);
-        if is_symlink(&target) {
-            return Err(self.failed(path, &symlink_refused()));
-        }
-        let directory = target.parent().expect("a joined path has a parent");
-        fs::create_dir_all(directory).map_err(|error| self.failed(path, &error))?;
-        let mut pending = Pending::beside(&target);
-        fs::write(&pending.path, content).map_err(|error| self.failed(path, &error))?;
-        fs::rename(&pending.path, &target).map_err(|error| self.failed(path, &error))?;
-        pending.persisted = true;
-        Ok(())
+        self.ignore_private_directory(path)?;
+        self.write_atomically(path, content)
     }
 
     fn remove(&mut self, path: &str) -> Result<(), StorageError> {
@@ -278,6 +355,17 @@ fn names_a_file(entry: &fs::DirEntry) -> bool {
     entry.file_type().is_ok_and(|kind| kind.is_file())
 }
 
+fn private_directory(path: &str) -> Option<&str> {
+    path.split_once('/')
+        .map(|(directory, _)| directory)
+        .filter(|directory| {
+            directory.eq_ignore_ascii_case(".tmp")
+                || Path::new(directory)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("tmp"))
+        })
+}
+
 fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|found| found.is_symlink())
 }
@@ -286,30 +374,75 @@ fn symlink_refused() -> std::io::Error {
     std::io::Error::new(ErrorKind::InvalidInput, "a symlink is not a record")
 }
 
-/// The file a write lands in before it is renamed into place. It removes
-/// itself unless the rename claimed it, so no failure — a full disk, a
-/// quota, a killed process mid-call — leaves a stray behind.
+/// A temporary file owned by one write. Error unwinding removes it unless
+/// the rename committed; abrupt process termination may leave an ignored sibling.
 ///
-/// The bytes go through `fs::write`, which creates with the umask the user
-/// set, because a notebook is committed to a project and read by whoever
-/// reads the project.
+/// A new file uses the process umask; a replacement receives its target's
+/// permissions before it becomes visible.
 struct Pending {
     path: PathBuf,
     persisted: bool,
 }
 
 impl Pending {
-    /// Beside the target, so the rename stays within one filesystem and
-    /// therefore stays atomic. One writer per process holds one of these at
-    /// a time, so the pid is name enough.
-    fn beside(target: &Path) -> Pending {
+    fn create(target: &Path) -> std::io::Result<(Pending, fs::File)> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
         let directory = target.parent().unwrap_or(Path::new("."));
         let name = target.file_name().unwrap_or_default().to_string_lossy();
-        Pending {
-            path: directory.join(format!(".{name}.{}.{TEMP_SUFFIX}", std::process::id())),
-            persisted: false,
+        loop {
+            let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+            let path = directory.join(format!(
+                ".{name}.{}.{sequence}.{TEMP_SUFFIX}",
+                std::process::id()
+            ));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => {
+                    return Ok((
+                        Pending {
+                            path,
+                            persisted: false,
+                        },
+                        file,
+                    ));
+                }
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
         }
     }
+}
+
+/// Sync each new directory's entry before a later record write depends on it.
+pub(crate) fn create_directory_tree(directory: &Path) -> std::io::Result<()> {
+    let missing: Vec<&Path> = directory
+        .ancestors()
+        .filter(|path| !path.as_os_str().is_empty())
+        .take_while(|path| !path.exists())
+        .collect();
+    fs::create_dir_all(directory)?;
+    for created in missing.iter().rev() {
+        sync_directory(
+            created
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .unwrap_or(Path::new(".")),
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(directory: &Path) -> std::io::Result<()> {
+    fs::File::open(directory)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_directory: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 impl Drop for Pending {

@@ -6,16 +6,15 @@
 //! handed it, which is what keeps a verb to one pass over the notebook.
 
 use crate::debt;
-use crate::encode;
 use crate::grammar::{self, Residence};
 use crate::graph::{TaskGraph, TaskNode};
 use crate::mention;
 use crate::record::{REF_KEYS, Record, RecordType, TaskState, linked_record};
 use crate::reply::{
-    Attribution, Blocker, Cited, CitedProof, Counts, Epic, GraphNode, ListedRecord, ReadyTask,
+    Attribution, Blocker, CitedProof, Counts, Epic, GraphNode, ListedRecord, ReadyTask,
 };
-use crate::request::{Draft, Filter};
-use crate::resolve::{Resolver, is_archived, path_stem, type_of};
+use crate::request::Filter;
+use crate::resolve::{Resolver, is_archived, path_stem};
 use crate::status::{ActiveTask, HeldTask, OpenQuestion, ReviewTask};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -111,23 +110,6 @@ pub(super) fn cited_proofs(records: &[Record]) -> Vec<CitedProof> {
         .collect()
 }
 
-/// The Notes a record links, each once, in the order it names them. A
-/// target that is not a Note id names no record — a link is free text
-/// until the grammar says otherwise, and nothing may turn one into a path.
-pub(super) fn note_links(record: &Record) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    record
-        .file()
-        .field_values("link")
-        .filter_map(|link| match grammar::split_link(link)? {
-            ("note", target) => Some(target.to_owned()),
-            _ => None,
-        })
-        .filter(|target| type_of(target) == Some(RecordType::Note))
-        .filter(|target| seen.insert(target.clone()))
-        .collect()
-}
-
 /// The order records were laid down: `created`, then id.
 fn oldest_first(left: &Record, right: &Record) -> std::cmp::Ordering {
     created(left)
@@ -137,50 +119,6 @@ fn oldest_first(left: &Record, right: &Record) -> std::cmp::Ordering {
 
 fn created(record: &Record) -> &str {
     record.file().field("created").unwrap_or_default()
-}
-
-/// The standing Decisions among `records` that a draft may conflict with.
-/// Computed at write time because the writing agent, holding full context,
-/// is the cheapest judge that will ever see the pair; the tool prints it
-/// and stops.
-pub(super) fn conflict_candidates(
-    draft: &Draft,
-    records: &[Record],
-    resolvable: &Resolver<'_>,
-) -> Vec<Cited> {
-    if draft.record_type != RecordType::Decision || draft.supersedes.is_some() {
-        return Vec::new();
-    }
-    let draft_tags: BTreeSet<&str> = draft.tags.iter().map(String::as_str).collect();
-    let cited_ids = mention::mentions(&draft.body);
-    let mut hits: Vec<&Record> = records
-        .iter()
-        .filter(|record| {
-            is_standing_decision(record, resolvable)
-                && looks_related(record, &draft_tags, &cited_ids)
-        })
-        .collect();
-    hits.sort_by(|left, right| oldest_first(left, right));
-    hits.into_iter().map(Cited::of).collect()
-}
-fn is_standing_decision(record: &Record, resolvable: &Resolver<'_>) -> bool {
-    record.record_type() == Some(RecordType::Decision)
-        && !is_archived(record.path())
-        && record.is_live()
-        && !debt::is_excluded(record, resolvable)
-}
-fn looks_related(record: &Record, draft_tags: &BTreeSet<&str>, cited_ids: &[&str]) -> bool {
-    shared_tag_count(record, draft_tags) >= 2 || cited_ids.contains(&path_stem(record.path()))
-}
-fn shared_tag_count(record: &Record, draft_tags: &BTreeSet<&str>) -> usize {
-    let Some(tags) = record.file().field("tags") else {
-        return 0;
-    };
-    tags.split(',')
-        .map(str::trim)
-        .collect::<BTreeSet<&str>>()
-        .intersection(draft_tags)
-        .count()
 }
 
 /// The records this one names as a blocker, as its Origin or as a link
@@ -219,6 +157,13 @@ fn task_graph(records: &[Record]) -> TaskGraph {
     TaskGraph::new(nodes)
 }
 
+pub(super) fn unfinished_dependencies(records: &[Record], id: &str) -> Vec<String> {
+    task_graph(records)
+        .unfinished(id)
+        .map(str::to_owned)
+        .collect()
+}
+
 pub(super) fn listed_row(record: &Record, resolvable: &Resolver<'_>) -> ListedRecord {
     let file = record.file();
     let state = if debt::is_excluded(record, resolvable) {
@@ -231,20 +176,13 @@ pub(super) fn listed_row(record: &Record, resolvable: &Resolver<'_>) -> ListedRe
         state,
         priority: file.field("priority").and_then(|value| value.parse().ok()),
         attribution: Attribution::of(record),
-        title: file
-            .field("title")
-            .map(str::to_owned)
-            .map(encode::bounded_text),
+        title: file.field("title").map(str::to_owned),
     }
 }
 
-/// Every id within `depth` edges of `from`, `from` itself included: what it
-/// waits on and was born from, however far back, and what waits on it and
-/// was born inside it, however far forward.
-///
-/// The walk is what lets a graph answer for a notebook of thousands. Both
-/// directions are walked because a reader asking about one Task asks the
-/// same question twice — what has to settle before it, and what it releases.
+/// Focus follows graph relationships in either direction. Distance is the
+/// shortest path, so records with a shared origin are two edges apart.
+/// Lifecycle pointers are not graph edges and do not enter this walk.
 pub(super) fn neighbourhood<'a>(
     records: &[&'a Record],
     from: &str,
@@ -254,37 +192,27 @@ pub(super) fn neighbourhood<'a>(
         .iter()
         .map(|record| path_stem(record.path()))
         .collect();
-    let mut ahead: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    let mut behind: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let Some(root) = drawn.get(from).copied() else {
+        return BTreeSet::new();
+    };
+    let mut neighbours: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for &record in records {
         let id = path_stem(record.path());
-        for target in kin_of(record).filter(|target| drawn.contains(target)) {
-            ahead.entry(id).or_default().push(target);
-            behind.entry(target).or_default().push(id);
+        let targets = kin_of(record).chain(mention::mentions(record.file().body()));
+        for target in targets.filter(|target| drawn.contains(target)) {
+            neighbours.entry(id).or_default().push(target);
+            neighbours.entry(target).or_default().push(id);
         }
     }
-    let root = drawn.get(from).copied();
-    let mut reached: BTreeSet<&str> = root.into_iter().collect();
-    for edges in [&ahead, &behind] {
-        reached.extend(walked(edges, root, depth));
-    }
-    reached
-}
-
-/// The ids `depth` steps out from `root` along `edges`, breadth first. Each
-/// direction keeps its own visits, so a Task reached one way is still walked
-/// through the other.
-fn walked<'a>(
-    edges: &BTreeMap<&'a str, Vec<&'a str>>,
-    root: Option<&'a str>,
-    depth: usize,
-) -> BTreeSet<&'a str> {
-    let mut visited: BTreeSet<&str> = root.into_iter().collect();
-    let mut frontier: Vec<&str> = visited.iter().copied().collect();
+    let mut visited = BTreeSet::from([root]);
+    let mut frontier = vec![root];
     for _ in 0..depth {
+        if frontier.is_empty() {
+            break;
+        }
         frontier = frontier
             .iter()
-            .filter_map(|at| edges.get(at))
+            .filter_map(|at| neighbours.get(at))
             .flatten()
             .copied()
             .filter(|target| visited.insert(target))
@@ -403,7 +331,7 @@ fn ready_row(record: &Record) -> ReadyTask {
         priority: file.field("priority").and_then(|value| value.parse().ok()),
         created: file.field("created").unwrap_or_default().to_owned(),
         attribution: Attribution::of(record),
-        title: encode::bounded_text(file.field("title").unwrap_or_default().to_owned()),
+        title: file.field("title").unwrap_or_default().to_owned(),
     }
 }
 
@@ -436,16 +364,14 @@ fn open_rows(
     rows
 }
 
-/// The membership edges of the notebook, indexed once. Each is read from
-/// one end and followed from the other, so answering them by scanning every
-/// record per hub would cost the notebook squared.
+/// Origin descendants indexed for membership, with dependency edges and
+/// closed states retained for epic detection and progress. A membership
+/// walk visits indexed descendants instead of rescanning the corpus.
 pub(super) struct MembershipIndex<'a> {
     /// What each record waits on, by id.
     waits_on: BTreeMap<&'a str, Vec<&'a str>>,
     /// What was born inside each record, by the origin's id.
     born_inside: BTreeMap<&'a str, Vec<&'a str>>,
-    /// What links each record, by the target's id.
-    linked_by: BTreeMap<&'a str, Vec<&'a str>>,
     /// The ids of the Tasks that have closed.
     closed: BTreeSet<&'a str>,
 }
@@ -455,7 +381,6 @@ impl<'a> MembershipIndex<'a> {
         let mut index = MembershipIndex {
             waits_on: BTreeMap::new(),
             born_inside: BTreeMap::new(),
-            linked_by: BTreeMap::new(),
             closed: BTreeSet::new(),
         };
         // Live before archived, so the duplicate-id corruption an
@@ -475,21 +400,11 @@ impl<'a> MembershipIndex<'a> {
             if let Some(origin) = record.origin() {
                 index.born_inside.entry(origin).or_default().push(id);
             }
-            for (_, target) in record.linked_records() {
-                index.linked_by.entry(target).or_default().push(id);
-            }
             if record.state() == Some(TaskState::Closed.word()) {
                 index.closed.insert(id);
             }
         }
         index
-    }
-
-    fn edges_from(&self, id: &str) -> impl Iterator<Item = &'a str> + '_ {
-        let waits_on = self.waits_on.get(id).map_or(&[][..], Vec::as_slice);
-        let born_inside = self.born_inside.get(id).map_or(&[][..], Vec::as_slice);
-        let linked_by = self.linked_by.get(id).map_or(&[][..], Vec::as_slice);
-        waits_on.iter().chain(born_inside).chain(linked_by).copied()
     }
 
     /// An epic is a hub Task, distinguished by its edges: it is blocked by
@@ -517,25 +432,14 @@ impl<'a> MembershipIndex<'a> {
             .is_some_and(|waits| waits.iter().any(|target| children.contains(target)))
     }
 
-    /// Every record inside `hub`'s scope, the hub among them: what the epic
-    /// waits on, what was born inside it, and what links it, each followed
-    /// as far as it goes.
-    ///
-    /// Every edge means membership, each written from the end that
-    /// carries it, and every one carries through depth. A blocker of a
-    /// child must close before the child, which must close before the hub,
-    /// so it is work this epic waits on however far down it sits — and
-    /// following it only to the first tier would blind the queue to a hub
-    /// whose children were themselves assembled from the hub side, which
-    /// is how an epic older than the edit surface is built. A link is
-    /// followed from the record that declares it into what it names, so a
-    /// hub reaches the documents that declare it their schema or their
-    /// rule without any of them repeating the id in prose.
+    /// The subject and its transitive origin descendants. A prerequisite
+    /// constrains readiness but does not become part of the subject;
+    /// contextual links belong to neighbourhood queries instead.
     pub(super) fn scope_of(&self, hub: &'a str) -> BTreeSet<&'a str> {
         let mut scope = BTreeSet::from([hub]);
         let mut frontier = vec![hub];
         while let Some(id) = frontier.pop() {
-            for reached in self.edges_from(id) {
+            for &reached in self.born_inside.get(id).into_iter().flatten() {
                 if scope.insert(reached) {
                     frontier.push(reached);
                 }
@@ -547,8 +451,8 @@ impl<'a> MembershipIndex<'a> {
 
 /// The hubs and where each stands, in notebook order. Progress counts the
 /// hub's own `blocked-by` children, which are its statement of what it
-/// waits on, while `next` reads the whole scope, since anything the epic
-/// waits on is work it still owes. A hub never nominates itself: one that
+/// waits on, while `next` selects among its origin descendants, not external
+/// prerequisites. A hub never nominates itself: one that
 /// reaches `ready` is asking for its acceptance close, not for work.
 pub(super) fn epic_rows(
     records: &[Record],
@@ -629,7 +533,7 @@ pub(super) fn held_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<
     .into_iter()
     .map(|(record, attribution)| HeldTask {
         id: path_stem(record.path()).to_owned(),
-        reason: encode::bounded_text(record.hold().unwrap_or_default().to_owned()),
+        reason: record.hold().unwrap_or_default().to_owned(),
         until: record.hold_until().map(str::to_owned),
         attribution,
     })
@@ -659,11 +563,8 @@ fn own_first<'a>(
         .collect()
 }
 
-/// The active Tasks not on hold: the dashboard's active lines, the first
-/// carrying the last log line — the mechanical "where I stopped". The
-/// caller's own come first; within a tier the most recently touched leads.
-/// A held one is paused on purpose and is not where a session resumes;
-/// [`held_tasks`] names it instead.
+/// Active Tasks retain their own continuations. Recency orders a work list;
+/// it does not select which parallel session the caller means to resume.
 pub(super) fn active_tasks(live_valid: &[&Record], identity: Option<&str>) -> Vec<ActiveTask> {
     let active = live_valid.iter().copied().filter(|record| {
         record.record_type() == Some(RecordType::Task)
@@ -676,26 +577,34 @@ pub(super) fn active_tasks(live_valid: &[&Record], identity: Option<&str>) -> Ve
             .then_with(|| path_stem(left.path()).cmp(path_stem(right.path())))
     })
     .into_iter()
-    .enumerate()
-    .map(|(position, (record, attribution))| ActiveTask {
+    .map(|(record, attribution)| ActiveTask {
         id: path_stem(record.path()).to_owned(),
-        title: encode::bounded_text(record.file().field("title").unwrap_or_default().to_owned()),
+        title: record.file().field("title").unwrap_or_default().to_owned(),
         attribution,
-        log: (position == 0)
-            .then(|| last_log_line(record))
-            .flatten()
-            .map(encode::bounded_text),
+        log: last_log_line(record),
     })
     .collect()
 }
 
-/// The last non-empty body line; the log convention makes it meaningful,
-/// nothing parses it.
+/// The latest dated log entry, including its indented Markdown continuation.
+/// Older handoffs without a dated log fall back to their last non-empty line.
 pub(super) fn last_log_line(record: &Record) -> Option<String> {
-    record
-        .file()
-        .body()
-        .lines()
+    let body = record.file().body();
+    let lines = body.lines().collect::<Vec<_>>();
+    let last_entry = lines.iter().rposition(|line| {
+        line.strip_prefix("- ")
+            .and_then(|text| text.get(..10))
+            .is_some_and(|day| crate::date::day_number(day).is_some())
+    });
+    if let Some(start) = last_entry {
+        let end = lines[start + 1..]
+            .iter()
+            .position(|line| !line.is_empty() && !line.starts_with("  "))
+            .map_or(lines.len(), |relative| start + 1 + relative);
+        return Some(lines[start..end].join("\n").trim_end().to_owned());
+    }
+    lines
+        .into_iter()
         .rev()
         .find(|line| !line.trim().is_empty())
         .map(str::to_owned)
@@ -730,9 +639,7 @@ pub(super) fn open_questions(live_valid: &[&Record], identity: Option<&str>) -> 
             id: path_stem(record.path()).to_owned(),
             created: created(record).to_owned(),
             attribution,
-            title: encode::bounded_text(
-                record.file().field("title").unwrap_or_default().to_owned(),
-            ),
+            title: record.file().field("title").unwrap_or_default().to_owned(),
         })
         .collect()
 }

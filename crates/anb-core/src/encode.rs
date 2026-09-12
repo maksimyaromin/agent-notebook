@@ -1,26 +1,9 @@
-//! The encoding every reply surface shares — the bound on a list, the
-//! bound on a text, and the quoting rule — so no two surfaces spell the
-//! same value differently.
-//!
-//! No cell carrying a record's own text is written raw. Inside a table the
-//! comma is the delimiter, so [`quoted_if_delimited`] quotes only a value
-//! that would break out of its cell; on a line of its own there is no
-//! delimiter, so [`quoted_line_text`] always quotes and the reader can see
-//! where the text ends.
+//! Text bounds, log signatures, shell arguments and record string quoting.
+//! Reply document encoding belongs to the host.
 
 use std::fmt::Write as _;
 
-/// How many rows a reply carries before it names the rest as a count.
-///
-/// What a command derives from the notebook is answered at a fixed size,
-/// whatever the notebook holds; a listing lifts that with `--all`, and a
-/// consequence named in passing has no lift. A record's own bytes are not
-/// derived, so `show` prints them as they stand — until a body outgrows a
-/// reply on its own, when it too is bounded and `--all` lifts it.
-///
-/// Where a reply heads a block with `label[n]`, `n` is the whole set and
-/// the rows under it are as many as the reply affords, with the shortfall
-/// named by the block's own hint.
+/// The default row bound for hosts; total and omitted counts are separate.
 pub const ROW_BOUND: usize = 20;
 
 /// How many characters of a record's own text a derived reply carries.
@@ -69,13 +52,6 @@ fn char_boundary(value: &str, chars: usize) -> usize {
         .char_indices()
         .nth(chars)
         .map_or(value.len(), |(index, _)| index)
-}
-
-/// The ids named inline in a reply, comma-separated: the first `bound` of
-/// them, then how many were left out.
-#[must_use]
-pub fn id_list(ids: &[String], bound: usize) -> String {
-    bounded_join(ids, ", ", bound)
 }
 
 /// An edge walk named inline in a message — a dependency cycle, a lineage.
@@ -134,13 +110,6 @@ pub fn author(by: Option<&str>, via: Option<&str>) -> String {
     }
 }
 
-/// A table cell for an optional value: `-` for none, the value quoted if
-/// it must be.
-#[must_use]
-pub fn absent_or(value: Option<&str>) -> String {
-    value.map_or_else(|| "-".to_owned(), quoted_if_delimited)
-}
-
 /// A value as one shell word, so a command a reply names stays typeable:
 /// single-quoted unless every character is one a shell reads as itself.
 #[must_use]
@@ -155,13 +124,7 @@ pub fn shell_word(value: &str) -> String {
     }
 }
 
-/// A table value carrying the row delimiter, a quote, or a character a
-/// terminal acts on is JSON-quoted; everything else stays bare.
-///
-/// A record's text is whatever a hand wrote, and a terminal obeys what is
-/// in it: an unescaped `\r` or `ESC[2K` rewrites the row above and forges a
-/// line about another record, and a bidi override reverses what follows it.
-/// Quoted, such a character cannot reach past the cell it sits in.
+/// Quote inline diagnostic values containing commas, quotes or terminal controls.
 #[must_use]
 pub fn quoted_if_delimited(value: &str) -> String {
     if value.contains([',', '"']) || value.contains(acted_on_by_a_terminal) {
@@ -169,14 +132,6 @@ pub fn quoted_if_delimited(value: &str) -> String {
     } else {
         value.to_owned()
     }
-}
-
-/// A record's text on a line of its own, always quoted: with no delimiter
-/// to break out of, the quotes are what tell a reader — and a terminal —
-/// where a hand-written value ends.
-#[must_use]
-pub fn quoted_line_text(value: &str) -> String {
-    json_quoted(value)
 }
 
 /// A character a terminal treats as an instruction rather than as text:
@@ -202,7 +157,7 @@ pub(crate) fn json_quoted(value: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            other if acted_on_by_a_terminal(other) => {
+            other if acted_on_by_a_terminal(other) || matches!(other, '\u{fffe}' | '\u{ffff}') => {
                 let _ = write!(out, "\\u{:04x}", other as u32);
             }
             other => out.push(other),
@@ -218,19 +173,6 @@ mod tests {
 
     fn ids(count: usize) -> Vec<String> {
         (0..count).map(|n| format!("task.t{n:02}")).collect()
-    }
-
-    #[test]
-    fn a_list_filling_the_bound_names_every_id_and_marks_nothing() {
-        assert_eq!(id_list(&ids(3), 3), "task.t00, task.t01, task.t02");
-    }
-
-    #[test]
-    fn a_list_past_the_bound_names_the_first_and_counts_the_rest() {
-        assert_eq!(
-            id_list(&ids(6), 3),
-            "task.t00, task.t01, task.t02, \u{2026} 3 more"
-        );
     }
 
     #[test]

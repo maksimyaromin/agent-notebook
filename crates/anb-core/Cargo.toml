@@ -5,11 +5,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
-# Empty by design: the Core stays dependency-free.
 [dependencies]
+serde_json.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+yaml-rust2 = { version = "0.13", default-features = false }
 
 [lints]
 workspace = true

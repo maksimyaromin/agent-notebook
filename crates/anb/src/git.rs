@@ -7,8 +7,24 @@
 //! in time is killed and has answered nothing.
 
 use std::io::{Read as _, Write as _};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+/// The local repository identity shared by linked worktrees.
+#[must_use]
+pub fn common_dir(project: &Path) -> Option<PathBuf> {
+    let bytes = answered(
+        Command::new("git").current_dir(project).args([
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ]),
+        String::new(),
+    )?;
+    let path = String::from_utf8(bytes).ok()?;
+    Some(PathBuf::from(path.trim()))
+}
 
 /// Long enough for any answer git reads off a local disk, short enough that
 /// a wedged one is a pause and not a hang.

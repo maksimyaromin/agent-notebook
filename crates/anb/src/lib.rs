@@ -6,13 +6,16 @@
 pub mod cli;
 pub mod fs_storage;
 pub mod git;
+pub mod hook;
 pub mod identity;
 pub mod json;
 pub mod lock;
+pub mod recall;
 pub mod reconcile;
 pub mod recovery;
 pub mod reply;
 pub mod scope;
+pub mod session;
 pub mod setup;
 pub mod skill;
 pub mod text;

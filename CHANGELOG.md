@@ -1,5 +1,46 @@
 # Changelog
 
+## agent-notebook v2026.09.12.0.9.0
+
+Project knowledge, personal practices and unfinished work now meet in one working-memory workflow. A conversation can resume its own Task while other conversations and colleagues work independently. Records remain plain Markdown, and a small piece of work needs only a clear outcome, not a separate report or a prescribed planning ceremony.
+
+This is a pre-stable minor release with interface changes. Read the upgrade notes before updating scripts or installed agent integrations.
+
+### New
+
+- **Recall across three audiences.** `anb recall` combines current work, shared project knowledge and private practices, labelling their sources. Search by phrase or use `--for <id>` to prioritize a subject's context. Shared knowledge remains available regardless of its author; bounded replies disclose omitted content and provide follow-up reads.
+- **Independent conversation focus.** `anb start` resumes the current session's Task. `start --next` selects and claims eligible work under one lock, preferring your assignments before the untaken queue. Session identity stays local and separate from human ownership. Deliberate collaboration between local sessions uses `--join`.
+- **Project-specific personal practices.** `--personal` stores knowledge for this person in this project, outside the repository. `--global` remains the home for practices across projects. Recall discovers both without requiring the agent to locate their directories.
+- **Import and migration.** `import` adds an existing record tree while preserving source ids, dates and bodies. `migrate` normalizes envelopes to YAML and retains recoverable originals. Both provide a read-only `--check` preview.
+- **Date-and-version release names.** New tags use `vYYYY.MM.DD.MAJOR.MINOR.PATCH`; the final components must match the package version. Published release names are unchanged.
+
+### Improved
+
+- **One reply document.** Default output uses standard TOON through a pinned codec. `--json` encodes the same fields and selected content. Counts, omissions and recovery commands are structured, and the budget applies to the encoded reply.
+- **A shorter completion workflow.** Record a Task's outcome with `close --body` or `--body-file`. Create a separate Note only when the finding deserves its own lifetime. Archiving a Task no longer archives related knowledge.
+- **Intent-oriented instructions.** The supplied skill teaches selective capture, consolidation, shared domain language and named-work discovery. It distinguishes responsibility for a result from assignment of its individual parts and explains when coordination is needed.
+- **Project customization without a skill fork.** Put workflow extensions in `.agents/anb.md`. Setup preserves that file and project-owned instructions while updating managed skills and supported startup hooks. Its discovery paragraph also explains how to read the Markdown without the CLI.
+- **Consistent text inputs.** Creation, editing, comments and outcomes accept the corresponding `--body` and `--body-file` inputs, including standard input and multiline text. The book, help and generated examples follow the revised workflow.
+
+### Fixed
+
+- **Consistent work selection.** Recall, its startup hook and other work views honor the same configured `scope`. Subject membership follows origin descendants; external prerequisites affect readiness without becoming part of the selected work.
+- **Completion respects prerequisites.** Successful closing refuses unfinished dependencies and names what to inspect. Cancellation remains explicit and does not cancel related work. Repeating a completed transition preserves the recorded outcome.
+- **Safe continuation and recovery.** Local claims, locks and interrupted starts preserve session focus and record changes together. Archive and restore refuse divergent copies instead of discarding one. New random ids avoid dependence on a shared sequential allocator.
+- **Review handoffs stay current.** Resuming or reopening a Task clears the previous review recipient so a later review does not silently return to the wrong person.
+
+### Upgrade notes
+
+- Replace `close --note`, `--pr`, `--sha`, `--report` and `--no-proof` with a concise outcome through `--body` or `--body-file`. Cite a pull request or commit in that outcome. `--reason` still ends work without completing it; existing report Notes remain readable.
+- Rerun `anb setup --agent <host>` to refresh managed instructions and hooks. Custom integrations using `status --hook` must move to the installed `anb hook` adapter; ordinary session reads use `anb recall`.
+- Update consumers of the previous custom text layout or JSON reply shapes. TOON and JSON now share one structured contract; use the reply reference and generated examples when adapting a parser.
+- Generated ids are no longer derived from titles. Use the id returned by `add`, or supply `--id` explicitly when a readable fixed id is needed. Existing ids remain unchanged.
+- For a work group, ensure its actual children carry `from: <hub>`. `--for` no longer treats dependency or contextual links as membership. Older dependency-only plans need explicit origins on their constituent work, not on external prerequisites.
+- Preview envelope normalization with `anb migrate --check`. Review older values that used surrounding quotes literally before applying migration. Reads do not migrate records automatically.
+- Knowledge lifetime is independent of Task archival. The former semantic-conflict and private-shadow heuristics have been removed; agents assess conflicting claims from their evidence and scope.
+
+Packages in this release: `@supolka/agent-notebook@0.9.0` and its five platform packages at the same version.
+
 ## agent-notebook v2026.09.08.4
 
 A narrowed listing says whose it is. Under `scope: mine` an agent that never typed a flag read `count: 0` as an empty epic or an empty notebook; now every read narrowed to one identity says so and names the call that widens it, as Status did. The packages move to 0.8.0: a line joins three replies and a field joins two JSON documents, which by the versioning rule this release also writes down is a minor.

@@ -9,9 +9,8 @@ Choose the record by how the information changes. A ruling needs an explicit rep
 
 Record a Decision when a choice should guide later work. Include the reason: the next reader needs to know the constraint behind the choice, especially when that constraint changes.
 
-```text
-$ anb add decision "Fences never nest" --kind rule --tag parser --tag grammar --body "A fence closes at the first closing marker."
-ok: add decision.fences-never-nest — decisions/decision.fences-never-nest.md
+```sh
+anb add decision "Fences never nest" --id decision.fences-never-nest --kind rule --tag parser --tag grammar --body "A fence closes at the first closing marker."
 ```
 
 | Kind | Use it for | Include |
@@ -24,26 +23,17 @@ A proposed choice belongs in an idea or Question until it is agreed. A `drift` c
 
 When the ruling changes, use `anb add decision "<title>" --supersedes <old>`. The command links the records and marks the predecessor `superseded`. Use `anb retire <id>` when a Decision no longer applies and has no replacement. Editing a Decision is for corrections to the same ruling, not for replacing it with another.
 
-### Possible conflicts
+### Related claims and contradictions
 
-A new Decision may overlap an existing one:
+Shared tags and citations identify related material, not a contradiction. Read the claims, their scope and their evidence before deciding whether they conflict. A new exception can complement a standing rule; a replacement changes the ruling and should name its predecessor.
 
-```text
-$ anb add decision "A fence body is opaque" --kind rule --tag parser --tag grammar
-ok: add decision.a-fence-body-is-opaque — decisions/decision.a-fence-body-is-opaque.md
-may-conflict[1]: decision.fences-never-nest (Alex)
+Use a typed link when the relationship deserves an explicit name:
+
+```sh
+anb edit decision.fence-body --link "within decision.fences-never-nest"
 ```
 
-The tool reports a possible conflict when Decisions share at least two tags or the new one cites an active Decision. It does not compare their meaning. Read the named record and decide whether the new ruling replaces it.
-
-Debt keeps a `may-conflict` signal for a citation between active Decisions that neither supersedes nor links the other: a body that names `decision.fences-never-nest` keeps the pair in Debt, counted on Status and listed by `anb debt`. A citation the method asks for, a `drift` naming the rule it departs from or a rule that is part of a wider one, is declared once as a link on either record, and the pair leaves the signal:
-
-```text
-$ anb edit decision.a-fence-body-is-opaque --link "within decision.fences-never-nest"
-ok: edit decision.a-fence-body-is-opaque — link
-```
-
-`add --link` declares it at creation; `edit --unlink` takes a link out, spelled as it stands. A link whose target is shaped like a record id must name a record, and it relates the two under the link's kind: `anb show decision.fences-never-nest` lists the drift as `linked-by[1]: decision.a-fence-body-is-opaque (within)`, the graph draws the edge, and `anb list --for decision.fences-never-nest` reaches every record that links it. The same holds for any kind you choose, such as a document declaring its schema with `--link "schema note.primitives-schema"`. Shared tags alone trigger the write-time hint, not persistent Debt.
+A link whose target looks like a record id must name an existing record in the same notebook. `show` exposes incoming links and `graph` draws their direction. `--unlink` removes the named relationship. Links provide context, not work membership; `list --for <id>` follows origin descendants instead. None of these operations decides whether the linked claims agree.
 
 ## Notes
 
@@ -62,15 +52,14 @@ Correct a Note with `anb edit <id> --body "<text>"` as understanding changes, or
 
 [Developing an idea](ideas.md) explains the route from a ticket or conversation to delivery. [Domain modeling](domain.md) explains when a glossary needs a model as well.
 
-A report imported with `anb close --note` is also a Note, linked to the Task it documents. This keeps the evidence accessible through the same commands as the work.
+A finding from completed work becomes a Note when it needs independent maintenance. Create it with `anb add note --from <task>` and link its sources. The Task's outcome stays on the Task; archiving the Task does not retire its knowledge.
 
 ## Questions
 
 Record a Question when work exposes an uncertainty that deserves its own resolution:
 
-```text
-$ anb add question "Do fences nest?" --from task.parser-accepts-fenced-bodies
-ok: add question.do-fences-nest — questions/question.do-fences-nest.md
+```sh
+anb add question "Do fences nest?" --from task.parser-accepts-fenced-bodies
 ```
 
 `--to <name>` puts the Question to the person who can settle it, and their Status shows it. Use `anb close <question> --resolved-by <decision-or-task>` when a record answers it. Use `anb close <question> --reason "<why>"` when it closes without such a record. A Question cannot close without one of these outcomes.
@@ -79,7 +68,13 @@ Open Questions become Debt after their age threshold. If the origin Task closes 
 
 ## Record who is acting
 
-The supplied skill asks agents to pass `--via` on `add` and `comment`, using a consistent tool name such as `codex` or `claude-code`. On creation, `by` names the accountable person, normally from git identity, while `via` names the tool. On a comment, `--via` labels that log entry and leaves the record's creation fields unchanged. Other commands do not accept `--via`.
+Use a consistent `--via` value such as `codex` or `claude-code`. On creation, `by` names the accountable person, normally from git identity, while `via` names the tool. `comment`, `close --body` and `retire --body` sign their appended entry without changing the record's creation fields.
+
+## Comments and outcomes
+
+`comment` appends context to any live Task, Decision, Note or Question. It preserves the existing body and accepts the same text inputs as `add` and `edit`: `--body "<text>"` or `--body-file <path>`. A `-` path reads standard input. The positional form `anb comment <id> "<text>"` also works. Use one text input per command.
+
+Each entry records its date, accountable person and optional agent tool. Markdown continuation lines are indented under the entry. An immediate repeat with the same text, date and signature changes nothing. Comments can explain a settled record until it is archived; use `restore` before correcting an archived one.
 
 ## Citations
 
@@ -87,10 +82,8 @@ Write a bare record id in a body or comment to reference it. Put the id in backt
 
 A reference to an unknown id produces a hint without rejecting the write:
 
-```text
-$ anb comment task.grammar-parser-accepts-fences "see task.typo-in-the-id"
-ok: comment task.grammar-parser-accepts-fences — logged
-dangling-mention[1]: task.typo-in-the-id — backtick to quote, or create the record
+```sh
+anb comment task.grammar-parser-accepts-fences "See task.typo-in-the-id."
 ```
 
 This allows a forward reference. If it was a typo, correct it; if it was an example, quote it. Until it resolves, the reference also appears as Debt. Envelope relationships such as `--from` are stricter and require an existing target.
@@ -98,5 +91,14 @@ This allows a forward reference. If it was a typo, correct it; if it was an exam
 ## Archive settled knowledge
 
 Archive a superseded or retired Decision, a retired Note, or a closed Question with `anb archive <id>`. `show` still reads an archived record, and `list --archive` still lists it. `anb restore <id>` returns one to the working set without changing its state or contents.
+
+When an idea ends or a ruling stops applying, record why before archiving it. `retire --body` appends the outcome and retires the Note or Decision in one write; `--body-file` reads a longer outcome. No separate report is required:
+
+```sh
+anb retire note.domain-language --body "The four names are confirmed in the domain map." --via codex
+anb archive note.domain-language
+```
+
+An identical retirement leaves the outcome unchanged. `retire` without text remains available when the body already explains why the record ended. For a Question, append any detail with `comment`, then close it with `--resolved-by` or `--reason`.
 
 Use `anb delete <id>` only for a record created by mistake. It removes the file and frees the id, but refuses while another record references it.

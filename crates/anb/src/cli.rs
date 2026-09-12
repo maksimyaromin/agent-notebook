@@ -1,8 +1,8 @@
-//! The command surface: conventional tracker verbs over the notebook.
+//! The command surface for project memory and its working lifecycle.
 //!
 //! Flags with domain semantics stay optional here and are judged by the
 //! Core, so their refusals arrive as structured recovery payloads; clap
-//! keeps only the structural surface — positionals and flag spelling.
+//! checks positional arguments and flag spelling.
 
 use anb_core::RecordType;
 use clap::{Args, Parser, Subcommand};
@@ -16,52 +16,80 @@ use clap::{Args, Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
-    /// Compact JSON instead of plain text, on every command.
+    /// JSON instead of TOON, with the same fields and selected content.
     #[arg(long, global = true)]
     pub json: bool,
-    /// Where the notebook lives, read from here and outranking
-    /// `ANB_NOTEBOOK`, which is read from the project. By default the
-    /// nearest `.agent-notebook` at or above the working directory.
+    /// Use this notebook path instead of the nearest .agent-notebook.
+    /// Overrides `ANB_NOTEBOOK`; relative paths start at the working directory.
     #[arg(long, global = true, value_name = "PATH")]
     pub notebook: Option<std::path::PathBuf>,
-    /// The user's notebook, `.agent-notebook` in the home directory,
-    /// instead of the project's; it outranks `ANB_NOTEBOOK` like
-    /// `--notebook` and is refused beside it. It holds knowledge that
-    /// outlives one repository, so the verbs that create or move a task or
-    /// a question refuse it.
+    /// Your private knowledge across projects, in the home directory.
+    /// Holds Notes and Decisions. Cannot combine with --notebook or --personal.
     #[arg(long, global = true)]
     pub global: bool,
+    /// Your private knowledge for this project, outside the repository.
+    /// Recall includes it automatically alongside shared project knowledge.
+    #[arg(long, global = true, conflicts_with_all = ["global", "notebook"])]
+    pub personal: bool,
+    /// Local agent session; `ANB_SESSION` or `CODEX_THREAD_ID` supplies the default.
+    #[arg(long, global = true, value_name = "ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Native `SessionStart` adapter installed by setup.
+    #[command(hide = true)]
+    Hook,
+    /// Recall your work, shared knowledge and personal practices. Search by
+    /// a phrase, or name a record with --for to prioritize its context.
+    Recall {
+        /// Match this phrase in record titles, tags, authors or bodies.
+        text: Option<String>,
+        /// Prioritize knowledge related to this project record.
+        #[arg(long = "for", value_name = "ID")]
+        focus: Option<String>,
+        /// Include every matching record and its full body.
+        #[arg(long)]
+        all: bool,
+        #[command(flatten)]
+        whose: Whose,
+    },
     /// Create a record: `add task|decision|note|question "<title>"`. The
     /// notebook appears on first write.
     Add(AddArgs),
-    /// open | review → active: take the Task into work, or back into it;
-    /// the Task records who holds it, and one somebody else holds is refused.
-    Start { id: String },
-    /// active → review: hand the work over for acceptance, to a named
-    /// person or to a human in general.
+    /// Start or resume a Task. Records your assignment and refuses work held by someone else.
+    Start {
+        /// The Task to start; omitted, resume the current session's focus.
+        id: Option<String>,
+        /// Start the next ready Task: your assigned work first, then unclaimed work.
+        #[arg(long, conflicts_with = "id")]
+        next: bool,
+        /// Restrict --next to this record's scope.
+        #[arg(long = "for", value_name = "ID", requires = "next")]
+        hub: Option<String>,
+        /// Share the Task with another local session without taking its focus away.
+        #[arg(long)]
+        join: bool,
+    },
+    /// Submit active work for review, optionally naming the reviewer.
     Submit {
         id: String,
-        /// Whom the review waits on; their Status shows it. Omitted, the
-        /// task keeps the addressee it carries, or waits on a human in
-        /// general.
+        /// The reviewer, whose Status will show this Task. If omitted,
+        /// keep the existing recipient or leave the review unassigned.
         #[arg(long, value_name = "NAME")]
         to: Option<String>,
     },
-    /// active | review → closed, carrying its proof; --reason ends a Task or
-    /// a Question without work, from open too; --resolved-by closes a
-    /// Question into the record that settled it.
+    /// Close completed work with an outcome. Use --reason to cancel a Task
+    /// or settle a Question, or --resolved-by to cite its answer.
     Close(CloseArgs),
-    /// closed → open, explicitly.
+    /// Reopen a closed Task, preserving its recorded outcome.
     Reopen { id: String },
     /// Pause a Task deliberately; the reason is mandatory.
     Hold {
         id: String,
-        /// Why the Task waits; an unreasoned hold is where work rots.
-        #[arg(long)]
+        /// Why the Task cannot continue.
+        #[arg(long, allow_hyphen_values = true)]
         reason: Option<String>,
         /// Calendar hold: the date to resume on.
         #[arg(long, value_name = "DATE")]
@@ -83,19 +111,36 @@ pub enum Command {
         /// The Task no longer waited on.
         on: String,
     },
-    /// Append one entry to a Task's log, where the next session resumes;
-    /// the entry is signed by the identity, `/` the tool when `--via` names one.
+    /// Append an attributed entry to a record in the working set, preserving its body.
     Comment {
         id: String,
-        text: String,
+        /// Entry text; --body and --body-file are alternatives.
+        #[arg(allow_hyphen_values = true, conflicts_with_all = ["body", "body_file"])]
+        text: Option<String>,
+        /// Entry text, including Markdown and line breaks.
+        #[arg(long, allow_hyphen_values = true)]
+        body: Option<String>,
+        /// Read the entry from a file; `-` reads standard input.
+        #[arg(long, value_name = "PATH", conflicts_with = "body")]
+        body_file: Option<String>,
         /// The acting agent tool writing the entry.
         #[arg(long)]
         via: Option<String>,
     },
-    /// active → retired: end a Decision or Note that has no successor.
-    Retire { id: String },
-    /// The dispatch queue: open, unblocked, unheld Tasks, most urgent first,
-    /// each naming who holds it when someone does.
+    /// Retire a Decision or Note that no longer applies and has no successor.
+    Retire {
+        id: String,
+        /// Append the outcome before retiring the record.
+        #[arg(long, allow_hyphen_values = true)]
+        body: Option<String>,
+        /// Read the outcome from a file; `-` reads standard input.
+        #[arg(long, value_name = "PATH", conflicts_with = "body")]
+        body_file: Option<String>,
+        /// The acting agent tool recording the outcome.
+        #[arg(long)]
+        via: Option<String>,
+    },
+    /// List Tasks that can start now, ordered by urgency, creation date and id.
     Ready {
         /// Every row; the listing is bounded by default.
         #[arg(long)]
@@ -103,8 +148,7 @@ pub enum Command {
         #[command(flatten)]
         narrowing: Narrowing,
     },
-    /// The records, ids and titles out: every live one by default, or the
-    /// ones the narrowing admits.
+    /// List records in the working set. Filter by subject, type or person.
     List {
         /// Every row; the listing is bounded by default.
         #[arg(long)]
@@ -114,23 +158,18 @@ pub enum Command {
         #[command(flatten)]
         extent: Extent,
     },
-    /// One record: envelope, body, and its mention blocks.
+    /// Read one record and its incoming and outgoing relationships.
     Show {
         id: String,
-        /// Every line and every mention; a long body and a crowded block
-        /// print bounded by default.
+        /// Include complete fields, body and relationships without display limits.
         #[arg(long)]
         all: bool,
     },
-    /// The session Status: the work, one quiet line when there is none, or
-    /// the budgeted composite.
+    /// Summarize active work, the ready queue, Questions and items needing attention.
     Status {
-        /// Token ceiling for this call, outranking the config key; 0 = no ceiling.
+        /// Override the configured token budget for this call; 0 removes the ceiling.
         #[arg(long)]
         budget: Option<u32>,
-        /// The session-start payload for an agent hook; fails soft.
-        #[arg(long)]
-        hook: bool,
         #[command(flatten)]
         whose: Whose,
     },
@@ -140,7 +179,22 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// The Debt: every sign of decay Status counts, each on its own line.
+    /// Import record directories and their archive, preserving ids, bodies and source dates.
+    Import {
+        /// Directory containing tasks/, decisions/, notes/, questions/ and optional archive/.
+        dir: std::path::PathBuf,
+        /// Validate the complete result and list new files without writing them.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Normalize record envelopes to YAML, keeping recoverable originals and all record history.
+    /// YAML quotes delimit text; review older values that used surrounding quotes literally.
+    Migrate {
+        /// Validate and list envelope changes without writing files or backups.
+        #[arg(long)]
+        check: bool,
+    },
+    /// List stale work, unresolved references and other items needing attention.
     Debt {
         /// Every row; the listing is bounded by default.
         #[arg(long)]
@@ -152,27 +206,22 @@ pub enum Command {
     Restore { id: String },
     /// Delete a record born by mistake; refuses while anything cites it.
     Delete { id: String },
-    /// Correct a live record's own fields; state stays a command's move.
+    /// Change a record's wording, assignment, tags or links. Use lifecycle commands for state.
     Edit(EditArgs),
-    /// The notebook as records and the edges between them: `list` with
-    /// edges.
+    /// Read the relationship graph for a notebook or a selected group of records.
     Graph(GraphArgs),
-    /// Wire the named agents to the notebook, in this directory: the
-    /// one-line snippet in the instruction file each reads, the
-    /// `SessionStart` hook where its host runs one, and the anb skills
-    /// where it looks for skills. Re-running patches in place.
+    /// Install instructions, skills and supported session hooks at the project root.
+    /// Re-running updates managed files and preserves project-owned instructions.
     Setup {
         /// An agent to wire: `claude-code`, `codex`, or `agents-md` for any
         /// tool that reads `AGENTS.md` and `.agents/skills`; repeatable.
         #[arg(long = "agent", value_name = "NAME")]
         agents: Vec<String>,
-        /// Take out what setup put in for the named agents, and nothing
-        /// else.
+        /// Remove managed integration files for the named agents.
         #[arg(long)]
         remove: bool,
     },
-    /// The skill an agent learns the tool from, rendered from the binary:
-    /// printed, written into a directory, or checked against one.
+    /// Print, write or check the workflow skill and its generated references.
     Skill {
         /// The skill directory to write `SKILL.md` and its references into;
         /// omitted, `SKILL.md` prints.
@@ -185,15 +234,16 @@ pub enum Command {
 }
 
 /// One creation command for every record type: the envelope flags all
-/// four share, plus the ones only some types carry — the Core refuses a
+/// four share, plus the ones only some types carry. The Core refuses a
 /// flag foreign to the type by name.
 #[derive(Args)]
 pub struct AddArgs {
     /// task, decision, note, or question.
     #[arg(value_parser = a_record_type)]
     pub record_type: RecordType,
+    #[arg(allow_hyphen_values = true)]
     pub title: String,
-    /// Explicit id; omitted, one is minted from the title.
+    /// Choose a stable id. By default the CLI allocates a random 128-bit id.
     #[arg(long)]
     pub id: Option<String>,
     /// Origin: the record this record was born from.
@@ -205,11 +255,10 @@ pub struct AddArgs {
     /// `<kind> <target>`, e.g. `pr https://…`; repeatable.
     #[arg(long = "link", value_name = "LINK")]
     pub links: Vec<String>,
-    /// The prose under the envelope; omitted, the record opens empty.
-    #[arg(long)]
+    /// Record body text; omitted, the body starts empty.
+    #[arg(long, allow_hyphen_values = true)]
     pub body: Option<String>,
-    /// The prose under the envelope, read from a file; `-` reads standard
-    /// input. Refused beside --body.
+    /// Read the body from a file; `-` reads standard input. Cannot combine with --body.
     #[arg(long = "body-file", value_name = "PATH", conflicts_with = "body")]
     pub body_file: Option<String>,
     /// The accountable identity; omitted, `ANB_BY` or the git identity fills it.
@@ -218,12 +267,10 @@ pub struct AddArgs {
     /// The acting agent tool.
     #[arg(long)]
     pub via: Option<String>,
-    /// Who will do the task: hands it over as it is written. Omitted, the
-    /// task is nobody's until someone starts it.
+    /// Assign the Task to this person. If omitted, leave it unassigned until someone starts it.
     #[arg(long = "taken-by", value_name = "NAME", conflicts_with = "mine")]
     pub taken_by: Option<String>,
-    /// Take the task for yourself: `--taken-by` with the identity the
-    /// writers sign with.
+    /// Assign the Task to yourself, using the current identity.
     #[arg(long)]
     pub mine: bool,
     /// Whom the record waits on: the person a question is put to, or the
@@ -237,7 +284,7 @@ pub struct AddArgs {
     /// A decision's rule, shape, or drift; a note's fact, term, guide, idea, model, or spec.
     #[arg(long)]
     pub kind: Option<String>,
-    /// The Decision or Note this one replaces; it flips in the same move.
+    /// The Decision or Note this record replaces; marks its predecessor superseded in the same operation.
     #[arg(long)]
     pub supersedes: Option<String>,
 }
@@ -246,13 +293,12 @@ pub struct AddArgs {
 pub struct EditArgs {
     pub id: String,
     /// The whole title, replaced.
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     pub title: Option<String>,
     /// The whole body, replaced; empty clears it.
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     pub body: Option<String>,
-    /// The whole body, replaced with a file's text; `-` reads standard
-    /// input. Refused beside --body.
+    /// Replace the body with a file's text; `-` reads standard input. Cannot combine with --body.
     #[arg(long = "body-file", value_name = "PATH", conflicts_with = "body")]
     pub body_file: Option<String>,
     /// Add a tag; repeatable.
@@ -261,9 +307,8 @@ pub struct EditArgs {
     /// Remove a tag; repeatable.
     #[arg(long = "untag", value_name = "TAG")]
     pub remove_tags: Vec<String>,
-    /// Add a link, `<kind> <target>`; repeatable. A Decision that cites
-    /// another as context declares it here, and the pair leaves
-    /// `may-conflict`.
+    /// Add a link, `<kind> <target>`; repeatable. Use a record id for
+    /// a shared relationship or a URL for an external source.
     #[arg(long = "link", value_name = "LINK")]
     pub add_links: Vec<String>,
     /// Remove a link, spelled as it stands; repeatable.
@@ -278,7 +323,7 @@ pub struct EditArgs {
     /// The explicit resurfacing date.
     #[arg(long, value_name = "DATE")]
     pub review_by: Option<String>,
-    /// Who holds the task: the hand-over that lets another identity start it.
+    /// Assign the Task to this person, allowing them to start it.
     #[arg(long = "taken-by", value_name = "NAME")]
     pub taken_by: Option<String>,
     /// Whom the task or question waits on.
@@ -293,27 +338,17 @@ pub struct EditArgs {
 #[derive(Args)]
 pub struct CloseArgs {
     pub id: String,
-    /// Proof, the default route: the report file, ingested as a Note the
-    /// notebook carries, so a reader reaches it through the notebook alone;
-    /// `-` reads standard input.
+    /// Record the completed Task's outcome in its body.
+    #[arg(long, allow_hyphen_values = true)]
+    pub body: Option<String>,
+    /// Read the outcome from a file; `-` reads standard input.
+    #[arg(long, value_name = "PATH", conflicts_with = "body")]
+    pub body_file: Option<String>,
+    /// The acting agent tool recording the outcome.
     #[arg(long)]
-    pub note: Option<String>,
-    /// Proof: the pull request that shipped the work.
-    #[arg(long)]
-    pub pr: Option<String>,
-    /// Proof: the commit that shipped the work.
-    #[arg(long)]
-    pub sha: Option<String>,
-    /// Proof: a file left where it lies, right for a living document,
-    /// which a Note would freeze into a second source of truth.
-    #[arg(long)]
-    pub report: Option<String>,
-    /// The explicit waiver: close stating there is no proof.
-    #[arg(long)]
-    pub no_proof: bool,
-    /// End a Task or a Question without work, stating why; the reason lands
-    /// in the envelope and no proof is written.
-    #[arg(long, value_name = "WHY")]
+    pub via: Option<String>,
+    /// Cancel a Task or settle a Question with an explanation recorded in its header.
+    #[arg(long, value_name = "WHY", allow_hyphen_values = true)]
     pub reason: Option<String>,
     /// The Decision or Task that settled the Question.
     #[arg(long, value_name = "ID")]
@@ -331,8 +366,7 @@ pub struct GraphArgs {
     /// Each record's envelope and body as well.
     #[arg(long)]
     pub full: bool,
-    /// Every row the plain text bounds. JSON is never bounded: a graph
-    /// missing edges is not a smaller graph, it is a wrong one.
+    /// Include complete record fields and bodies. Both formats always include every graph edge.
     #[arg(long)]
     pub all: bool,
     #[command(flatten)]
@@ -347,7 +381,7 @@ pub const NARROWING: &str = "Narrowing";
 
 /// Whose records a read answers with. Without any of the three, the
 /// notebook's `scope` key decides.
-#[derive(Args)]
+#[derive(Args, Default)]
 #[command(next_help_heading = NARROWING)]
 pub struct Whose {
     /// Only this identity's work: the tasks it holds, the records it wrote
@@ -362,10 +396,7 @@ pub struct Whose {
     pub team: bool,
 }
 
-/// What every listing narrows by. Each flag is a predicate over the same
-/// notebook, so two flags ask for the intersection, and a narrowing
-/// honoured while printing is honoured while drawing: a picture of another
-/// notebook is no picture of this one.
+/// Shared listing and graph filters. Multiple filters select their intersection.
 #[derive(Args)]
 #[command(next_help_heading = NARROWING)]
 pub struct Narrowing {
@@ -378,15 +409,14 @@ pub struct Narrowing {
     /// Only the records addressed to this person.
     #[arg(long, value_name = "NAME")]
     pub to: Option<String>,
-    /// Only records inside this record's scope: what it waits on, what
-    /// was born inside it and what links it, as far as each goes.
+    /// Only this subject and records created from it, following origins
+    /// through every descendant. Dependencies still govern readiness.
     #[arg(long = "for", value_name = "ID")]
     pub scope: Option<String>,
     /// Only records carrying this tag; repeated, carrying every one.
     #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
-    /// Only records whose id, title, tags, people or body hold this text,
-    /// whatever its case.
+    /// Match text in record ids, titles, tags, people or bodies, ignoring case.
     #[arg(long = "match", value_name = "TEXT")]
     pub text: Option<String>,
 }
@@ -397,9 +427,8 @@ pub struct Narrowing {
 #[derive(Args, Default)]
 #[command(next_help_heading = NARROWING)]
 pub struct Extent {
-    /// Only records of these types, comma-separated or repeated. Every
-    /// type by default, including one whose own `type` field no notebook
-    /// word matches.
+    /// Select record types, comma-separated or repeated. By default, include
+    /// every type and records whose type could not be parsed.
     #[arg(long = "type", value_name = "TYPE", value_delimiter = ',', value_parser = a_record_type)]
     pub types: Vec<RecordType>,
     /// Only records of these kinds, comma-separated or repeated: a

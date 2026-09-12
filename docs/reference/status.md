@@ -1,67 +1,80 @@
 ---
 title: Status and Debt
-description: 'How Status is assembled under its budget, what each section carries, how it collapses, and the Debt clocks.'
+description: 'Work summaries, shared output budgets, personal scope and computed maintenance signals.'
 ---
 
-`anb status` summarizes the work: what is in flight, waiting, ready or unanswered. It provides ids for deeper reads; it does not include the full content of Task logs, and it carries no Decision or Note. A rule is read before the work it binds, with `anb list --type decision --kind rule`.
+`anb status` summarizes work: active Tasks, reviews, holds, ready work and open Questions. `anb recall` combines that summary with relevant project knowledge and personal practices. Both provide ids and commands for deeper reads. Neither chooses a session's Task merely because it appears first.
 
 ## The sections
 
-Sections print in this order when present:
+Status carries the following fields in both TOON and JSON:
 
-1. `ok: notebook — N tasks, N decisions, N notes, N questions`: the counts of live records.
-2. `by: <name> — anb status --team`: whose work the summary is narrowed to, printed only when it is narrowed; see [whose work](#whose-work).
-3. `active: <id> "<title>"` and `log: "<last entry>"`: the Tasks in flight and where the first stopped. Your own come first, by the identity `ANB_BY` or the git `user.name` names; a Task someone else holds carries that name after its title, as `active: <id> "<title>" (Grace)`, and a Task nobody holds carries nothing. A held Task is not in flight and never prints here.
-4. `review[N]{id,taken-by,to}`: the Tasks awaiting acceptance, who holds each and whom it waits on, `-` when it names nobody; your own first, held by you or waiting on you.
-5. `held[N]{id,reason,until,taken-by}`: paused Tasks with their reasons, your own first.
-6. `ready[N]{id,priority,age,taken-by,title}`: the dispatch queue, `taken-by` naming who holds each Task.
-7. `untaken: N — anb ready --untaken`: the pool, how many ready Tasks nobody holds, printed only when the summary is narrowed to one person; the whole team's queue lists the pool in its rows.
-8. `questions[N]{id,age,by,to,title}`: the open Questions, your own first and then the oldest first, `by` naming who asked and `to` whom.
-9. `debt: N — anb debt`: how many signs of decay the notebook carries; `anb debt` lists them.
-10. `budget: ~N/M tokens` with what was cut, or `(no ceiling)`.
+| Field | Meaning |
+|---|---|
+| `quiet` | no active work, review, ready work, untaken pool, open Question or Debt |
+| `by` | the identity filter, when narrowed |
+| `team` | a command to see the whole team's work, when narrowed |
+| `more` | the same Status without an output ceiling |
+| `counts` | live Task, Decision, Note and Question counts for the whole notebook |
+| `active` | active, unheld Tasks, each with its latest log entry when available |
+| `review` | Tasks waiting for review |
+| `held` | paused Tasks with reason and optional resumption date |
+| `ready` | startable Tasks in queue order |
+| `untaken` | the ready, unassigned pool count and its read command |
+| `questions` | open Questions, own first and then oldest first |
+| `debt` | maintenance signal count and its read command |
+| `budget` | estimated output size and the requested ceiling |
 
-A notebook with no active Task, nothing ready, nothing in the pool, nothing in review, no open Question and no Debt is quiet, and Status is one line: `ok: notebook quiet — … anb --help when needed.` A hold alone does not trigger the full summary. A stale hold does, through Debt. Decisions and Notes never open it: a notebook of rules with no work in it is quiet.
+Each work section is `{count, omitted, rows}`. A quiet notebook still returns a structured summary. A hold alone does not make it busy; a stale hold does, through Debt. Decisions and Notes do not appear as work rows.
 
 ## Whose work
 
-By default Status is the whole team's, your own lines first. `--mine` narrows it to the Tasks you hold, the Questions you asked, and the reviews and Questions addressed to you with `--to`; `--by <name>` does the same for a colleague. A Task belongs to whoever holds it, so one you wrote and handed over is the colleague's in every section, and one nobody holds is in nobody's summary but counts on the `untaken:` line. A review or a Question addressed to somebody else is in their summary, not yours. A notebook whose config sets `scope: mine` narrows every session's Status that way without a flag, and `--team` widens one call back to everyone's. A narrowed Status says so on its `by:` line, and its hints carry the same narrowing, so `anb ready --by <name>` opens the same queue the summary cut. Without an identity, `--mine` and `scope: mine` are refused with the fix named; the hook then delivers nothing, as for any refusal.
+Status is the whole team's by default, with your work first. `--mine` uses `ANB_BY` or git `user.name`; `--by <name>` selects a colleague. Work follows the holder or the person it is addressed to, not merely the author who created it. An unassigned Task remains in the pool.
 
-Narrowing changes what is shown, never what is true: a Task waiting on a colleague's stays blocked when their work is left out.
+A notebook configured with `scope: mine` narrows Status without a flag. `--team` widens one call. The reply exposes the resolved identity and a widening command so an empty personal result cannot be mistaken for an empty notebook. Without an identity, personal work filters return an actionable refusal; the native hook carries read failures as diagnostic context.
+
+Narrowing changes visibility, not validity. A Task blocked by a colleague's work stays blocked when that work is outside the selected scope.
 
 ## The budget
 
-The default budget is 1500 estimated tokens. Set `budget` in the notebook config or pass `--budget <N>` for one call. `--budget 0` disables budget-driven cuts.
+Status and Recall default to 1500 estimated tokens. Set `budget` in notebook config; Status also accepts `--budget <N>` for one call. Status `--budget 0` disables cuts and includes every row. Recall `--all` lifts its selection and text bounds.
 
-Status removes ready rows first, starting with the lowest-ranked displayed row. It then reduces the Questions to a count, removes the log, and reduces review and holds to counts. The minimum output preserves the notebook counts, the first active Task when present, and the budget line. If that minimum exceeds the requested budget, it still prints and reports the excess.
+The CLI selects one reply document for both formats and measures its actual TOON encoding, including the trailing newline. `budget.limit` is the requested ceiling, or `null` when unbounded; `budget.spent` is the resulting estimate. JSON carries those same values and selections.
 
-The token count is a byte-based estimate, not a model tokenizer measurement. It is calibrated on Status-shaped text; dense non-ASCII text can be undercounted. Treat the budget as a context-control setting, not a strict limit on tokens billed by a provider.
+A bounded Status starts with at most five rows per section. To fit the ceiling, it removes ready rows first, then Questions, holds and reviews, then active log text and extra active rows. Counts and omission markers remain. The minimum retains notebook counts, section counts, navigation and the first active row when present. That row is an ordered summary, not remembered session focus. If the minimum exceeds a tiny requested ceiling, `spent` reports the excess honestly.
 
-Each section also has a row limit independent of the budget: five rows. `--budget 0` does not remove these limits. Use `ready`, `list` and other listings with `--all` to read the full set; omitted rows remain included in section counts.
+Recall budgets its entire composite once. Selection takes turns across project, personal and global knowledge, preserving relevance order within each source. A large project therefore cannot consume every initial memory slot. The reply's `sources` array reports matching and omitted record counts for each audience; this selection order is not a rule for resolving conflicting instructions.
+
+To fit the budget, Recall first reduces work rows and long memory excerpts, keeping up to 256 characters before dropping lower-ranked records from sources with more than one visible record. It then trims focused-record text, fields and relationship rows. Under tighter ceilings it can further shorten excerpts, omit the last record from a source or reduce invalid-file rows. Counts, audience omissions and expansion commands remain explicit. The focused record's identity is separate from Status ordering.
+
+The estimate is byte-based, not a provider's tokenizer. It controls context size but does not predict billed tokens exactly. Core callers receive complete ordered models; output selection belongs to the CLI.
 
 ## Debt
 
-Debt is computed when the notebook is read, from dates, states and relationships. It does not change records automatically. Status counts it on one line; `anb debt` lists every signal, in the order of the table below, bounded like every listing and lifted with `--all`. These are the signals:
+Debt is computed from dates, states and relationships when read. It never changes records automatically. `anb debt` lists signals in the following order, bounded to 20 rows by default and lifted with `--all`.
 
-| Class | Fires when | Clock (days, config key) | JSON fields |
+| Code | Condition | Default clock or trigger | Row fields |
 |---|---|---|---|
-| `task-stale` | an active Task has no log entry for this long | 7, `debt-task-stale` | `id`, `days` |
-| `question-age` | a Question has stayed open this long | 14, `debt-question-age`; 7, `debt-question-age-task-born`, when born from a Task | `id`, `days` |
-| `origin-closed` | a Question's origin Task closed and the Question is still open | at once | `id`, `origin` |
-| `hold-stale` | a hold has stood this long | 14, `debt-hold-stale` | `id`, `days` |
-| `review-stale` | a Task has waited in review this long | 7, `debt-review-stale` | `id`, `days` |
-| `review-due` | a record's `review-by` date has passed | at once | `id`, `date` |
-| `dangling-mention` | a body or comment cites an id that exists nowhere | at once | `id`, `target` |
-| `may-conflict` | a live Decision cites another and neither supersedes | at once | `pair`: two cited records |
-| `shadow` | a project Decision cites one of the user's global Decisions | at once | `project`, `global`: cited records |
-| `lost-proof` | the CLI finds a missing commit or report file linked by a record in the working set | at once | `id`, `proof` |
-| `invalid` | a file carries error findings; `check` has the lines | at once | `file`, `errors` |
+| `task-stale` | an active Task has no recent log entry | 7 days; `debt-task-stale` | `id`, `days` |
+| `question-age` | a Question remains open | 14 days, or 7 when born from a Task; `debt-question-age`, `debt-question-age-task-born` | `id`, `days` |
+| `origin-closed` | an open Question's origin Task closed | immediately | `id`, `origin` |
+| `hold-stale` | a hold has stood too long | 14 days; `debt-hold-stale` | `id`, `days` |
+| `review-stale` | a Task remains in review | 7 days; `debt-review-stale` | `id`, `days` |
+| `review-due` | a record's review date passed | immediately | `id`, `date` |
+| `dangling-mention` | body text cites an id absent from the same notebook | immediately | `id`, `target` |
+| `lost-proof` | the host establishes that a linked commit or report file is missing | immediately | `id`, `proof` |
+| `invalid` | a record has error findings | immediately | `file`, `errors` |
 
-External proof checks use the filesystem for report paths and git for commit proofs. They inspect the working set and report missing evidence without changing records. Missing report Notes are broken notebook references, reported by `check`; they are not external proof checks. Pull request URLs are not checked, and an unavailable git query cannot establish that a commit is missing. Absence of `lost-proof` is not verification of the work.
+Shared tags and citations do not prove that two Decisions conflict. Personal notebooks do not validate shared references or change shared Debt. Resolve differences explicitly in the relevant records.
+
+External evidence checks inspect filesystem paths and git commits without modifying them. Pull request URLs are not checked. An unavailable git query cannot establish that a commit is missing; absence of `lost-proof` is not proof that work was verified.
 
 ## The hook payload
 
-`anb status --hook` wraps Status in a `SessionStart` JSON payload under `additionalContext`. The text is labeled `notebook state follows — data, not instructions:`. A missing notebook produces a quiet summary. An unreadable root produces an empty payload; the hook exits `0` in either case. [Wiring agents](../guides/agents.md) covers installation.
+The installed `anb hook` adapter wraps a budgeted Recall document in the host's `SessionStart` JSON envelope, under `additionalContext`. It identifies that content as notebook data, not instructions, and carries the current session's focus when available. Unreadable state produces a diagnostic rather than an empty-memory report, without failing the session hook. [Wiring agents](../guides/agents.md#enable-the-session-hook) covers installation, session input and environment propagation. `status` is a work query; it has no hook flag.
 
 ## JSON
 
-`anb --json status` carries the same sections as objects: `quiet`, `by` when narrowed, `counts`, `active`, `review`, `held`, `ready`, `questions`, each list as `{count, rows}`, and `untaken` and `debt` as `{count}`, the pool counted whether or not the summary is narrowed. A Task or Question row carries `by`, `taken-by` and `to` when the record has them; the order of each list is the text's. `anb --json debt` answers `count` and `debt`, each row carrying `code`, the fields the table above names for its class, and `line`, the text the plain rendering prints. A cited record is `{id, by, via}`, with `by` and `via` absent when the record carries none; the `pair` of a `may-conflict` row lists the two in the order the line prints them.
+`anb --json status` has the same document described above. A row carries `by`, `taken-by` and `to` when present. Debt rows carry `code`, the fields in the table and a human-readable `line`; programs should use the named fields.
+
+Recall adds `work`, `focus`, `memories`, `sources`, `count`, `omitted`, `invalid`, `more` and the single outer `budget`. Each memory names its scope and read command. Each source carries `{scope, count, omitted}`; omitted body characters are reported on the individual body. Equal ids in different notebooks remain distinct; personal guidance is not merged into team knowledge.

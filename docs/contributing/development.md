@@ -3,7 +3,7 @@ title: Development
 description: 'The design boundaries, evidence and working method behind changes to agent-notebook.'
 ---
 
-I use agent-notebook to manage work on this project. The backlog and design decisions are in [the repository's notebook](https://github.com/maksimyaromin/agent-notebook/tree/main/.agent-notebook), along with closed Tasks and their reports. If you want to understand why something works the way it does, those records are a useful place to start.
+I use agent-notebook to remember work on this project. The backlog and design decisions are in [the repository's notebook](https://github.com/maksimyaromin/agent-notebook/tree/main/.agent-notebook), along with closed Tasks and their outcomes. If you want to understand why something works the way it does, those records are a useful place to start.
 
 ## Contributing
 
@@ -14,12 +14,12 @@ Contributions to the skills matter as much as changes to the CLI. If you have re
 For work in this repository, start with:
 
 ```sh
-cargo run --quiet -- status
+cargo run --quiet -- recall
 cargo run --quiet -- list --type decision --kind rule
-cargo run --quiet -- list --match proof --archive
+cargo run --quiet -- list --type task --archive
 ```
 
-The rules are read before the work; `--archive` reaches the closed Tasks and their reports. Read the relevant Decisions and reports before reopening a design question: they record the constraint and the alternatives considered. When a constraint changes, record the new decision and its reason. The [session guide](../guides/session.md) covers the work loop; `AGENTS.md` contains the repository conventions.
+Read the relevant rules before changing the behavior they govern. `--archive` reaches settled work and its evidence. Before reopening a design question, inspect its constraint and the alternatives already considered. When a constraint changes, record the new decision and its reason. The [session guide](../guides/session.md) covers the work loop; `AGENTS.md` contains the repository conventions.
 
 ## Where behavior belongs
 
@@ -27,7 +27,7 @@ Record validity belongs in the Core; working conventions belong in skills. For e
 
 `crates/anb-core` implements the grammar, record model, operations, queries and validation. Its `Storage` trait exchanges strings and relative paths. The in-memory adapter lets tests exercise the same notebook operations as a filesystem host, without a temporary repository or a shell. The Core receives dates and identity from its caller.
 
-`crates/anb` supplies filesystem storage, command parsing, rendering, locks, git queries and agent setup. Concurrency belongs here: the host protects a whole operation, including changes to several files. Per-file atomic writes alone would let a concurrent reader mistake an unfinished archive move for a duplicate record.
+`crates/anb` supplies filesystem storage, random creation ids, command parsing, audience composition, session coordination, rendering, locks, Git queries and agent setup. Concurrency belongs here: the host protects a whole operation, including changes to several files. Per-file atomic writes alone would let a concurrent reader mistake an unfinished archive move for a duplicate record. Private session state is not committed and is not a distributed lock.
 
 This separation leaves room for other hosts to reuse the Core. A proposed host still has to define its storage and concurrency behavior; the trait does not provide transactions or synchronization.
 
@@ -63,7 +63,7 @@ The docs check covers sidebar membership, source links, the site build and local
 
 ## Documentation and skills
 
-A command change affects its help, replies, installed references and the guide where someone learns to use it. `crates/anb/src/skill/anb.rs` renders the workflow skill and executes its worked session against a scratch notebook. The main skill contains the working method, including planning and domain modeling; separate references contain command syntax, worked replies and refusals. The atlas skill is authored under `.agents/skills/anb-atlas/` and bundled by `skill/atlas.rs`.
+A command change affects its help, replies, installed references and the guide where someone learns to use it. `crates/anb/src/skill/method.md` owns the working method. `crates/anb/src/skill/anb.rs` renders the skill and executes its worked session against a scratch notebook. The main skill covers recall, capture, audience selection and consolidation; separate references contain command syntax, worked replies and refusals. The atlas skill is authored under `.agents/skills/anb-atlas/` and bundled by `skill/atlas.rs`.
 
 Regenerate the CLI-owned texts after changing their source:
 

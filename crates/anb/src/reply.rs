@@ -4,14 +4,15 @@
 //! when a reply names one.
 
 use crate::cli::{AddArgs, CloseArgs, Command, EditArgs, Extent, GraphArgs, Narrowing, Whose};
+use crate::recall::{Audience, Recall};
 use crate::setup::{self, SetUp};
 use crate::skill::{self, Drift};
-use anb_core::encode::{ROW_BOUND, quoted_if_delimited, shell_word};
+use anb_core::encode::{ROW_BOUND, shell_word};
 use anb_core::{
     Archived, Budget, CitedProof, Closed, Commented, Created, DebtSignal, Deleted, Draft, Edged,
     Edit, Edited, FileFinding, Filter, Focus, Graph, GraphSlice, Held, Link, ListedRecord,
-    Notebook, NotebookError, Proof, ReadyTask, RecordType, Repair, Restored, Scope, Status,
-    Storage, StorageError, Transitioned, View, path_stem,
+    Notebook, NotebookError, ReadyTask, RecordType, Repair, Restored, Scope, Status, Storage,
+    StorageError, Transitioned, View, path_stem,
 };
 use std::fmt::Write as _;
 use std::path::Path;
@@ -68,30 +69,22 @@ fn narrowing_flags(filter: &Filter) -> String {
     out
 }
 
-/// Whose a narrowed listing is, and the call that widens it: `by: <name>
-/// — anb <verb> … --team`, the line Status opens with. A read narrowed to
-/// one identity by the `scope` key was narrowed by nothing the caller
-/// typed, so the reply says so itself, or an empty listing would read
-/// exactly like an empty notebook. `None` when the read is everyone's.
+/// Remove the identity narrowing while retaining every other filter.
 #[must_use]
-pub fn whose_line(verb: &str, filter: &Filter) -> Option<String> {
-    let (by, widened) = widened(filter)?;
-    Some(by_line(
-        by,
-        &format!("anb {verb}{}", narrowing_flags(&widened)),
-    ))
+pub fn team_command(verb: &str, filter: &Filter) -> Option<String> {
+    let (_, widened) = widened(filter)?;
+    Some(format!("anb {verb}{} --team", narrowing_flags(&widened)))
 }
 
-/// [`whose_line`] for a graph: the widening call carries the focus and
-/// `--full` as well, so it draws the same graph as everyone's.
+/// Widen a graph's identity scope without changing its focus or depth.
 #[must_use]
-pub fn whose_slice_line(slice: &GraphSlice, full: bool) -> Option<String> {
-    let (by, filter) = widened(&slice.filter)?;
+pub fn team_slice_command(slice: &GraphSlice, full: bool) -> Option<String> {
+    let (_, filter) = widened(&slice.filter)?;
     let widened = GraphSlice {
         filter,
         focus: slice.focus.clone(),
     };
-    Some(by_line(by, &slice_command(&widened, full)))
+    Some(format!("{} --team", slice_command(&widened, full)))
 }
 
 /// The identity a filter is narrowed to, beside the filter without it.
@@ -106,10 +99,6 @@ fn widened(filter: &Filter) -> Option<(&str, Filter)> {
     ))
 }
 
-fn by_line(by: &str, widening: &str) -> String {
-    format!("by: {} — {widening} --team\n", quoted_if_delimited(by))
-}
-
 /// The repair a finding names, as the command that runs it. A finding is
 /// located by file, and the id a verb takes is that file's stem.
 #[must_use]
@@ -118,6 +107,7 @@ pub fn repair_command(repair: &Repair, path: &str) -> String {
     match repair {
         Repair::Clear(field) => format!("anb edit {id} --clear {field}"),
         Repair::Unblock(on) => format!("anb unblock {id} {on}"),
+        Repair::Unlink(link) => format!("anb edit {id} --unlink {}", shell_word(link)),
         Repair::Unhold => format!("anb unhold {id}"),
         Repair::Archive => format!("anb archive {id}"),
         Repair::Restore => format!("anb restore {id}"),
@@ -127,6 +117,10 @@ pub fn repair_command(repair: &Repair, path: &str) -> String {
 /// What a command came to; the renderers turn one of these into text.
 #[derive(Debug)]
 pub enum Reply {
+    Started(crate::session::Started),
+    Imported(anb_core::FileBatch),
+    Migrated(anb_core::FileBatch),
+    Recalled(Box<Recall>),
     Created {
         command: &'static str,
         created: Created,
@@ -160,7 +154,6 @@ pub enum Reply {
     },
     Status {
         status: Status,
-        hook: bool,
     },
     Checked {
         findings: Vec<FileFinding>,
@@ -184,9 +177,6 @@ pub enum Reply {
         full: bool,
         all: bool,
     },
-    /// The hook's fail-soft outcome: no context rather than a blocked
-    /// session.
-    Silence,
 }
 
 impl Reply {
@@ -251,6 +241,8 @@ fn skilled(dir: Option<&Path>, check: bool) -> Result<SkillReply, NotebookError>
 /// happened. `today` is the host's date — the Core holds no clock.
 #[derive(Clone, Copy)]
 pub struct Host<'a> {
+    /// The local agent session, independent of accountable human identity.
+    pub session: Option<&'a str>,
     pub identity: fn() -> Option<String>,
     /// Borrowed rather than a plain `fn`, because a caller may need to
     /// close over where it reads from — the tests hand in a table of
@@ -260,12 +252,12 @@ pub struct Host<'a> {
     /// Core holds neither git nor a filesystem, so the question is asked
     /// out here; a caller with nothing to ask answers with an empty list.
     pub lost_proofs: &'a dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
-    /// The user's notebook, when the host resolved a usable one. It stands
-    /// behind every surface of the project's: Status pairs a project rule
-    /// with the standing rule it shadows, a write's nudge names no id it
-    /// holds as dangling, and `check` lets a link reach it. `None` names no
-    /// such root, never an empty one.
+    /// Cross-project personal knowledge, separate from shared validation.
+    /// A failed read of a configured source must propagate, not become None.
     pub user_notebook: Option<&'a dyn Storage>,
+    /// Private practices for this project, outside its committed notebook.
+    pub personal_notebook: Option<&'a dyn Storage>,
+    pub audience: Audience,
     /// Where the session starts: the directory `setup` writes the agents'
     /// files into.
     pub project_dir: &'a Path,
@@ -277,31 +269,100 @@ pub struct Host<'a> {
 /// # Errors
 /// The Core's refusal, or the shell's own argument refusal — either
 /// renders as a recovery payload.
+#[allow(
+    clippy::too_many_lines,
+    reason = "One exhaustive dispatch places every command at its domain operation."
+)]
 pub fn execute(
     command: Command,
     storage: &mut dyn Storage,
     host: Host<'_>,
 ) -> Result<Reply, NotebookError> {
     let Host {
+        session,
         identity,
         read_file,
         lost_proofs,
-        user_notebook,
+        audience,
         project_dir,
         today,
+        ..
     } = host;
     let identity = identity();
-    let mut notebook = Notebook::new(storage)
-        .with_user(user_notebook)
-        .with_identity(identity.as_deref());
+    let session_focus = if matches!(
+        &command,
+        Command::Recall { focus: None, .. } | Command::Hook
+    ) {
+        crate::session::focus(storage, session, identity.as_deref())?
+    } else {
+        None
+    };
+    let mut notebook = Notebook::new(storage).with_identity(identity.as_deref());
     match command {
+        Command::Hook => {
+            let by = named(
+                Whose::default(),
+                notebook.config()?.scope(),
+                identity.as_deref(),
+            )?;
+            recalled(
+                &notebook,
+                None,
+                session_focus.as_deref(),
+                false,
+                by.as_deref(),
+                host,
+            )
+        }
+        Command::Import { dir, check } => {
+            let source = import_source(&project_dir.join(dir), audience)?;
+            Ok(Reply::Imported(notebook.import(&source, check)?))
+        }
+        Command::Migrate { check } => Ok(Reply::Migrated(notebook.migrate(check)?)),
+        Command::Recall {
+            text,
+            focus,
+            all,
+            whose,
+        } => {
+            let by = named(whose, notebook.config()?.scope(), identity.as_deref())?;
+            recalled(
+                &notebook,
+                text.as_deref(),
+                focus.or(session_focus).as_deref(),
+                all,
+                by.as_deref(),
+                host,
+            )
+        }
         Command::Add(mut args) => {
             let body = body_text(args.body.take(), args.body_file.take(), read_file)?;
             let draft = draft(args, body.unwrap_or_default(), identity.as_deref())?;
             created("add", &mut notebook, &draft, today)
         }
-        Command::Retire { id } => Ok(moved("retire", notebook.retire(&id, today)?)),
-        Command::Start { id } => Ok(moved("start", notebook.start(&id, today)?)),
+        Command::Retire {
+            id,
+            body,
+            body_file,
+            via,
+        } => retired(&mut notebook, &id, body, body_file, via.as_deref(), host),
+        Command::Start {
+            id,
+            next,
+            hub,
+            join,
+        } => Ok(Reply::Started(crate::session::start(
+            storage,
+            session,
+            identity.as_deref(),
+            &crate::session::Start {
+                id,
+                next,
+                hub,
+                join,
+            },
+            today,
+        )?)),
         Command::Submit { id, to } => {
             Ok(moved("submit", notebook.submit(&id, to.as_deref(), today)?))
         }
@@ -324,12 +385,21 @@ pub fn execute(
         Command::Unhold { id } => Ok(Reply::Unheld(notebook.unhold(&id, today)?)),
         Command::Block { id, on } => Ok(Reply::Blocked(notebook.block(&id, &on, today)?)),
         Command::Unblock { id, on } => Ok(Reply::Unblocked(notebook.unblock(&id, &on, today)?)),
-        Command::Comment { id, text, via } => Ok(Reply::Commented(notebook.comment(
-            &id,
-            via.as_deref(),
-            &text,
-            today,
-        )?)),
+        Command::Comment {
+            id,
+            text,
+            body,
+            body_file,
+            via,
+        } => {
+            let text = body_text(body.or(text), body_file, read_file)?.unwrap_or_default();
+            Ok(Reply::Commented(notebook.comment(
+                &id,
+                via.as_deref(),
+                &text,
+                today,
+            )?))
+        }
         Command::Ready { narrowing, all } => queued(&notebook, identity.as_deref(), narrowing, all),
         Command::List {
             narrowing,
@@ -348,32 +418,128 @@ pub fn execute(
             signals: notebook.debt(today, lost_proofs)?,
             all,
         }),
-        Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id, today)?)),
+        Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id)?)),
         Command::Restore { id } => Ok(Reply::Restored(notebook.restore(&id)?)),
         Command::Delete { id } => Ok(Reply::Deleted(notebook.delete(&id)?)),
         Command::Edit(args) => edited(&mut notebook, args, read_file, today),
         Command::Graph(args) => graphed(&notebook, identity.as_deref(), args),
         Command::Setup { agents, remove } => {
-            Ok(Reply::SetUp(setup::apply(project_dir, remove, &agents)?))
+            let project = crate::fs_storage::project_anchor(project_dir);
+            Ok(Reply::SetUp(setup::apply(project, remove, &agents)?))
         }
         Command::Skill { dir, check } => Ok(Reply::Skill(skilled(dir.as_deref(), check)?)),
-        Command::Status {
-            budget,
-            hook,
-            whose,
-        } => status_reply(
+        Command::Status { budget, whose } => status_reply(
             &notebook,
             identity.as_deref(),
             budget,
             whose,
-            hook,
             lost_proofs,
             today,
         ),
     }
 }
 
-/// A record minted under the verb that asked for it.
+fn retired(
+    notebook: &mut Notebook<'_>,
+    id: &str,
+    body: Option<String>,
+    body_file: Option<String>,
+    via: Option<&str>,
+    host: Host<'_>,
+) -> Result<Reply, NotebookError> {
+    let outcome = body_text(body, body_file, host.read_file)?;
+    if via.is_some() && outcome.is_none() {
+        return Err(NotebookError::InvalidArgument {
+            reason: "retire: --via requires an outcome with --body or --body-file".to_owned(),
+        });
+    }
+    let transition = match outcome {
+        Some(outcome) => notebook.retire_with_outcome(id, via, &outcome, host.today)?,
+        None => notebook.retire(id, host.today)?,
+    };
+    Ok(moved("retire", transition))
+}
+
+fn import_source(
+    path: &Path,
+    audience: Audience,
+) -> Result<crate::fs_storage::FsStorage, NotebookError> {
+    if let Some(reason) = crate::fs_storage::unusable_root(path) {
+        return Err(NotebookError::InvalidArgument { reason });
+    }
+    if !path.is_dir() {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!("import: {} is not a directory", path.display()),
+        });
+    }
+    let source = crate::fs_storage::FsStorage::new(path.to_path_buf());
+    if audience != Audience::Project {
+        for record_type in [RecordType::Task, RecordType::Question] {
+            for directory in [
+                record_type.directory().to_owned(),
+                format!("archive/{}", record_type.directory()),
+            ] {
+                if source.list(&directory)?.iter().any(|path| {
+                    path.rsplit_once('.')
+                        .is_some_and(|(_, extension)| extension == "md")
+                }) {
+                    return Err(NotebookError::InvalidArgument {
+                        reason: "import: personal notebooks hold Notes and Decisions; import Tasks and Questions into the project".to_owned(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(source)
+}
+
+/// Compose one bounded memory read without merging audience identities.
+fn recalled(
+    notebook: &Notebook<'_>,
+    text: Option<&str>,
+    focus: Option<&str>,
+    all: bool,
+    by: Option<&str>,
+    host: Host<'_>,
+) -> Result<Reply, NotebookError> {
+    let mut more = "anb recall".to_owned();
+    if let Some(text) = text {
+        let _ = write!(more, " {}", shell_word(text));
+    }
+    if let Some(id) = focus {
+        let _ = write!(more, " --for {}", shell_word(id));
+    }
+    if let Some(by) = by {
+        let _ = write!(more, " --by {}", shell_word(by));
+    } else {
+        more.push_str(" --team");
+    }
+    let _ = write!(more, "{} --all", host.audience.flag());
+    let mut recalled = Recall {
+        work: notebook.status(host.today, Budget::Unbounded, by, host.lost_proofs)?,
+        focus: focus.map(|id| notebook.view(id)).transpose()?,
+        memories: Vec::new(),
+        invalid: Vec::new(),
+        all,
+        budget: if all {
+            Budget::Unbounded
+        } else {
+            notebook.config()?.budget()
+        },
+        more,
+    };
+    recalled.include(host.audience, notebook.recall(text, focus)?);
+    for (scope, source) in [
+        (Audience::Personal, host.personal_notebook),
+        (Audience::Global, host.user_notebook),
+    ] {
+        if let Some(source) = source {
+            recalled.include(scope, anb_core::recall(source, text, None)?);
+        }
+    }
+    Ok(Reply::Recalled(Box::new(recalled)))
+}
+
 fn created(
     command: &'static str,
     notebook: &mut Notebook<'_>,
@@ -442,44 +608,24 @@ fn moved(command: &'static str, transition: Transitioned) -> Reply {
     }
 }
 
-/// The Status, or the hook's fail-soft outcome: an empty context, never a
-/// blocked session.
+/// The work dashboard under the selected identity and output budget.
 fn status_reply(
     notebook: &Notebook<'_>,
     identity: Option<&str>,
     budget: Option<u32>,
     whose: Whose,
-    hook: bool,
     lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
     today: &str,
 ) -> Result<Reply, NotebookError> {
-    // Every failure here — reading the notebook to find the proofs
-    // included — passes through the one funnel the hook's fail-soft needs.
-    let status = configured_status(notebook, identity, budget, whose, lost_proofs, today);
-    match (status, hook) {
-        (Ok(status), hook) => Ok(Reply::Status { status, hook }),
-        (Err(_), true) => Ok(Reply::Silence),
-        (Err(error), false) => Err(error),
-    }
-}
-
-/// The Status under the resolved ceiling and scope: a flag outranks the
-/// config key for each.
-fn configured_status(
-    notebook: &Notebook<'_>,
-    identity: Option<&str>,
-    budget: Option<u32>,
-    whose: Whose,
-    lost_proofs: &dyn Fn(&[CitedProof]) -> Vec<CitedProof>,
-    today: &str,
-) -> Result<Status, NotebookError> {
     let config = notebook.config()?;
     let ceiling = match budget {
         Some(ceiling) => Budget::from_ceiling(ceiling),
         None => config.budget(),
     };
     let by = named(whose, config.scope(), identity)?;
-    notebook.status(today, ceiling, by.as_deref(), lost_proofs)
+    Ok(Reply::Status {
+        status: notebook.status(today, ceiling, by.as_deref(), lost_proofs)?,
+    })
 }
 
 fn edited(
@@ -647,12 +793,22 @@ fn filter(
         kinds,
         archive,
     } = extent;
-    // The pool is nobody's by definition, so asking for it answers the
-    // whose question outright and leaves the config key aside.
+    // Personal work defaults do not limit the authors of shared knowledge.
+    // An explicit identity still narrows a knowledge query by author.
+    let knowledge = !kinds.is_empty()
+        || (!types.is_empty()
+            && types
+                .iter()
+                .all(|of| matches!(of, RecordType::Decision | RecordType::Note)));
     let by = if untaken {
         None
     } else {
-        named(whose, notebook.config()?.scope(), identity)?
+        let default = if knowledge {
+            Scope::Team
+        } else {
+            notebook.config()?.scope()
+        };
+        named(whose, default, identity)?
     };
     Ok(Filter {
         types,
@@ -694,21 +850,17 @@ fn named(
     }
 }
 
-/// The one way a close was told to end the record. `--note` names a file
-/// the shell must read, since only the host can reach a path outside the
-/// notebook; every other proof is a string the Core stores as given; a
-/// reason ends a Task or a Question without a proof; a resolver is the
-/// record a Question closed into.
+/// A completed Task records its outcome. Cancellation records a reason;
+/// a Question can instead name the record that resolved it.
 enum Closing {
-    Ingest(String),
-    Stored(Proof),
+    Outcome(String),
     Reason(String),
     ResolvedBy(String),
 }
 
 /// The single closing among the flags, or the refusal that says which way
 /// the caller missed: nothing offered, or more than one.
-fn chosen_closing(offered: [Option<Closing>; 7]) -> Result<Closing, NotebookError> {
+fn chosen_closing(offered: [Option<Closing>; 3]) -> Result<Closing, NotebookError> {
     let mut offered = offered.into_iter().flatten();
     match (offered.next(), offered.next()) {
         (Some(only), None) => Ok(only),
@@ -729,36 +881,33 @@ fn close_reply(
 ) -> Result<Closed, NotebookError> {
     let CloseArgs {
         id,
-        note,
-        pr,
-        sha,
-        report,
-        no_proof,
+        body,
+        body_file,
+        via,
         reason,
         resolved_by,
     } = args;
     // Each flag builds its own answer, so no two can be transposed.
-    match chosen_closing([
-        note.map(Closing::Ingest),
-        pr.map(|url| Closing::Stored(Proof::Pr(url))),
-        sha.map(|sha| Closing::Stored(Proof::Sha(sha))),
-        report.map(|path| Closing::Stored(Proof::Report(path))),
-        no_proof.then_some(Closing::Stored(Proof::Waived)),
+    let closing = chosen_closing([
+        body_text(body, body_file, read_file)?.map(Closing::Outcome),
         reason.map(Closing::Reason),
         resolved_by.map(Closing::ResolvedBy),
-    ])? {
-        Closing::Ingest(path) => {
-            let report = read_file(&path).map_err(|error| file_refusal("note", &error))?;
-            notebook.close_with_report(&id, &report, today)
-        }
-        Closing::Stored(proof) => notebook.close(&id, &proof, today),
+    ])?;
+    if via.is_some() && !matches!(closing, Closing::Outcome(_)) {
+        return Err(NotebookError::InvalidArgument {
+            reason: "close: --via requires an outcome with --body or --body-file".to_owned(),
+        });
+    }
+    match closing {
+        Closing::Outcome(outcome) => notebook.close(&id, via.as_deref(), &outcome, today),
         Closing::Reason(reason) => notebook.close_with_reason(&id, &reason, today),
         Closing::ResolvedBy(resolver) => notebook.resolve_question(&id, &resolver, today),
     }
 }
 
 /// The close flags as one phrase, so the two refusals name the same set.
-const CLOSE_FLAGS: &str = "--note <path>, --pr <url>, --sha <sha>, --report <path>, --no-proof, --reason \"<why>\", or --resolved-by <id>";
+const CLOSE_FLAGS: &str =
+    "--body \"<outcome>\", --body-file <path>, --reason \"<why>\", or --resolved-by <id>";
 
 /// A file the caller named under `flag` and the shell could not read. The
 /// path came off the command line, so every way it can fail is a refused

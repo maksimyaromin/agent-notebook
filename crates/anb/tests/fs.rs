@@ -9,6 +9,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
+fn reply_value(text: &str) -> serde_json::Value {
+    if text.starts_with('{') {
+        serde_json::from_str(text).expect("the reply is JSON")
+    } else {
+        reddb_io_toon::decode(text)
+            .expect("the reply is TOON")
+            .to_json_value()
+    }
+}
+
+fn has_outcome(text: &str, path: &str, outcome: &str) -> bool {
+    reply_value(text)["files"]
+        .as_array()
+        .expect("setup reports files")
+        .iter()
+        .any(|file| file["path"] == path && file["outcome"] == outcome)
+}
+
 fn storage_in(dir: &TempDir) -> FsStorage {
     FsStorage::new(dir.path().to_owned())
 }
@@ -42,6 +60,41 @@ fn a_write_replaces_and_leaves_no_temp_file_behind() {
         vec!["tasks/task.demo.md"],
         "the temp file of the atomic write must be gone"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn replacing_a_record_preserves_its_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = TempDir::new().unwrap();
+    let mut storage = storage_in(&dir);
+    storage.write("notes/note.private.md", "first").unwrap();
+    let path = dir.path().join("notes/note.private.md");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    storage.write("notes/note.private.md", "second").unwrap();
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_existing_temporary_symlink_is_never_opened_or_removed() {
+    let dir = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let mut storage = storage_in(&dir);
+    fs::create_dir(dir.path().join("notes")).unwrap();
+    let victim = outside.path().join("untouched.txt");
+    fs::write(&victim, "original").unwrap();
+    let stale = dir
+        .path()
+        .join(format!("notes/.note.private.md.{}.tmp", std::process::id()));
+    std::os::unix::fs::symlink(&victim, &stale).unwrap();
+    storage.write("notes/note.private.md", "record").unwrap();
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "original");
+    assert!(fs::symlink_metadata(&stale).unwrap().is_symlink());
+    assert_eq!(storage.read("notes/note.private.md").unwrap(), "record");
 }
 
 #[test]
@@ -549,8 +602,7 @@ mod the_users_notebook {
         );
     }
 
-    /// The scopes differ in where a record lives and in nothing else: one
-    /// grammar, one renderer, one set of rules.
+    /// Record content is audience-independent; navigation preserves the selected notebook.
     #[test]
     fn the_same_note_reads_the_same_in_either_scope() {
         let home = TempDir::new().unwrap();
@@ -565,16 +617,23 @@ mod the_users_notebook {
         );
         served(&home, project.path(), None, &filed);
 
-        assert_eq!(
-            served(
-                &home,
-                project.path(),
-                None,
-                &["show", "note.practice", "--global"]
-            ),
-            served(&home, project.path(), None, &["show", "note.practice"]),
-            "the output contract does not know which scope it is reading"
-        );
+        let mut global = reply_value(&served(
+            &home,
+            project.path(),
+            None,
+            &["show", "note.practice", "--global"],
+        ));
+        let mut shared = reply_value(&served(
+            &home,
+            project.path(),
+            None,
+            &["show", "note.practice"],
+        ));
+        assert_eq!(global["more"], "anb --global show note.practice --all");
+        assert_eq!(shared["more"], "anb show note.practice --all");
+        global.as_object_mut().unwrap().remove("more");
+        shared.as_object_mut().unwrap().remove("more");
+        assert_eq!(global, shared, "the same record data in either audience");
         assert_eq!(
             fs::read_to_string(home.path().join(".agent-notebook/notes/note.practice.md")).unwrap(),
             fs::read_to_string(
@@ -616,40 +675,25 @@ mod the_users_notebook {
         );
     }
 
-    /// The pair the second root exists to make visible: a project rule
-    /// standing against one of the user's own, counted on the project's
-    /// own Status and named in its Debt with both sides and their authors.
+    /// A private record cannot resolve a shared citation for teammates.
     #[test]
-    fn a_project_rule_standing_against_the_users_own_reaches_the_projects_debt() {
+    fn shared_debt_ignores_private_records_with_matching_ids() {
         let home = TempDir::new().unwrap();
         let project = a_project();
         a_pair_across_the_scopes(&home, &project);
 
         let status = served(&home, project.path(), None, &["status"]);
-        assert!(
-            status.contains("debt: 1 — anb debt\n"),
-            "the session opens on the count: {status}"
-        );
+        assert_eq!(reply_value(&status)["debt"]["count"], 1);
         let debt = served(&home, project.path(), None, &["debt"]);
-        let shadow = debt
-            .lines()
-            .map(str::trim)
-            .find(|line| line.starts_with("shadow:"))
-            .unwrap_or_else(|| panic!("no shadow line in: {debt}"));
         assert_eq!(
-            shadow, "shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)",
-            "the project rule leads: it is the one this repository follows"
-        );
-        assert!(
-            !debt.contains("dangling-mention"),
-            "and the citation names something, so nothing calls it missing: {debt}"
+            reply_value(&debt)["debt"],
+            serde_json::json!([{"code":"dangling-mention","id":"decision.spaces","target":"decision.tabs","line":"dangling-mention: decision.spaces -> decision.tabs"}])
         );
     }
 
-    /// An agent reads the Debt as data, so the pair reaches it in
-    /// whichever shape it asked for.
+    /// JSON reports the same local-only citation finding.
     #[test]
-    fn the_pair_reaches_the_json_debt_under_its_own_code() {
+    fn json_debt_does_not_infer_a_cross_scope_conflict() {
         let home = TempDir::new().unwrap();
         let project = a_project();
         a_pair_across_the_scopes(&home, &project);
@@ -659,11 +703,9 @@ mod the_users_notebook {
         let rows = parsed["debt"].as_array().expect("debt rows");
         assert!(
             rows.iter().any(|row| {
-                row["code"] == "shadow"
-                    && row["line"]
-                        == "shadow: decision.spaces (Teammate) <-> global decision.tabs (Reader)"
+                row["code"] == "dangling-mention" && row["target"] == "decision.tabs"
             }),
-            "no shadow row in: {payload}"
+            "the shared citation remains unresolved: {payload}"
         );
     }
 
@@ -846,6 +888,8 @@ mod a_notebook_that_moved {
                 "add",
                 "task",
                 "Named on the line",
+                "--id",
+                "task.named-on-the-line",
             ],
         );
         assert!(
@@ -869,7 +913,13 @@ mod a_notebook_that_moved {
         anb(
             &project,
             ".tmp/private",
-            &["add", "task", "Filed from the root"],
+            &[
+                "add",
+                "task",
+                "Filed from the root",
+                "--id",
+                "task.filed-from-the-root",
+            ],
         );
         let listed = anb_in(&deep, ".tmp/private", &["list"]);
 
@@ -886,12 +936,27 @@ mod a_notebook_that_moved {
     #[test]
     fn a_notebook_outside_any_repository_takes_the_cycle_too() {
         let loose = TempDir::new().unwrap();
-        anb(&loose, "notes", &["add", "task", "No repository in sight"]);
+        anb(
+            &loose,
+            "notes",
+            &[
+                "add",
+                "task",
+                "No repository in sight",
+                "--id",
+                "task.no-repository-in-sight",
+            ],
+        );
         anb(&loose, "notes", &["start", "task.no-repository-in-sight"]);
         anb(
             &loose,
             "notes",
-            &["close", "task.no-repository-in-sight", "--no-proof"],
+            &[
+                "close",
+                "task.no-repository-in-sight",
+                "--body",
+                "Completed and checked.",
+            ],
         );
         assert!(
             loose
@@ -906,7 +971,17 @@ mod a_notebook_that_moved {
         let project = a_project();
         let elsewhere = ".tmp/private-notebook";
 
-        anb(&project, elsewhere, &["add", "task", "Work kept to myself"]);
+        anb(
+            &project,
+            elsewhere,
+            &[
+                "add",
+                "task",
+                "Work kept to myself",
+                "--id",
+                "task.work-kept-to-myself",
+            ],
+        );
         anb(&project, elsewhere, &["start", "task.work-kept-to-myself"]);
         anb(
             &project,
@@ -917,7 +992,12 @@ mod a_notebook_that_moved {
         anb(
             &project,
             elsewhere,
-            &["close", "task.work-kept-to-myself", "--no-proof"],
+            &[
+                "close",
+                "task.work-kept-to-myself",
+                "--body",
+                "Completed and checked.",
+            ],
         );
         anb(
             &project,
@@ -1130,15 +1210,129 @@ mod setup {
     }
 
     #[test]
+    fn setup_from_a_subdirectory_installs_at_the_project_root() {
+        let project = a_project();
+        let nested = project.path().join("src/parser");
+        fs::create_dir_all(&nested).unwrap();
+
+        ok(&nested, &["setup", "--agent", "agents-md"]);
+
+        assert!(project.path().join("AGENTS.md").is_file());
+        assert!(project.path().join(".agents/skills/anb/SKILL.md").is_file());
+        assert_eq!(fs::read_dir(&nested).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn setup_refreshes_skills_without_restoring_a_replaced_instruction_block() {
+        let project = TempDir::new().unwrap();
+        ok(project.path(), &["setup", "--agent", "agents-md"]);
+        let guide = "# Project memory\n\nRead the project rules before starting work.\n";
+        fs::write(project.path().join("AGENTS.md"), guide).unwrap();
+        let reference = ".agents/skills/anb/references/commands.md";
+        fs::write(
+            project.path().join(reference),
+            "---\nmanaged-by: anb\n---\nOutdated command reference.\n",
+        )
+        .unwrap();
+
+        for _ in 0..2 {
+            let reply = ok(project.path(), &["setup", "--agent", "agents-md"]);
+            assert!(has_outcome(&reply, "AGENTS.md", "yours, left alone"));
+            assert_eq!(read(project.path(), "AGENTS.md"), guide);
+            assert!(!read(project.path(), reference).contains("Outdated command reference."));
+        }
+    }
+
+    #[test]
+    fn an_existing_installation_keeps_its_unmarked_project_instructions_on_upgrade() {
+        let project = TempDir::new().unwrap();
+        let guide = "# Project memory\n\nUse our notebook workflow.\n";
+        fs::write(project.path().join("AGENTS.md"), guide).unwrap();
+        fs::create_dir_all(project.path().join(".agents/skills/anb")).unwrap();
+        fs::write(
+            project.path().join(".agents/skills/anb/SKILL.md"),
+            "# Our workflow\n\nCheck project rules before starting.\n",
+        )
+        .unwrap();
+
+        ok(project.path(), &["setup", "--agent", "agents-md"]);
+
+        assert_eq!(read(project.path(), "AGENTS.md"), guide);
+    }
+
+    #[test]
+    fn a_deleted_instruction_file_stays_deleted_after_remove_and_reinstall() {
+        let project = TempDir::new().unwrap();
+        ok(project.path(), &["setup", "--agent", "agents-md"]);
+        fs::remove_file(project.path().join("AGENTS.md")).unwrap();
+
+        for args in [
+            vec!["setup", "--agent", "agents-md"],
+            vec![
+                "setup",
+                "--agent",
+                "codex",
+                "--agent",
+                "agents-md",
+                "--remove",
+            ],
+            vec!["setup", "--agent", "agents-md"],
+        ] {
+            ok(project.path(), &args);
+            assert!(!project.path().join("AGENTS.md").exists());
+        }
+    }
+
+    #[test]
+    fn setup_never_changes_the_project_workflow_extension() {
+        let project = TempDir::new().unwrap();
+        fs::create_dir_all(project.path().join(".agents")).unwrap();
+        let workflow = "# Project workflow\n\nKeep external issue status in the issue tracker.\n";
+        fs::write(project.path().join(".agents/anb.md"), workflow).unwrap();
+
+        for remove in [false, false, true] {
+            let mut args = vec![
+                "setup",
+                "--agent",
+                "claude-code",
+                "--agent",
+                "codex",
+                "--agent",
+                "agents-md",
+            ];
+            if remove {
+                args.push("--remove");
+            }
+            ok(project.path(), &args);
+            assert_eq!(read(project.path(), ".agents/anb.md"), workflow);
+        }
+    }
+
+    #[test]
+    fn an_invalid_setup_receipt_refuses_before_any_integration_file_changes() {
+        let project = TempDir::new().unwrap();
+        let receipt = "{\"instructions\": [\"another-file.md\"]}\n";
+        fs::write(project.path().join(".anb-setup.json"), receipt).unwrap();
+
+        let refused = anb(project.path(), &["setup", "--agent", "claude-code"]);
+
+        assert!(!refused.status.success());
+        assert_eq!(read(project.path(), ".anb-setup.json"), receipt);
+        assert_eq!(fs::read_dir(project.path()).unwrap().count(), 1);
+    }
+
+    #[test]
     fn setup_writes_the_snippet_and_both_hooks_and_a_second_run_changes_nothing() {
         let project = TempDir::new().unwrap();
         let first = ok(
             project.path(),
             &["setup", "--agent", "claude-code", "--agent", "codex"],
         );
+        assert!(has_outcome(&first, "AGENTS.md", "written"));
+        assert!(has_outcome(&first, ".anb-setup.json", "written"));
         assert_eq!(
-            first,
-            "ok: setup — 18 files\n  AGENTS.md: written\n  CLAUDE.md: written\n  .claude/settings.json: written\n  .codex/hooks.json: written\n  .claude/skills/anb/SKILL.md: written\n  .claude/skills/anb/references/commands.md: written\n  .claude/skills/anb/references/session.md: written\n  .claude/skills/anb/references/refusals.md: written\n  .claude/skills/anb-atlas/SKILL.md: written\n  .claude/skills/anb-atlas/references/drawing.md: written\n  .claude/skills/anb-atlas/references/intent-loop.md: written\n  .agents/skills/anb/SKILL.md: written\n  .agents/skills/anb/references/commands.md: written\n  .agents/skills/anb/references/session.md: written\n  .agents/skills/anb/references/refusals.md: written\n  .agents/skills/anb-atlas/SKILL.md: written\n  .agents/skills/anb-atlas/references/drawing.md: written\n  .agents/skills/anb-atlas/references/intent-loop.md: written\nskipped: agents-md\nnotice: Codex runs a project hook after you review it: run /hooks in Codex from this directory\n"
+            reply_value(&first)["skipped"],
+            serde_json::json!(["agents-md"])
         );
         assert!(read(project.path(), "AGENTS.md").contains("<!-- anb:begin -->"));
         assert!(read(project.path(), "CLAUDE.md").contains("<!-- anb:begin -->"));
@@ -1146,13 +1340,13 @@ mod setup {
             serde_json::from_str(&read(project.path(), ".claude/settings.json")).unwrap();
         assert_eq!(
             settings["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-            serde_json::json!("anb status --hook")
+            serde_json::json!("anb hook")
         );
         let codex: serde_json::Value =
             serde_json::from_str(&read(project.path(), ".codex/hooks.json")).unwrap();
         assert_eq!(
             codex["hooks"]["SessionStart"][0]["hooks"][0]["command"],
-            serde_json::json!("anb status --hook")
+            serde_json::json!("anb hook")
         );
 
         let agents_before = read(project.path(), "AGENTS.md");
@@ -1160,11 +1354,14 @@ mod setup {
             project.path(),
             &["setup", "--agent", "claude-code", "--agent", "codex"],
         );
-        assert_eq!(
-            second,
-            "ok: setup — 18 files\n  AGENTS.md: already\n  CLAUDE.md: already\n  .claude/settings.json: already\n  .codex/hooks.json: already\n  .claude/skills/anb/SKILL.md: already\n  .claude/skills/anb/references/commands.md: already\n  .claude/skills/anb/references/session.md: already\n  .claude/skills/anb/references/refusals.md: already\n  .claude/skills/anb-atlas/SKILL.md: already\n  .claude/skills/anb-atlas/references/drawing.md: already\n  .claude/skills/anb-atlas/references/intent-loop.md: already\n  .agents/skills/anb/SKILL.md: already\n  .agents/skills/anb/references/commands.md: already\n  .agents/skills/anb/references/session.md: already\n  .agents/skills/anb/references/refusals.md: already\n  .agents/skills/anb-atlas/SKILL.md: already\n  .agents/skills/anb-atlas/references/drawing.md: already\n  .agents/skills/anb-atlas/references/intent-loop.md: already\nskipped: agents-md\n",
-            "a re-run finds its own lines and adds nothing"
+        assert!(
+            reply_value(&second)["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|file| file["outcome"] != "written")
         );
+        assert!(has_outcome(&second, ".anb-setup.json", "already"));
         assert_eq!(read(project.path(), "AGENTS.md"), agents_before);
     }
 
@@ -1215,10 +1412,8 @@ mod setup {
                 "--remove",
             ],
         );
-        assert_eq!(
-            removed,
-            "ok: setup --remove — 18 files\n  AGENTS.md: removed\n  CLAUDE.md: removed\n  .claude/settings.json: removed\n  .codex/hooks.json: removed\n  .claude/skills/anb/SKILL.md: removed\n  .claude/skills/anb/references/commands.md: removed\n  .claude/skills/anb/references/session.md: removed\n  .claude/skills/anb/references/refusals.md: removed\n  .claude/skills/anb-atlas/SKILL.md: removed\n  .claude/skills/anb-atlas/references/drawing.md: removed\n  .claude/skills/anb-atlas/references/intent-loop.md: removed\n  .agents/skills/anb/SKILL.md: removed\n  .agents/skills/anb/references/commands.md: removed\n  .agents/skills/anb/references/session.md: removed\n  .agents/skills/anb/references/refusals.md: removed\n  .agents/skills/anb-atlas/SKILL.md: removed\n  .agents/skills/anb-atlas/references/drawing.md: removed\n  .agents/skills/anb-atlas/references/intent-loop.md: removed\n"
-        );
+        assert!(has_outcome(&removed, ".anb-setup.json", "removed"));
+        assert!(!project.path().join(".anb-setup.json").exists());
         assert_eq!(
             read(project.path(), "AGENTS.md"),
             "# Our guide\n\nRead the docs.\n"
@@ -1256,17 +1451,19 @@ mod setup {
                 "--remove",
             ],
         );
-        assert!(again.contains("AGENTS.md: absent"), "{again}");
+        assert!(has_outcome(&again, "AGENTS.md", "absent"), "{again}");
     }
 
     #[test]
     fn setup_writes_only_the_named_agents_files() {
         let project = TempDir::new().unwrap();
         let reply = ok(project.path(), &["setup", "--agent", "claude-code"]);
+        assert!(has_outcome(&reply, "CLAUDE.md", "written"));
         assert_eq!(
-            reply,
-            "ok: setup — 9 files\n  CLAUDE.md: written\n  .claude/settings.json: written\n  .claude/skills/anb/SKILL.md: written\n  .claude/skills/anb/references/commands.md: written\n  .claude/skills/anb/references/session.md: written\n  .claude/skills/anb/references/refusals.md: written\n  .claude/skills/anb-atlas/SKILL.md: written\n  .claude/skills/anb-atlas/references/drawing.md: written\n  .claude/skills/anb-atlas/references/intent-loop.md: written\nskipped: codex, agents-md\n"
+            reply_value(&reply)["skipped"],
+            serde_json::json!(["codex", "agents-md"])
         );
+        assert!(project.path().join(".claude/skills/anb/SKILL.md").is_file());
         for absent in ["AGENTS.md", ".codex", ".agents"] {
             assert!(
                 !project.path().join(absent).exists(),
@@ -1280,8 +1477,11 @@ mod setup {
         let project = TempDir::new().unwrap();
         fs::write(project.path().join("CLAUDE.md"), "@AGENTS.md\n").unwrap();
         let reply = ok(project.path(), &["setup", "--agent", "claude-code"]);
-        assert!(reply.contains("AGENTS.md: written"), "{reply}");
-        assert!(reply.contains("CLAUDE.md: imports AGENTS.md"), "{reply}");
+        assert!(has_outcome(&reply, "AGENTS.md", "written"), "{reply}");
+        assert!(
+            has_outcome(&reply, "CLAUDE.md", "imports AGENTS.md"),
+            "{reply}"
+        );
         assert!(read(project.path(), "AGENTS.md").contains("<!-- anb:begin -->"));
     }
 
@@ -1291,8 +1491,8 @@ mod setup {
         let refused = anb(project.path(), &["setup"]);
         assert!(!refused.status.success());
         assert_eq!(
-            String::from_utf8(refused.stderr).unwrap(),
-            "error[invalid-argument]: setup: name the agents to wire with --agent, one of claude-code, codex, agents-md\ntry: anb setup --agent claude-code\ntry: anb setup --agent codex\ntry: anb setup --agent agents-md\n"
+            reply_value(&String::from_utf8(refused.stderr).unwrap()),
+            serde_json::json!({"error":"invalid-argument","message":"setup: name the agents to wire with --agent, one of claude-code, codex, agents-md","try":["anb setup --agent claude-code","anb setup --agent codex","anb setup --agent agents-md"]})
         );
         assert_eq!(fs::read_dir(project.path()).unwrap().count(), 0);
     }
@@ -1302,10 +1502,9 @@ mod setup {
         let project = TempDir::new().unwrap();
         let refused = anb(project.path(), &["setup", "--agent", "pi"]);
         assert!(!refused.status.success());
-        assert!(
-            String::from_utf8(refused.stderr)
-                .unwrap()
-                .starts_with("error[invalid-argument]: setup: `pi` is not an agent; one of claude-code, codex, agents-md\n")
+        assert_eq!(
+            reply_value(&String::from_utf8(refused.stderr).unwrap())["message"],
+            "setup: `pi` is not an agent; one of claude-code, codex, agents-md"
         );
         assert_eq!(fs::read_dir(project.path()).unwrap().count(), 0);
     }
@@ -1318,10 +1517,13 @@ mod setup {
             &["setup", "--agent", "claude-code", "--agent", "codex"],
         );
         let removed = ok(project.path(), &["setup", "--agent", "codex", "--remove"]);
-        assert_eq!(
-            removed,
-            "ok: setup --remove — 3 files\n  AGENTS.md: read by an agent not named, kept\n  .codex/hooks.json: removed\n  .agents/skills: read by an agent not named, kept\nskipped: claude-code, agents-md\n"
-        );
+        assert!(has_outcome(
+            &removed,
+            "AGENTS.md",
+            "read by an agent not named, kept"
+        ));
+        assert!(has_outcome(&removed, ".codex/hooks.json", "removed"));
+        assert!(has_outcome(&removed, ".anb-setup.json", "already"));
         assert!(
             !project.path().join(".codex").exists(),
             "the hook's directory was setup's alone"
@@ -1341,7 +1543,7 @@ mod setup {
                 "--remove",
             ],
         );
-        assert!(rest.contains("AGENTS.md: removed"), "{rest}");
+        assert!(has_outcome(&rest, "AGENTS.md", "removed"), "{rest}");
         assert!(!project.path().join(".agents").exists());
         assert!(read(project.path(), "CLAUDE.md").contains("<!-- anb:begin -->"));
         assert!(project.path().join(".claude/skills/anb/SKILL.md").exists());
@@ -1375,7 +1577,7 @@ mod setup {
             ],
         );
         assert!(
-            removed.contains("AGENTS.md: read by an agent not named, kept"),
+            has_outcome(&removed, "AGENTS.md", "read by an agent not named, kept"),
             "{removed}"
         );
         assert!(read(project.path(), "AGENTS.md").contains("<!-- anb:begin -->"));
@@ -1390,7 +1592,10 @@ mod setup {
             project.path(),
             &["setup", "--agent", "claude-code", "--agent", "codex"],
         );
-        assert!(reply.contains("CLAUDE.md: links AGENTS.md"), "{reply}");
+        assert!(
+            has_outcome(&reply, "CLAUDE.md", "links AGENTS.md"),
+            "{reply}"
+        );
         assert_eq!(
             read(project.path(), "AGENTS.md")
                 .matches("<!-- anb:begin -->")
@@ -1411,7 +1616,10 @@ mod setup {
             project.path(),
             &["setup", "--agent", "claude-code", "--agent", "codex"],
         );
-        assert!(reply.contains("CLAUDE.md: imports AGENTS.md"), "{reply}");
+        assert!(
+            has_outcome(&reply, "CLAUDE.md", "imports AGENTS.md"),
+            "{reply}"
+        );
         assert_eq!(
             read(project.path(), "CLAUDE.md"),
             "@AGENTS.md\n\n## Claude Code\n"
@@ -1430,8 +1638,10 @@ mod setup {
         assert!(!refused.status.success());
         let payload = String::from_utf8(refused.stderr).unwrap();
         assert!(
-            payload
-                .starts_with("error[invalid-argument]: setup: .claude/settings.json is not JSON"),
+            reply_value(&payload)["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("setup: .claude/settings.json is not JSON"),
             "{payload}"
         );
         assert_eq!(read(project.path(), ".claude/settings.json"), "{ not json");
@@ -1480,8 +1690,8 @@ mod skill {
         let written = anb(project.path(), &["skill", "skills/anb"]);
         assert!(written.status.success());
         assert_eq!(
-            stdout(&written),
-            "ok: skill — 4 files written into skills/anb\n"
+            reply_value(&stdout(&written)),
+            serde_json::json!({"ok":"skill","dir":"skills/anb","files":4})
         );
         assert!(
             fs::read_to_string(project.path().join("skills/anb/SKILL.md"))
@@ -1492,8 +1702,8 @@ mod skill {
         let checked = anb(project.path(), &["skill", "skills/anb", "--check"]);
         assert!(checked.status.success());
         assert_eq!(
-            stdout(&checked),
-            "ok: skill — skills/anb matches the rendering\n"
+            reply_value(&stdout(&checked)),
+            serde_json::json!({"ok":"skill","dir":"skills/anb","drift":[]})
         );
 
         let path = project.path().join("skills/anb/references/refusals.md");
@@ -1506,8 +1716,8 @@ mod skill {
             "drift is a failing exit, so CI stops on it"
         );
         assert_eq!(
-            stdout(&drifted),
-            "skill: skills/anb has drifted from the rendering\n  SKILL.md: missing\n  references/refusals.md: differs from the rendering\ntry: anb skill skills/anb\n"
+            reply_value(&stdout(&drifted)),
+            serde_json::json!({"ok":"skill","dir":"skills/anb","drift":[{"file":"SKILL.md","reason":"missing"},{"file":"references/refusals.md","reason":"differs from the rendering"}]})
         );
 
         let as_json = anb(
@@ -1539,7 +1749,7 @@ mod skill {
             &["setup", "--agent", "claude-code", "--agent", "codex"],
         ));
         assert!(
-            rerun.contains(".claude/skills/anb/SKILL.md: yours, left alone"),
+            has_outcome(&rerun, ".claude/skills/anb/SKILL.md", "yours, left alone"),
             "{rerun}"
         );
         assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
@@ -1556,7 +1766,7 @@ mod skill {
             ],
         ));
         assert!(
-            removed.contains(".claude/skills/anb/SKILL.md: yours, left alone"),
+            has_outcome(&removed, ".claude/skills/anb/SKILL.md", "yours, left alone"),
             "{removed}"
         );
         assert!(path.exists(), "a file the user owns is never deleted");
@@ -1668,10 +1878,7 @@ mod skill {
                 project.path(),
                 &["setup", "--agent", "claude-code", "--agent", "codex"],
             ));
-            assert!(
-                rerun.contains(&format!("{file}: yours, left alone")),
-                "{rerun}"
-            );
+            assert!(has_outcome(&rerun, file, "yours, left alone"), "{rerun}");
             let removed = stdout(&anb(
                 project.path(),
                 &[
@@ -1686,7 +1893,7 @@ mod skill {
                 ],
             ));
             assert!(
-                removed.contains(&format!("{file}: yours, left alone")),
+                has_outcome(&removed, file, "yours, left alone"),
                 "{removed}"
             );
             assert_eq!(fs::read_to_string(&path).unwrap(), theirs);

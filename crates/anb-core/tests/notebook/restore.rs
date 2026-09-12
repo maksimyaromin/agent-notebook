@@ -177,11 +177,8 @@ mod restore_verb {
         ));
     }
 
-    /// A move interrupted between its write and its remove leaves the id
-    /// in both homes. The live directory is the only home a verb can edit,
-    /// so the standing copy is the record's truth: the next call finishes
-    /// the move by removing the leftover and rewrites nothing — proved on
-    /// an invalid record, whose copy no parse could vouch for.
+    /// Identical interrupted copies can be reconciled without choosing
+    /// between histories, including when the record needs later repair.
     #[test]
     fn an_interrupted_move_is_finished_by_the_next_call() {
         let text = task_file("open", &["priority: 9"]);
@@ -198,23 +195,23 @@ mod restore_verb {
         ));
     }
 
-    /// A canonical live path admits no clean record but the id's own —
-    /// `add` refuses an id the archive claims — so a clean standing copy
-    /// is this record however its bytes have moved on since the
-    /// interruption, and the correction survives the resume.
     #[test]
-    fn a_live_copy_corrected_since_the_interruption_keeps_its_bytes() {
+    fn a_live_correction_keeps_both_copies_until_they_are_reconciled() {
         let corrected = record_file("task.demo", "task", "closed", &["priority: 2"], "");
+        let original = task_file("closed", &[]);
         let mut storage = storage_with(&[
             ("tasks/task.demo.md", &corrected),
-            ("archive/tasks/task.demo.md", &task_file("closed", &[])),
+            ("archive/tasks/task.demo.md", &original),
         ]);
-        Notebook::new(&mut storage).restore("task.demo").unwrap();
-        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), corrected);
         assert!(matches!(
-            storage.read("archive/tasks/task.demo.md"),
-            Err(StorageError::NotFound { .. })
+            Notebook::new(&mut storage).restore("task.demo"),
+            Err(NotebookError::DuplicateId { .. })
         ));
+        assert_eq!(storage.read("tasks/task.demo.md").unwrap(), corrected);
+        assert_eq!(
+            storage.read("archive/tasks/task.demo.md").unwrap(),
+            original
+        );
     }
 
     /// The move lands its copy before it removes its source, so a failure
@@ -232,9 +229,7 @@ mod restore_verb {
         assert_eq!(storage.read("archive/tasks/task.demo.md").unwrap(), text);
     }
 
-    /// The resume test's other half: the leftover must answer for the id
-    /// too. Bytes under this filename that declare another record are
-    /// somebody's only copy, and removing them unread would destroy it.
+    /// A file declaring another id has different bytes and keeps its copy.
     #[test]
     fn a_leftover_declaring_another_record_is_not_removed() {
         let foreign = record_file("task.other", "task", "closed", &[], "");
@@ -253,9 +248,7 @@ mod restore_verb {
         assert!(storage.read("tasks/task.demo.md").is_ok());
     }
 
-    /// Bytes that are neither the leftover byte-for-byte nor a clean
-    /// record could be anything, and a move that guessed would delete
-    /// history one way or the other.
+    /// A foreign destination also blocks restore without losing either file.
     #[test]
     fn a_destination_held_by_bytes_the_move_cannot_call_its_own_is_refused() {
         let foreign = record_file("task.other", "task", "closed", &[], "");

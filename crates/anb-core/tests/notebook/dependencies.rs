@@ -367,7 +367,7 @@ mod dependency_graph {
             ("tasks/task.other.md", &task("task.other", "open", &[])),
         ]);
         let closed = Notebook::new(&mut storage)
-            .close("task.done", &Proof::Waived, TODAY)
+            .close("task.done", None, "Completed and verified.", TODAY)
             .unwrap();
         assert_eq!(closed.unblocked, vec!["task.freed"]);
     }
@@ -386,7 +386,7 @@ mod dependency_graph {
             ),
         ]);
         let closed = Notebook::new(&mut storage)
-            .close("task.done", &Proof::Waived, TODAY)
+            .close("task.done", None, "Completed and verified.", TODAY)
             .unwrap();
         assert_eq!(
             closed.unblocked,
@@ -417,7 +417,7 @@ mod dependency_graph {
             ),
         ]);
         let closed = Notebook::new(&mut storage)
-            .close("task.done", &Proof::Waived, TODAY)
+            .close("task.done", None, "Completed and verified.", TODAY)
             .unwrap();
         assert_eq!(closed.unblocked, vec!["task.urgent", "task.background"]);
     }
@@ -874,7 +874,7 @@ mod epics {
     }
 
     #[test]
-    fn what_a_child_waits_on_is_work_the_epic_waits_on_too() {
+    fn an_external_dependency_blocks_a_child_without_joining_its_epic() {
         let mut storage = storage_with(&[
             (
                 "tasks/task.epic.md",
@@ -898,8 +898,8 @@ mod epics {
         let notebook = Notebook::new(&mut storage);
         assert_eq!(
             ids(notebook.list(&within("task.epic")).unwrap()),
-            vec!["task.child", "task.epic", "task.outside"],
-            "it must close before the child, which must close before the hub"
+            vec!["task.child", "task.epic"],
+            "dependencies constrain readiness without declaring membership"
         );
         assert_eq!(
             notebook
@@ -908,14 +908,12 @@ mod epics {
                 .into_iter()
                 .map(|row| row.id)
                 .collect::<Vec<String>>(),
-            vec!["task.outside"],
-            "and it is the one thing the epic can actually be got on with"
+            Vec::<String>::new(),
+            "the child's external dependency still blocks it in a scoped queue"
         );
     }
 
-    /// A scope narrows what is shown, never what is read: a row inside
-    /// it is resolved against every record, so an Origin lying outside
-    /// the scope is a record the notebook holds, not a dangling one.
+    /// Membership narrows rows without changing reference resolution.
     #[test]
     fn a_scoped_row_is_resolved_against_the_whole_notebook() {
         let mut storage = storage_with(&[
@@ -958,11 +956,10 @@ mod epics {
         assert_eq!(
             states,
             vec![
-                ("task.adopted".to_owned(), "open".to_owned()),
                 ("task.child".to_owned(), "open".to_owned()),
                 ("task.epic".to_owned(), "open".to_owned()),
             ],
-            "an Origin outside the scope is still a record the notebook holds"
+            "the external prerequisite and its origin remain resolvable, not members"
         );
         assert_eq!(
             notebook
@@ -971,15 +968,13 @@ mod epics {
                 .into_iter()
                 .map(|row| row.id)
                 .collect::<Vec<String>>(),
-            vec!["task.adopted", "task.child"],
+            vec!["task.child"],
             "the verdict is the unscoped queue's, narrowed"
         );
     }
 
     #[test]
-    fn a_tier_assembled_from_the_hub_side_is_still_reached() {
-        // The shape of an epic older than the edit surface: the middle tier
-        // names its children, and they carry no Origin back.
+    fn prerequisites_without_an_origin_do_not_join_the_hubs_queue() {
         let mut storage = storage_with(&[
             (
                 "tasks/task.outer.md",
@@ -1022,10 +1017,10 @@ mod epics {
                 .into_iter()
                 .map(|row| row.id)
                 .collect::<Vec<String>>(),
-            vec!["task.g1", "task.g2"],
-            "an epic with dispatchable work must never report an empty queue"
+            Vec::<String>::new(),
+            "ready external prerequisites are context, not the hub's work"
         );
-        assert_eq!(epics(&mut storage)[0].next.as_deref(), Some("task.g1"));
+        assert_eq!(epics(&mut storage)[0].next, None);
     }
 
     #[test]

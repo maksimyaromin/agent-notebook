@@ -8,9 +8,7 @@ use crate::encode;
 use crate::grammar::{self, RecordFile};
 use crate::record::{Record, RecordType};
 use crate::reply::EdgeKind;
-use crate::request::{
-    CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, Proof, REVIEW_BY, TAKEN_BY, TO,
-};
+use crate::request::{CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, REVIEW_BY, TAKEN_BY, TO};
 use crate::resolve::{path_stem, record_path, type_of};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -123,19 +121,24 @@ pub(super) fn guard_addressee(record_type: RecordType, to: &str) -> Result<(), N
 /// own choosing — any but the ones the graph draws itself, which would
 /// make a declared relation read as a dependency, an origin or a mention.
 fn guard_link(link: &Link) -> Result<(), NotebookError> {
-    guard_single_line("link", &link.target)?;
-    if !grammar::is_link(&link.kind, &link.target) {
-        let given = format!("{} {}", link.kind, link.target);
-        return Err(NotebookError::InvalidArgument {
-            reason: format!("link: `{}` is not `<kind> <target>`", given.trim_end()),
-        });
-    }
+    guard_link_value(link)?;
     if EdgeKind::DRAWN_WORDS.contains(&link.kind.as_str()) {
         return Err(NotebookError::InvalidArgument {
             reason: format!(
                 "link: `{}` is a relation the graph draws itself; choose another kind",
                 link.kind
             ),
+        });
+    }
+    Ok(())
+}
+
+fn guard_link_value(link: &Link) -> Result<(), NotebookError> {
+    guard_single_line("link", &link.target)?;
+    if !grammar::is_link(&link.kind, &link.target) {
+        let given = format!("{} {}", link.kind, link.target);
+        return Err(NotebookError::InvalidArgument {
+            reason: format!("link: `{}` is not `<kind> <target>`", given.trim_end()),
         });
     }
     Ok(())
@@ -172,8 +175,11 @@ pub(super) fn validate_edit(
             return invalid(format!("tags: `{tag}` is not a `[a-z0-9-]+` tag"));
         }
     }
-    for link in edit.add_links.iter().chain(&edit.remove_links) {
+    for link in &edit.add_links {
         guard_link(link)?;
+    }
+    for link in &edit.remove_links {
+        guard_link_value(link)?;
     }
     if let Some(priority) = edit.priority {
         if record_type != RecordType::Task {
@@ -218,21 +224,6 @@ fn writes(edit: &Edit, key: &str) -> bool {
         .any(|(written, _)| *written == key)
 }
 
-/// A proof is a link value: one non-empty line, or an explicit waiver.
-pub(super) fn guard_proof(proof: &Proof) -> Result<(), NotebookError> {
-    let (Proof::Pr(target) | Proof::Sha(target) | Proof::Report(target) | Proof::Note(target)) =
-        proof
-    else {
-        return Ok(());
-    };
-    guard_single_line("proof", target)?;
-    if target.trim().is_empty() {
-        return Err(NotebookError::InvalidArgument {
-            reason: "proof: the target must not be empty".to_owned(),
-        });
-    }
-    Ok(())
-}
 /// [`guard_today`] plus the day number the clocks subtract from.
 pub(super) fn guarded_day(today: &str) -> Result<i64, NotebookError> {
     guard_today(today)?;
@@ -289,6 +280,7 @@ pub(super) fn guarded_reason<'a>(verb: &str, reason: &'a str) -> Result<&'a str,
 /// identity, `/` the acting hand. An unsigned one carries `-`, so every
 /// entry keeps the same shape.
 pub(super) fn log_entry(today: &str, by: Option<&str>, via: Option<&str>, text: &str) -> String {
+    let text = text.lines().collect::<Vec<_>>().join("\n  ");
     format!("- {today} {}: {text}", encode::author(by, via))
 }
 pub(super) fn parsed_type(id: &str) -> Result<RecordType, NotebookError> {
@@ -398,23 +390,6 @@ pub(super) fn id_claims(
             .or_insert_with(|| record_path(id, record_type, true));
     }
     claims
-}
-
-/// What an ingested report is called, so a reader scanning `list` sees
-/// whose report it is and never mistakes it for the Task itself.
-pub(super) fn report_note_title(task_title: &str) -> String {
-    format!("Report: {task_title}")
-}
-
-/// The id an ingested report mints: the Task's own slug under
-/// `note.report-`, so a reader guesses the report from the Task and no id
-/// ends on whatever word a title cut landed on. A slug too long to leave
-/// room for the collision suffix is cut at a word boundary.
-pub(super) fn report_note_id(task_id: &str) -> String {
-    const PREFIX: &str = "note.report-";
-    let slug = task_id.split_once('.').map_or(task_id, |(_, slug)| slug);
-    let room = grammar::ID_CAP - PREFIX.len() - SUFFIX_LEN;
-    format!("{PREFIX}{}", cut_at_word_boundary(slug, room))
 }
 
 /// Splice every requested correction into the file, answering the keys
@@ -625,9 +600,6 @@ fn cut_at_word_boundary(slug: &str, cap: usize) -> &str {
 /// How many suffixed ids one slug can carry: every two-character base36
 /// pair.
 const SUFFIX_COUNT: usize = 36 * 36;
-
-/// What a collision suffix adds to an id: the hyphen and the pair.
-const SUFFIX_LEN: usize = 3;
 
 fn base36_pair(n: usize) -> String {
     const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";

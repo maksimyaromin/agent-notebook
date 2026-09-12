@@ -1,37 +1,43 @@
 ---
 title: Developing an idea
-description: 'Bring a request into the notebook, investigate it and keep its connection to delivery.'
+description: 'Keep the useful context of a proposal without creating a second tracker or a compulsory document pipeline.'
 ---
 
-A feature often starts with a ticket, a page or a conversation. That description gives a developer something to investigate. The supplied skill starts a Note of kind `idea` for this work, or resumes an existing one about the same subject.
+A feature often starts with a ticket, a page or a conversation. Use an `idea` Note when the proposal needs to survive beyond one piece of work: its motivation, open alternatives or several possible deliveries. An agreed small change can be one Task. A brief explanation may need no record at all.
 
-The idea records the problem and intended improvement in the developer's own understanding, with a link to the source. It can accumulate questions, alternatives and evidence before implementation is agreed. Keeping it separate from a Task means the proposal can remain useful even if it produces several deliveries or no code at all.
+The idea records the team's current understanding of the problem and intended improvement, with a link to the source. Product, support, design and engineering can contribute evidence to the same proposal. Keep what changes a later decision, not a transcript of every discussion. Permission to explore does not establish approval to deliver.
 
 ## Capture the request
 
-For example, a request to reuse verified operations can begin as:
+Search the existing knowledge before creating another account of the proposal:
 
 ```sh
-anb add note "Reuse verified operations" --kind idea --tag operation-library --via codex --link "doc https://example.com/issues/42" --body "Agents repeatedly prepare the same operations. Explore whether a reviewed library can reduce that work. Direction: proposed. Open: publication rules and where operations should live."
+anb recall "verified operations"
 ```
 
-The URL is an example source. An agent reads the actual source before summarizing it and uses the returned record id for subsequent links. A title alone is not enough to infer missing requirements.
+If its context needs a home, a request to reuse verified operations can begin as:
+
+```sh
+anb add note "Reuse verified operations" --id note.verified-operations --kind idea --tag operation-library --via codex --link "doc https://example.com/issues/42" --body "Agents repeatedly prepare the same operations. Explore whether a reviewed library can reduce that work. Proposed, not approved. Open: publication rules and where operations should live."
+```
+
+The URL and explicit id make this example concrete. In ordinary work, read the actual source before summarizing it and use the id returned by the CLI for subsequent links. A title alone is not enough to infer missing requirements. The source ticket still owns its requirements, delivery commitments and discussion; the Note keeps the useful local interpretation and unresolved context.
 
 An idea's `active` state means it is maintained. It does not mean that the proposed feature is approved. Agreement and implementation status belong in the body; the CLI does not infer either from the Note kind.
 
 ## Work out what is needed
 
-The skill uses uncertainties to guide the investigation. For sustained research or design work, the agent creates an investigation Task from the idea. Status can then resume that work without treating the feature itself as approved for implementation. A disputed term may need a definition and a domain model. A performance claim may need a measurement. A choice between implementations needs a comparison against the same outcome and constraints.
+Let the next uncertainty guide the investigation. A performance claim needs a measurement; a disputed term may need a definition; a design choice needs alternatives compared against the same outcome and constraints. Create an investigation Task when research itself has a deliverable that another session must continue. Its outcome can be evidence or a recommendation, without authorizing implementation.
 
-Questions record what remains unresolved, using the idea or investigation Task as their origin. Research findings become `fact` Notes with sources and limits. A design choice becomes a `shape` Decision once it is settled. The idea cites these records so another session can follow the reasoning.
+Keep a brief finding or next step as a comment on the relevant record. Use a Question for an unresolved choice that affects future work, a `fact` Note for reusable evidence with sources and limits, or a `shape` Decision for an accepted design choice and its reason. Give each new record the origin that produced it, and cite supporting records where they help explain the conclusion.
 
 The agent should bring you a concrete interpretation and recommendation, together with the question the evidence cannot settle. It should not ask you to redo the investigation, and it should not treat permission to explore as permission to implement. Existing authorization and any review gates you set determine how far it can proceed.
 
-A small change may need only the idea and a Task. For a larger change, a `spec` Note defines observable behavior, exclusions and acceptance criteria. A `model` Note explains the [domain relationships](domain.md). These documents are created when they help the work; the workflow does not require a fixed document set.
+Create a `spec` Note only when observable behavior, exclusions and acceptance criteria need their own maintained home. A `model` Note can explain [domain relationships](domain.md). Existing specifications and models can remain canonical elsewhere; link them and record only the context missing from those sources. Neither kind is a required stage before a Task.
 
 ## Keep the connection to delivery
 
-When the work is ready for delivery planning, create a hub Task from the idea and child Tasks from that hub. The hub cites the relevant spec and Decisions. Each child describes a reviewable result, the behavior to preserve, any remaining research and how completion will be checked.
+For one reviewable result, a Task can cite the idea directly. When several independently useful results must come together, a hub Task can connect them. Each child states its outcome, constraints and completion evidence. Keep dates, commitments and reporting in the team's tracker when that is their established home; the notebook records what the agent needs to continue the work.
 
 The relationships have different purposes:
 
@@ -43,12 +49,12 @@ The relationships have different purposes:
 | Child blocked by another child | A real prerequisite in the delivery order |
 | Spec or model id cited in a body | Context the agent should read; it does not create a dependency |
 
-The [Task guide](tasks.md#hubs-and-epics) shows the commands. An idea can have several delivery hubs without losing its identity. A new finding gets the origin that actually produced it; the agent cites other relevant records in its body instead of repeatedly reassigning `from`.
+The [Task guide](tasks.md#hubs-and-epics) shows the commands. These relationships are optional and serve different questions. An idea can have several deliveries without losing its identity. Keep an existing origin when adding supporting context; a related record is not automatically a prerequisite.
 
 ## Continue in another session
 
 Ask the agent to continue the idea or delivery by name. `anb list --match <text>` finds ids, titles, tags, people and bodies, and `--tag` narrows to one subject, so consistent subject tags make the associated work easier to find; `--archive` reaches archived records.
 
-The Task log records the established result and next action. The hub points to the idea and governing documents. Progress stays in Tasks rather than being copied into status tables across the idea, spec and plan.
+The Task log records the established result and next action. Follow that Task's context, including an idea, hub or canonical document when present. Progress stays with the work rather than being copied into status tables across several Notes.
 
-Finished Tasks are archived with their reports. Ideas and specs remain live while they are useful. A deferred idea can retain its reason and revisit condition without creating ready implementation work. Retire it when it is no longer worth pursuing.
+Archive finished Tasks when they no longer belong in the working set. Archiving a Task does not retire or archive its linked knowledge. Ideas and specs remain live while they are useful. A deferred idea can retain its reason and revisit condition without creating ready implementation work; retire it when it is no longer worth pursuing.
