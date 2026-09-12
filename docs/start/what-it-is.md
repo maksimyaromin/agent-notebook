@@ -1,59 +1,64 @@
 ---
 title: What it is
-description: 'Why the notebook separates durable knowledge, deterministic record rules and a working method you can change.'
+description: 'How project knowledge, personal practices and unfinished work become useful memory for the next session.'
 ---
 
-I want to be able to return to a project and understand why it is built the way it is. When an agent investigates a problem, that investigation should help with later work too. Saving the conversation is not enough: some decisions will have changed, some questions will still be open, and someone has to keep track of which is which.
+A new agent can read the code. It cannot read yesterday's conversation, know which interpretation the team rejected or guess which unfinished change you mean by “continue.” Those gaps cost attention every time someone starts again.
 
-That is the job I built agent-notebook for. Records distinguish work, decisions, knowledge and questions. The CLI checks their states and relationships in code, without a model call. The supplied skills teach the agent when to record something, how to keep it current and what to leave for the next session.
+agent-notebook keeps the context worth carrying across that boundary. It gives the project a shared account of what things mean, the person a view of their work and the conversation a place to resume. Its purpose is continuity of understanding, not completeness of the record.
 
-## A default method you can change
+## Keep the conclusion, not the conversation
 
-The supplied skill describes how I work: one active Task, a log of useful progress, findings recorded as they come up, and a report when the work is finished. Keeping one Task active makes it clear where the next session should resume.
+A useful memory changes a later decision. “The request timed out” records an attempt. “This endpoint is unreliable” makes a broader claim that the attempt alone cannot support. The notebook preserves the attempt on its Task; a maintained Note needs evidence for the conclusion it offers.
 
-I do not expect that to suit every team. Several agents may need to work on separate Tasks, or a reviewer may need to accept a result before it closes. You can put those instructions in the skill. The CLI allows several active Tasks and an optional review stage; it still checks each record's state transitions and dependencies.
+This distinction separates quick capture from consolidation. Capture records what happened, what remains uncertain and the next useful action. Consolidation reads that evidence alongside the existing explanation and updates what the project can rely on. It preserves constraints that still hold and names a replacement when the ruling changes. It is not a shorter transcript of the latest conversation.
 
-Storage is a separate choice too. By default, the first record write creates `.agent-notebook/` at the repository root. The supplied skill commits it with the code so collaborators inherit the same context. You can instead ignore it to keep working notes private, or select another location. Git integration, the global notebook and maps extend the ways you can use the records; the CLI does not require them.
+The record types follow those different lifetimes. A Task ends when its result is verified. A Question ends when its uncertainty is settled. A Note remains useful while its explanation is maintained. A Decision remains applicable until it is replaced or retired. Finishing the Task does not erase the knowledge learned from it. A small change needs no proposal, specification or separate report merely to complete this cycle.
 
-A new request begins as an [idea](../guides/ideas.md), with its source and the intended improvement. The skill teaches the agent how to investigate it and when it is ready for delivery planning. A [domain model](../guides/domain.md) can describe responsibilities and invariants that a glossary alone cannot.
+## Remember enough to act
 
-## What goes in the notebook
+Stored memory and active context have different jobs. The files preserve detail; Recall supplies a bounded starting point. The agent follows the user's subject, reads nearby knowledge and opens the sources needed for the decision. Counts and omissions disclose what the initial reply left out. A short excerpt is an invitation to read further, not evidence that nothing else matters.
 
-| Record | Purpose | Lifecycle |
-|---|---|---|
-| Task | Work, dependencies and a progress log | open → active → review → closed |
-| Decision | A ruling and its reason | active → superseded or retired |
-| Note | Knowledge kept current in place | active → retired |
-| Question | An uncertainty with an origin and an eventual answer | open → closed |
+Retrieval does not change the records. Reading a rule should not increase its authority, alter its date or make competing explanations disappear. Related statements may complement each other. Only their meaning, evidence and scope can establish a contradiction.
 
-Records have readable ids such as `task.parser-accepts-fenced-bodies`. Use those ids to connect the work to its context: create a Question `--from` a Task, cite a Decision in a log entry, or close a Task with its report. The notebook derives a graph from these relationships. Finished records move to an archive that remains searchable.
+Review begins when new evidence challenges a claim, a planned review becomes due or someone asks to reconsider it. The agent compares the relevant material and makes a deliberate correction. Age can prompt attention; it cannot justify automatic loss of knowledge.
 
-## Why it works this way
+### What biological memory contributes
 
-### Records are files
+Research on complementary learning systems distinguishes rapid learning of particular experiences from the integration of structured knowledge. That distinction informs the separation between work logs and maintained explanations. It does not establish a biological equivalence between files and neural systems. [Kumaran, Hassabis and McClelland, 2016](https://pubmed.ncbi.nlm.nih.gov/27315762/).
 
-Each record has a small envelope of typed fields followed by a Markdown body. The CLI reads the files directly, without a database, index or daemon. You can inspect the notebook with ordinary file tools and move it without exporting from a service.
+Experiments on schemas show that established knowledge can affect how new information is learned. The engineering consequence here is to read the existing model before creating another account of the same subject. A supported observation can refine that model; a single example does not establish a universal rule. [Tse and colleagues, 2007](https://pubmed.ncbi.nlm.nih.gov/17412951/).
 
-The envelope has a small line grammar: each key determines its value type, and the Markdown body stays intact. Changing state should not reformat an investigation or discard a line the parser does not understand. `anb check` reports invalid files with their locations and repair commands. A malformed record remains visible as a finding. The [format reference](../reference/records.md) specifies the envelope and preservation rules.
+These are design inferences, not borrowed operating parameters. Human working-memory estimates do not establish a four-record limit for an LLM. The notebook uses an explicit output budget, not a simulated attention span. It has no confidence coefficients, retrieval penalties, random forgetting or mandatory sleep cycle. Each would need independent evidence that it improves this software's behavior. [Cowan, 2001](https://pubmed.ncbi.nlm.nih.gov/11515286/).
 
-### Changes go through the CLI
+## Share meaning without mixing responsibilities
 
-Agents use commands to change records. The CLI rejects invalid state transitions and dependency cycles. Closing work requires evidence, an explicit waiver, or a reason the work will not happen. The default method imports a report as a Note, so moving or sharing the notebook also preserves the evidence. Replacing a Decision updates its predecessor too; the next reader can tell which ruling applies without interpreting competing prose.
+Product, support and engineering encounter different parts of the same system. Their agents need to agree on what a Publication is, which boundary protects a tenant and why an export may be refused. A definition belongs to the project whoever wrote it. Where contexts use the same word differently, the model explains the difference instead of forcing a misleading universal definition.
 
-These checks apply regardless of which agent runs the command. They verify the recorded outcome; they cannot judge whether a report proves the work or whether a design choice is sound. That judgment stays with the people and agents doing the work.
+A PM can bring an idea without designing its implementation. The idea preserves the problem, intended result and unresolved choices. The team can investigate it, record a ruling and deliver it through related Tasks. The proposal remains distinguishable from an approved commitment.
 
-### The session starts with a summary
+Authorship, responsibility and attention stay separate. Creating a Task records work that could be done; starting it records who takes it. A Task representing a larger result can have independently assigned parts. Its owner is accountable for the overall result, not automatically the executor of every part. With a session identity supplied by the host or caller, each conversation remembers the Task it is working on, so one person can have several sessions without one session silently redirecting another.
 
-`anb status` summarizes the work: active Tasks, ready Tasks, open Questions and a count of neglected work. Its configurable budget limits how much context the summary consumes. It reports omissions so the agent can request more. A quiet notebook gets one line. Keeping history should not require putting all of it into every session. `anb show` opens one record, and one set of narrowing flags follows one branch of work, one type or kind of record, one tag, or one person's records on every listing.
+“What is on my list?” selects personal work. “What is Alex doing?” changes the view, not the assignment. “Work on the export redesign” requires finding the intended result and inspecting its parts before taking responsibility. Existing assignments remain visible during that inspection. The agent asks before taking overlapping work, not after it has reassigned someone else's Tasks.
 
-Replies use short text tables and stable refusal codes, with `--json` for programs. The [reply contract](../reference/replies.md) describes the shapes; [Status and Debt](../reference/status.md) explains the budget and its limits.
+Composition, prerequisites and context answer different questions. A migration needed by the export redesign may be another team's work. It can block a delivery without becoming part of that delivery. A source document explains the work without becoming work to assign. [Tasks and the shape of work](../guides/tasks.md) defines these relationships and their commands.
 
-## Developing with our own notebook
+Personal practices have a different audience from project facts. “Ask me before running the slow suite here” belongs to that person's project memory. A practice deliberately used across projects belongs to their global memory. Both stay outside the repository and appear with their audience labelled. A personal preference neither changes a shared definition nor silently outranks a team requirement.
 
-I use the same CLI and skills for this project. Moving the backlog into the notebook exposed a practical problem: reports linked into an uncommitted directory could not be read from another clone. Importing reports with `close --note` became the default method, while file paths, commits and pull requests remained valid proof choices.
+## Leave useful files behind
 
-I intend to keep developing it this way. When using the tool exposes a problem, I record it in the notebook and use that case to check the fix. But my own workflow will only expose some of the problems. I would like to hear where other people need different behavior, including changes they have made to the skills. The [development guide](../contributing/development.md) explains the code and links to the public notebook.
+The next reader may have no CLI, hook or skill. A record must therefore explain itself: a meaningful title, a conclusion with its scope, the reason or evidence behind it and links to the sources a reader can inspect. An id keeps references stable; it does not replace the name and meaning of the thing being referenced.
 
-## Start with the supplied workflow
+The YAML envelope exposes state, attribution and relationships. The Markdown body carries the explanation. File search that includes the notebook can find the project's vocabulary, and a reader can distinguish a proposal from a ruling or an old ruling from its replacement. Setup leaves a discovery paragraph in the project's native agent instructions, including how to read the files when the command is unavailable. A project can also link the notebook from its ordinary documentation.
 
-`anb setup` installs the skills and agent integrations. The [quickstart](quickstart.md) demonstrates their workflow through the CLI. [Customizing the workflow](../guides/customization.md) shows how to change reviews, skill instructions and notebook location.
+This makes the memory portable, not omniscient. An agent still has to discover and read the relevant files. A private source must remain private, and a shared conclusion must not depend on a teammate's local preferences. The notebook keeps a useful interpretation of a ticket or document; the original system retains its commitments and published explanation.
+
+## Put each guarantee in the right place
+
+The CLI owns facts it can check: record structure, lifecycle transitions, references, dependency cycles and safe file changes. It derives views from the records rather than persisting another dashboard or search database. JSON and TOON encode the same selected reply. Failures identify what happened and the next useful read or correction.
+
+The skill owns judgment: what deserves memory, which result the user means, what evidence supports a claim and when another person's agreement is needed. Project workflow rules belong in `.agents/anb.md`; they do not require a fork of the installed skill. This boundary follows the software-design principle of hiding machinery behind a small, meaningful interface. A field or command earns its place by expressing a distinct fact, not by anticipating every phrase a user might say.
+
+Files are shared through Git. Local locks protect cooperating writers; session claims coordinate conversations using the same notebook. They do not create a distributed lease across disconnected clones. A view of a colleague's work reports the recorded state available in the checkout, not a live view of their computer.
+
+The result is a memory the team can inspect and correct, and a routine the agent can resume. [Start with one piece of work](quickstart.md). The [record reference](../reference/records.md) explains the data contract; the [working method](../guides/session.md) explains a session.

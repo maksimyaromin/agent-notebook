@@ -37,12 +37,28 @@ pub enum NotebookError {
         id: String,
         taken_by: String,
     },
+    /// Another local session is working on this Task.
+    SessionConflict {
+        id: String,
+        session: String,
+    },
+    /// Local session state needs recovery before another operation is safe.
+    SessionRecovery {
+        session: Option<String>,
+        path: String,
+        reason: String,
+    },
     /// The record's state does not allow this move; `valid` names the
     /// moves it does allow, each the word its retry command is keyed by.
     InvalidTransition {
         id: String,
         state: String,
         valid: Vec<&'static str>,
+    },
+    /// Successful completion still depends on unfinished Tasks.
+    UnfinishedDependencies {
+        id: String,
+        blockers: Vec<String>,
     },
     /// An argument is malformed before any record is touched.
     InvalidArgument {
@@ -87,7 +103,10 @@ impl NotebookError {
             NotebookError::InvalidRecord { .. } => "invalid-record",
             NotebookError::WrongType { .. } => "wrong-type",
             NotebookError::Taken { .. } => "taken",
+            NotebookError::SessionConflict { .. } => "session-conflict",
+            NotebookError::SessionRecovery { .. } => "session-recovery",
             NotebookError::InvalidTransition { .. } => "invalid-transition",
+            NotebookError::UnfinishedDependencies { .. } => "unfinished-dependencies",
             NotebookError::InvalidArgument { .. } => "invalid-argument",
             NotebookError::DuplicateId { .. } => "duplicate-id",
             NotebookError::StillReferenced { .. } => "still-referenced",
@@ -120,6 +139,29 @@ impl std::fmt::Display for NotebookError {
             NotebookError::Taken { id, taken_by } => {
                 write!(f, "`{id}` is taken by {taken_by}")
             }
+            NotebookError::SessionConflict { id, session } => {
+                write!(
+                    f,
+                    "`{id}` is in use by local session `{session}`; use --join to work on it together"
+                )
+            }
+            NotebookError::SessionRecovery {
+                session,
+                path,
+                reason,
+            } => {
+                if let Some(session) = session {
+                    write!(
+                        f,
+                        "local session `{session}` at `{path}` needs recovery: {reason}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "local session state at `{path}` needs recovery: {reason}"
+                    )
+                }
+            }
             NotebookError::InvalidTransition { id, state, valid } => {
                 if valid.is_empty() {
                     write!(f, "`{id}` is {state}; no move is valid from `{state}`")
@@ -128,6 +170,12 @@ impl std::fmt::Display for NotebookError {
                 }
             }
             NotebookError::InvalidArgument { reason } => f.write_str(reason),
+            NotebookError::UnfinishedDependencies { id, .. } => {
+                write!(
+                    f,
+                    "cannot complete `{id}` while dependencies remain unfinished"
+                )
+            }
             NotebookError::DuplicateId { id, holder } => {
                 write!(f, "`{id}` already exists at {holder}")
             }

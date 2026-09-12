@@ -859,27 +859,6 @@ mod edit_verb {
     }
 
     #[test]
-    fn a_new_body_citing_a_record_the_users_notebook_holds_carries_no_nudge() {
-        let user = storage_with(&[(
-            "notes/note.practice.md",
-            &record_file("note.practice", "note", "active", &[], ""),
-        )]);
-        let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
-        let edited = Notebook::new(&mut storage)
-            .with_user(Some(&user))
-            .edit(
-                "task.demo",
-                &Edit {
-                    body: Some("Follows note.practice.".to_owned()),
-                    ..edit()
-                },
-                TODAY,
-            )
-            .unwrap();
-        assert_eq!(edited.dangling_mentions, Vec::<String>::new());
-    }
-
-    #[test]
     fn a_new_body_citing_nothing_carries_the_dangling_mention_nudge() {
         let mut storage = storage_with(&[("tasks/task.demo.md", &task_file("open", &[]))]);
         let edited = Notebook::new(&mut storage)

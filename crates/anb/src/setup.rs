@@ -1,17 +1,12 @@
 //! `setup`: wire an agent's session start to the notebook, in the project.
 //!
-//! Three mechanisms, each bounded so a re-run patches in place and
-//! `--remove` takes out only what setup put in: one descriptive line in the
-//! instruction files every agent reads — `AGENTS.md`, and `CLAUDE.md`, which
-//! Claude Code reads instead — between markers; one `SessionStart` hook
-//! group in the settings Claude Code and Codex run hooks from; and the anb
-//! skill files where each agent looks for skills, known as setup's own by
-//! the mark in their frontmatter. Other tools' lines and hook
-//! groups in the same files are never touched; a skill file the user made
-//! theirs is theirs.
+//! Instruction markers, hook commands and skill frontmatter identify the
+//! files setup may update. The setup receipt remembers instruction files
+//! after a project removes their markers, so an upgrade preserves the
+//! project's replacement. Project workflow extensions remain user-owned.
 
 use crate::skill;
-use anb_core::{NotebookError, StorageError};
+use anb_core::{NotebookError, Storage, StorageError};
 use serde_json::{Map, Value, json};
 use std::fs;
 use std::io::ErrorKind;
@@ -20,17 +15,15 @@ use std::path::{Path, PathBuf};
 const BEGIN: &str = "<!-- anb:begin -->";
 const END: &str = "<!-- anb:end -->";
 
-/// The one line an agent reads before it knows the tool: descriptive, so it
-/// informs without instructing, and marker-bounded, so it is found again.
-pub const SNIPPET: &str = "<!-- anb:begin -->Project working memory: .agent-notebook/ — `anb status` shows the current state, `anb --help` the commands.<!-- anb:end -->";
+/// A marked discovery paragraph for agents that have not loaded the skill.
+pub const SNIPPET: &str = "<!-- anb:begin -->Project working memory lives in .agent-notebook/: plain Markdown containing decisions, domain knowledge and unfinished work. Read the files directly when anb is unavailable; no skill is needed for reading. With anb installed, start with `anb recall` for work and context, or `anb --help` for commands. Project workflow extensions belong in .agents/anb.md.<!-- anb:end -->";
 
 /// The command both hosts run at session start; also the marker by which
 /// setup recognises its own hook group among others.
-pub const HOOK_COMMAND: &str = "anb status --hook";
+pub const HOOK_COMMAND: &str = "anb hook";
+const LEGACY_HOOK_COMMAND: &str = "anb status --hook";
 
-/// The hook's own ceiling. Status is bounded and fails soft, so it never
-/// needs the hosts' ten-minute default; a stuck lock must not hold a
-/// session's start for longer than a reader would wait.
+/// Host-side ceiling on session-start context collection, including lock waits.
 const HOOK_TIMEOUT_SECONDS: u64 = 15;
 
 const AGENTS_FILE: &str = "AGENTS.md";
@@ -39,6 +32,7 @@ const CLAUDE_SETTINGS: &str = ".claude/settings.json";
 const CODEX_HOOKS: &str = ".codex/hooks.json";
 const CLAUDE_SKILLS: &str = ".claude/skills";
 const SHARED_SKILLS: &str = ".agents/skills";
+const RECEIPT_FILE: &str = ".anb-setup.json";
 
 /// The instruction file an agent reads its one line from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,8 +103,7 @@ pub enum Outcome {
     /// The file is a link to somewhere else. Writing through it would edit a
     /// file the project does not own, so setup leaves it as it found it.
     Linked,
-    /// A skill file whose frontmatter no longer carries setup's mark: the
-    /// user made it theirs, and setup neither rewrites nor removes it.
+    /// A skill or instruction file the project has taken over.
     Yours,
     /// A file or directory an agent not named reads too: removal takes it
     /// out only when every agent that reads it is named.
@@ -179,6 +172,8 @@ enum Pending {
 /// back — or a storage failure on any read or write.
 pub fn apply(project: &Path, remove: bool, named: &[String]) -> Result<SetUp, NotebookError> {
     let chosen = chosen_agents(named)?;
+    let receipt = read_receipt(project)?;
+    let mut instructions = receipt.clone().unwrap_or_default();
     let is_chosen = |agent: &Agent| chosen.iter().any(|it| it.name == agent.name);
     let reads_agents = |agent: &Agent| {
         agent.instructions == Instructions::Agents
@@ -188,20 +183,40 @@ pub fn apply(project: &Path, remove: bool, named: &[String]) -> Result<SetUp, No
     // it is named: the file is as much the unnamed agent's.
     let all_readers_named =
         |reads: &dyn Fn(&Agent) -> bool| AGENTS.iter().filter(|agent| reads(agent)).all(is_chosen);
+    let was_installed = |file: &str| {
+        instructions.iter().any(|name| name == file)
+            || chosen.iter().any(|agent| {
+                let reads = if file == AGENTS_FILE {
+                    reads_agents(agent)
+                } else {
+                    agent.instructions == Instructions::Claude && !reads_agents(agent)
+                };
+                reads && project.join(agent.skills).join("anb/SKILL.md").is_file()
+            })
+    };
 
     let mut plans = Vec::new();
     if chosen.iter().any(|agent| reads_agents(agent)) {
         if remove && !all_readers_named(&reads_agents) {
             plans.push(left_alone(AGENTS_FILE, Outcome::Shared));
         } else {
-            plans.push(plan_snippet(project, AGENTS_FILE, remove)?);
+            plans.push(plan_snippet(
+                project,
+                AGENTS_FILE,
+                remove,
+                was_installed(AGENTS_FILE),
+            )?);
         }
     }
     if chosen
         .iter()
         .any(|agent| agent.instructions == Instructions::Claude)
     {
-        plans.push(plan_claude_file(project, remove)?);
+        plans.push(plan_claude_file(
+            project,
+            remove,
+            was_installed(CLAUDE_FILE),
+        )?);
     }
     for hook in distinct(chosen.iter().filter_map(|agent| agent.hook)) {
         plans.push(plan_hook(project, hook, remove)?);
@@ -223,7 +238,24 @@ pub fn apply(project: &Path, remove: bool, named: &[String]) -> Result<SetUp, No
         if let Some(pending) = pending {
             perform(pending)?;
         }
+        // A later file failure must not erase a completed instruction's ownership history.
+        if remember_instruction(&wired, remove, &mut instructions) {
+            write_receipt(project, &instructions)?;
+        }
         files.push(wired);
+    }
+    if receipt.is_some() || !instructions.is_empty() {
+        let outcome = if receipt.as_ref() == Some(&instructions) {
+            Outcome::Already
+        } else if instructions.is_empty() {
+            Outcome::Removed
+        } else {
+            Outcome::Written
+        };
+        files.push(Wired {
+            path: RECEIPT_FILE.to_owned(),
+            outcome,
+        });
     }
     let codex_written = files
         .iter()
@@ -238,6 +270,68 @@ pub fn apply(project: &Path, remove: bool, named: &[String]) -> Result<SetUp, No
             .collect(),
         notice: codex_written.then_some(CODEX_NOTICE),
     })
+}
+
+fn read_receipt(project: &Path) -> Result<Option<Vec<String>>, NotebookError> {
+    let path = project.join(RECEIPT_FILE);
+    if is_link(&path) {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!("setup: {RECEIPT_FILE} is a link. Move it aside before running setup"),
+        });
+    }
+    let Some(text) = read_text(&path)? else {
+        return Ok(None);
+    };
+    let invalid = || NotebookError::InvalidArgument {
+        reason: format!(
+            "setup: {RECEIPT_FILE} must contain an instructions array naming AGENTS.md or CLAUDE.md. Correct the receipt before running setup"
+        ),
+    };
+    let receipt: Value = serde_json::from_str(&text).map_err(|_| invalid())?;
+    let instructions: Vec<String> =
+        serde_json::from_value(receipt.get("instructions").cloned().ok_or_else(invalid)?)
+            .map_err(|_| invalid())?;
+    if instructions
+        .iter()
+        .any(|file| !matches!(file.as_str(), AGENTS_FILE | CLAUDE_FILE))
+    {
+        return Err(invalid());
+    }
+    Ok(Some(instructions))
+}
+
+fn remember_instruction(wired: &Wired, remove: bool, instructions: &mut Vec<String>) -> bool {
+    if !matches!(wired.path.as_str(), AGENTS_FILE | CLAUDE_FILE) {
+        return false;
+    }
+    if remove && matches!(wired.outcome, Outcome::Removed | Outcome::Absent) {
+        let before = instructions.len();
+        instructions.retain(|file| file != &wired.path);
+        return before != instructions.len();
+    }
+    if matches!(
+        wired.outcome,
+        Outcome::Written | Outcome::Already | Outcome::Yours
+    ) && !instructions.contains(&wired.path)
+    {
+        instructions.push(wired.path.clone());
+        instructions.sort();
+        return true;
+    }
+    false
+}
+
+fn write_receipt(project: &Path, instructions: &[String]) -> Result<(), NotebookError> {
+    let path = project.join(RECEIPT_FILE);
+    if instructions.is_empty() {
+        return fs::remove_file(&path).map_err(|error| io_failure(&path, &error));
+    }
+    let mut text = serde_json::to_string_pretty(&json!({ "instructions": instructions }))
+        .expect("JSON values always serialise");
+    text.push('\n');
+    crate::fs_storage::FsStorage::new(project.to_owned())
+        .write(RECEIPT_FILE, &text)
+        .map_err(NotebookError::Storage)
 }
 
 /// The agents `named`, each once, in setup's own order. Nothing is written
@@ -302,6 +396,7 @@ fn plan_skill_file(
 ) -> Result<Planned, NotebookError> {
     let shown = format!("{dir}/{file}");
     let path = project.join(dir).join(file);
+    ensure_local_parent(project, &path)?;
     if is_link(&path) {
         return Ok(left_alone(shown, Outcome::Linked));
     }
@@ -350,12 +445,16 @@ fn plan_snippet(
     project: &Path,
     file: &'static str,
     remove: bool,
+    was_installed: bool,
 ) -> Result<Planned, NotebookError> {
     let path = project.join(file);
     if is_link(&path) {
         return Ok(left_alone(file, Outcome::Linked));
     }
     let text = read_text(&path)?.unwrap_or_default();
+    if bounded_line(&text, file)?.is_none() && was_installed {
+        return Ok(left_alone(file, Outcome::Yours));
+    }
     let (outcome, pending) = if remove {
         match snippet_removed(&text, file)? {
             Some(rest) if rest.trim().is_empty() => (Outcome::Removed, Some(Pending::Delete(path))),
@@ -380,7 +479,11 @@ fn plan_snippet(
 /// Claude Code reads `CLAUDE.md`, not `AGENTS.md`. A `CLAUDE.md` that links
 /// or imports `AGENTS.md` already carries the snippet through it, and a
 /// second copy would reach Claude twice; any other one gets its own line.
-fn plan_claude_file(project: &Path, remove: bool) -> Result<Planned, NotebookError> {
+fn plan_claude_file(
+    project: &Path,
+    remove: bool,
+    was_installed: bool,
+) -> Result<Planned, NotebookError> {
     let path = project.join(CLAUDE_FILE);
     if is_link(&path) {
         let outcome = if links_agents_file(project, &path) {
@@ -393,7 +496,7 @@ fn plan_claude_file(project: &Path, remove: bool) -> Result<Planned, NotebookErr
     if read_text(&path)?.is_some_and(|text| imports_agents_file(&text)) {
         return Ok(left_alone(CLAUDE_FILE, Outcome::Imports));
     }
-    plan_snippet(project, CLAUDE_FILE, remove)
+    plan_snippet(project, CLAUDE_FILE, remove, was_installed)
 }
 
 fn left_alone(file: impl Into<String>, outcome: Outcome) -> Planned {
@@ -408,6 +511,29 @@ fn left_alone(file: impl Into<String>, outcome: Outcome) -> Planned {
 
 fn is_link(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+}
+
+fn ensure_local_parent(project: &Path, path: &Path) -> Result<(), NotebookError> {
+    for parent in path
+        .ancestors()
+        .skip(1)
+        .take_while(|parent| *parent != project)
+    {
+        match fs::symlink_metadata(parent) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(NotebookError::InvalidArgument {
+                    reason: format!(
+                        "setup: {} is a linked directory; use a project-owned directory before running setup",
+                        parent.strip_prefix(project).unwrap_or(parent).display()
+                    ),
+                });
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(io_failure(parent, &error)),
+        }
+    }
+    Ok(())
 }
 
 fn links_agents_file(project: &Path, claude: &Path) -> bool {
@@ -429,6 +555,7 @@ fn imports_agents_file(text: &str) -> bool {
 
 fn plan_hook(project: &Path, file: &'static str, remove: bool) -> Result<Planned, NotebookError> {
     let path = project.join(file);
+    ensure_local_parent(project, &path)?;
     if is_link(&path) {
         return Ok(left_alone(file, Outcome::Linked));
     }
@@ -524,7 +651,7 @@ fn without_paragraph_break(before: &str) -> &str {
 fn bounded_line(text: &str, file: &str) -> Result<Option<(usize, usize)>, NotebookError> {
     let stray = || NotebookError::InvalidArgument {
         reason: format!(
-            "setup: {file} carries an anb marker without its pair — fix or remove that line"
+            "setup: {file} has an anb marker without its pair. Restore the missing marker or remove that line"
         ),
     };
     let Some(start) = text.find(BEGIN) else {
@@ -538,8 +665,7 @@ fn bounded_line(text: &str, file: &str) -> Result<Option<(usize, usize)>, Notebo
     Ok(Some((start, start + end + END.len())))
 }
 
-/// `settings` with setup's `SessionStart` group added; `None` when a group
-/// already runs the hook command.
+/// Install the native hook or replace an exact legacy command in place.
 #[must_use]
 pub fn hook_applied(settings: Value) -> Option<Value> {
     let mut root = into_object(settings);
@@ -551,8 +677,23 @@ pub fn hook_applied(settings: Value) -> Option<Value> {
         .entry("SessionStart")
         .or_insert_with(|| Value::Array(Vec::new()));
     let groups = array_mut(groups);
+    let mut upgraded = false;
+    for group in groups.iter_mut() {
+        if let Some(hooks) = group.get_mut("hooks").and_then(Value::as_array_mut) {
+            for hook in hooks {
+                if hook
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|command| command.trim() == LEGACY_HOOK_COMMAND)
+                {
+                    hook["command"] = json!(HOOK_COMMAND);
+                    upgraded = true;
+                }
+            }
+        }
+    }
     if groups.iter().any(runs_the_hook) {
-        return None;
+        return upgraded.then_some(Value::Object(root));
     }
     groups.push(json!({
         "hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT_SECONDS}]
@@ -595,12 +736,12 @@ fn runs_the_hook(group: &Value) -> bool {
         .is_some_and(|hooks| hooks.iter().any(is_the_hook))
 }
 
-/// Setup's hook is recognised by its command alone, so a timeout the user
-/// tuned by hand keeps the group ours.
+/// Arguments or shell operators make a command user-owned. A separate
+/// timeout setting does not change command ownership.
 fn is_the_hook(hook: &Value) -> bool {
     hook.get("command")
         .and_then(Value::as_str)
-        .is_some_and(|command| command.trim_start().starts_with(HOOK_COMMAND))
+        .is_some_and(|command| matches!(command.trim(), HOOK_COMMAND | LEGACY_HOOK_COMMAND))
 }
 
 /// Drop `hooks.SessionStart` when it emptied, and `hooks` after it: a key
@@ -663,9 +804,24 @@ fn read_settings(path: &Path, file: &str) -> Result<Value, NotebookError> {
     if text.trim().is_empty() {
         return Ok(Value::Object(Map::new()));
     }
-    serde_json::from_str(&text).map_err(|error| NotebookError::InvalidArgument {
-        reason: format!("setup: {file} is not JSON ({error}) — fix it or move it aside"),
-    })
+    let settings: Value =
+        serde_json::from_str(&text).map_err(|error| NotebookError::InvalidArgument {
+            reason: format!(
+                "setup: {file} is not JSON ({error}). Correct the file or move it aside"
+            ),
+        })?;
+    let containers_valid = settings.is_object()
+        && settings.get("hooks").is_none_or(|hooks| {
+            hooks.is_object() && hooks.get("SessionStart").is_none_or(Value::is_array)
+        });
+    if !containers_valid {
+        return Err(NotebookError::InvalidArgument {
+            reason: format!(
+                "setup: {file} must be an object, with hooks as an object and hooks.SessionStart as an array when present; correct those settings before running setup"
+            ),
+        });
+    }
+    Ok(settings)
 }
 
 /// The directory a host's files live under, `.codex` for `.codex/hooks.json`:
@@ -710,6 +866,98 @@ fn io_failure(path: &Path, error: &std::io::Error) -> NotebookError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exact_legacy_hook_upgrades_in_place_and_keeps_other_entries() {
+        let before = json!({"permissions":{"allow":["Bash(ls)"]},"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"anb status --hook","timeout":5},{"type":"command","command":"other-tool prime"}]}]}});
+        let mut expected = before.clone();
+        expected["hooks"]["SessionStart"][0]["hooks"][0]["command"] = json!("anb hook");
+        assert_eq!(hook_applied(before), Some(expected.clone()));
+        assert_eq!(hook_applied(expected), None);
+    }
+
+    #[test]
+    fn custom_hook_commands_are_neither_rewritten_nor_removed() {
+        for command in [
+            "anb status --hook --budget 800",
+            "anb hook --custom",
+            "anb hooker",
+            "anb status --hook && other-tool prime",
+        ] {
+            let before = json!({"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":command}]}]}});
+            assert_eq!(hook_removed(before.clone()), None, "{command}");
+            let installed = hook_applied(before.clone()).unwrap();
+            assert_eq!(
+                installed["hooks"]["SessionStart"][0],
+                before["hooks"]["SessionStart"][0]
+            );
+            assert_eq!(
+                installed["hooks"]["SessionStart"].as_array().unwrap().len(),
+                2
+            );
+            assert_eq!(hook_removed(installed), Some(before));
+        }
+    }
+
+    #[test]
+    fn setup_refuses_wrong_json_container_types_without_replacing_them() {
+        for settings in [
+            r#"["keep"]"#,
+            r#"{"hooks":["keep"]}"#,
+            r#"{"hooks":{"SessionStart":"keep"}}"#,
+        ] {
+            let project = tempfile::TempDir::new().unwrap();
+            fs::create_dir(project.path().join(".claude")).unwrap();
+            fs::write(project.path().join(CLAUDE_SETTINGS), settings).unwrap();
+            assert!(
+                apply(project.path(), false, &["claude-code".to_owned()]).is_err(),
+                "{settings}"
+            );
+            assert_eq!(
+                fs::read_to_string(project.path().join(CLAUDE_SETTINGS)).unwrap(),
+                settings
+            );
+            assert!(!project.path().join(CLAUDE_FILE).exists());
+            assert!(!project.path().join(RECEIPT_FILE).exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_refuses_linked_parent_directories_before_any_write_or_removal() {
+        for (agent, directory) in [
+            ("claude-code", ".claude"),
+            ("agents-md", ".agents/skills"),
+            ("agents-md", ".agents/skills/anb/references"),
+        ] {
+            for remove in [false, true] {
+                let project = tempfile::TempDir::new().unwrap();
+                let outside = tempfile::TempDir::new().unwrap();
+                let settings = r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"anb status --hook"}]}]}}"#;
+                fs::write(outside.path().join("settings.json"), settings).unwrap();
+                let link = project.path().join(directory);
+                fs::create_dir_all(link.parent().unwrap()).unwrap();
+                std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+                let agents = if agent == "agents-md" {
+                    vec![agent.to_owned(), "codex".to_owned()]
+                } else {
+                    vec![agent.to_owned()]
+                };
+                assert!(
+                    apply(project.path(), remove, &agents).is_err(),
+                    "{directory}, remove={remove}"
+                );
+                assert_eq!(
+                    fs::read_to_string(outside.path().join("settings.json")).unwrap(),
+                    settings
+                );
+                assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
+                assert!(!project.path().join("AGENTS.md").exists());
+                assert!(!project.path().join("CLAUDE.md").exists());
+                assert!(!project.path().join(RECEIPT_FILE).exists());
+            }
+        }
+    }
 
     #[test]
     fn the_snippet_is_appended_once_and_patched_in_place() {
@@ -863,7 +1111,7 @@ mod tests {
     #[test]
     fn a_hand_tuned_timeout_keeps_the_group_ours() {
         let tuned = json!({"hooks": {"SessionStart": [{"hooks": [
-            {"type": "command", "command": "anb status --hook --budget 800", "timeout": 5}
+            {"type": "command", "command": HOOK_COMMAND, "timeout": 5}
         ]}]}});
         assert_eq!(hook_applied(tuned.clone()), None);
         assert_eq!(hook_removed(tuned).unwrap(), json!({}));

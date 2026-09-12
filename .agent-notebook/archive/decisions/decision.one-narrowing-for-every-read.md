@@ -1,15 +1,16 @@
 ---
 id: decision.one-narrowing-for-every-read
 type: decision
-state: active
+state: superseded
 kind: shape
-title: One narrowing for every read: a listing answers with what its filter admits
+title: "One narrowing for every read: a listing answers with what its filter admits"
 by: Maksim Yaromin
 via: claude-code
 from: task.read-side-complexity-revision
 tags: cli, read-side
+superseded-by: decision.work-selection
 created: 2026-09-08
-updated: 2026-09-08
+updated: 2026-09-12
 ---
 
 Every read that prints a row takes one Filter: type, kind, tag, for (an epic's scope), by (an identity; --mine is by with the caller's name, --team is nobody, and the config key scope decides when the call names none), match (a text over id, title, tags, people and body) and archive. Each flag is a predicate over the same notebook, two flags ask for the intersection, and a filter narrows what is shown and never what is read, so no narrowing can free a blocked Task or change a hub's count. A flag means the same on every verb that takes it, and a verb takes only the flags it can answer: list and graph take the whole Filter; ready takes for, tag, match and whose, and refuses type, kind and archive on the command line, since a queue of live Tasks could only answer them with nothing more; status takes by, mine and team.

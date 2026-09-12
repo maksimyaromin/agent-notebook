@@ -1,57 +1,85 @@
 ---
-title: The session
-description: 'Resume work from Status, choose the next Task, and leave a useful handoff.'
+title: Sessions and collaboration
+description: 'Continue the intended work, keep parallel sessions separate and inspect a colleague’s context without claiming it.'
 ---
 
-Start with `anb status`. It shows the work: active Tasks and the latest log entry, work in review or on hold, the ready queue and the open Questions, so you can continue without reading the notebook's history. A configured session-start hook provides this automatically; otherwise, run the command yourself. The standing rules are not on it: read them with `anb list --type decision --kind rule` before the work they bind.
+Start with `anb recall`. It combines work with shared project knowledge and private practices. Follow the user's subject, open the relevant record and read source material when the current decision depends on it. `status` is the work-only dashboard; `recall` adds the knowledge needed to interpret it.
 
-## Resume the work
+## Resume the intended Task
 
-Read the active Task with `anb show <id>`. Its latest log entry should say what is established and what remains to do. Check held Tasks before choosing new work: a hold records an intentional pause, and its reason may still apply.
-
-If there is no active Task, inspect the ready queue:
-
-```text
-$ anb ready
-ready[1]{id,priority,age,taken-by,title}:
-  task.negative-corpus-wired-into-ci,-,0d,-,Negative corpus wired into CI
+```sh
+anb start
+anb recall --for task.customer-exports
 ```
 
-`ready` lists open Tasks with no unresolved dependencies and no hold, ordered by priority and then age. Priority `0` is most urgent; `-` means none was set. The `taken-by` column names who holds a Task; `anb ready --untaken` is the pool, the Tasks nobody holds. Use `anb ready --for <hub>` for one epic, then `anb start <id>` to take a Task into work.
+`start` without an id resumes a remembered session focus. The host supplies that session through `--session`, `ANB_SESSION` or `CODEX_THREAD_ID`, in that order. A session id identifies an agent conversation, not a person.
 
-The supplied skill keeps one Task active at a time per person. The CLI allows several, so check Status before starting another.
+`start <id>` names the Task explicitly. If no unambiguous focus exists, the command reports the choice the agent needs to make. The latest update is not evidence that a Task belongs to this conversation.
 
-## Several people, one notebook
+A closed focus remains inspectable: it explains what finished before the agent chooses more work. A missing session file means there is no remembered focus. Malformed, unreadable or interrupted state produces a recovery error; neither case licenses a guess.
 
-The CLI knows who is asking: `ANB_BY` names the identity, else the git `user.name` does. Every `add` signs its record `by` that identity, and every `comment` signs its log entry `by/via`, so the person stays in the trail beside the tool.
+## Take the next part
 
-A Task belongs to whoever holds it, and authorship is a separate fact: `taken-by` names the holder, `by` the author. `start` takes a Task nobody holds and records you as `taken-by`; a Task someone else holds refuses `start` with `taken`. A planner hands a Task over in the command that writes it, `anb add task "<title>" --taken-by <name>`, or later with `anb edit <id> --taken-by <name>`; `anb add task "<title>" --mine` takes a Task for yourself. A Task nobody holds is nobody's, however many people wrote or planned it. Status lists your own active Tasks first and names who holds any other, so you resume your work and not a colleague's.
-
-A Question put to a colleague with `anb add question "<title>" --to <name>`, or a review handed to one with `anb submit <id> --to <name>`, waits on that person, and their Status shows it beside their own work; the `to` column of the review and questions tables says whom each waits on.
-
-Reading is the whole project's by default: `status`, `ready`, `list` and `graph` show everyone's records, your own first where the order matters. `--mine` narrows any of them to your work, the Tasks you hold, the Questions, Decisions and Notes you wrote, and what waits on you; `--by <name>` does the same for a colleague; `--untaken` is the pool, the Tasks nobody holds; `--to <name>` is what is addressed to a person. A notebook whose config sets `scope: mine` makes your own work the default for every read, including the session hook; every narrowed read then opens with `by: <name> — anb <verb> … --team`, Status counts the pool on an `untaken:` line when there is one, so a session whose own queue is empty knows where its next work is, and `--team` widens one call to the whole project. `list --match <name>` finds the records that name a person, since it matches `by`, `via` and `taken-by`.
-
-## Leave a useful log
-
-```text
-$ anb comment task.parser-accepts-fenced-bodies "fences parse; the indented-body case is next"
-ok: comment task.parser-accepts-fenced-bodies — logged
+```sh
+anb start --next
+anb start --next --for task.customer-exports
 ```
 
-Write what the next session needs to act: a result, an unresolved obstacle, or the next concrete check. Status includes the latest entry; `show` reads the full Task. A log that only says "made progress" gives the next session no starting point.
+When this session has active, unheld work within the requested scope, `--next` resumes it. Otherwise it starts eligible work assigned to the current person before taking an untaken Task. An explicit `--for` can select a different scope without holding the previous Task. Selection and claiming happen under the same notebook lock, so two local sessions cannot both claim the same next Task.
 
-File an uncertainty as a [Question](knowledge.md#questions) with `--from <task>`. Record a ruling as a Decision and cite its id in the Task when it affects the work. These records let you follow an investigation without making the Task log explain every subject in full.
+`--for` selects the hub and its descendants through `from`. External prerequisites can block these Tasks without becoming part of the result. A Task must still be ready, and an assignment to somebody else is not ignored. `ready --for <hub> --team` inspects the full scoped queue without taking anything.
 
-## Read beyond the summary
+## Work in parallel
 
-Status also reports work awaiting review, the open Questions and how much Debt the notebook carries. `anb debt` lists the Debt: matters that need attention, such as an old Question or a reference to a missing record. It does not change their state. Check whether the work is still relevant before acting: resolve the Question, update the Task, or record why it must stay paused. A date is a reason to look again, not evidence that the work is obsolete. Where an epic stands is a read of its own: `anb ready --for <hub>` is its queue, and `anb list --for <hub> --archive` its whole membership.
+A person can have several active Tasks in separate sessions. Each session remembers one focus. Starting a different Task in one session neither holds another Task nor steals the other session's focus.
 
-A compact section still has a count. `ready: 7` means there are seven Tasks, even if the budget omitted their rows. `anb status --budget 0` removes budget-driven cuts; individual sections still limit their rows. Use the relevant listing with `--all` for the complete set. [Status and Debt](../reference/status.md) specifies the sections, limits and clocks.
+```sh
+anb --session export start task.customer-exports
+anb --session pricing start task.price-rounding
+anb --session export recall
+```
 
-A quiet notebook produces one line. Knowledge alone leaves it quiet: a rule binds the work, and the skill reads it before the work rather than at every session's start. Holds alone do not trigger the full summary, but a stale hold becomes Debt and makes it visible again.
+A second local session cannot silently treat another session's Task as exclusive work. Use `start <id> --join` for intentional collaboration. Joining does not transfer human assignment, so a colleague's Task still requires an explicit reassignment before it can be started by someone else.
 
-## Finish or pause
+Session state lives in the ignored `.sessions.tmp/` directory of the selected project notebook. Separate worktrees have separate notebook roots and session state while sharing project-specific personal practices. Switching branches in the same worktree does not switch session files. Session claims are local coordination, not a distributed lease across disconnected clones. Coordinate overlapping offline work through the team's existing process and reconcile the resulting Git changes.
 
-Close completed work with proof and archive it. [Tasks](tasks.md#closing-with-a-proof) explains the proof options. If you need to pause, use `anb hold <id> --reason "<why>"`; the Task leaves the active display and ready queue until you unhold it.
+Interrupted starts retain enough intent to compare the before and after record bytes. A retry completes the same transition when that comparison proves it is safe. It refuses intervening changes it cannot reconcile rather than overwriting them.
 
-Before ending a session, run `anb check` and resolve its findings. If the notebook is versioned, commit it with the work it describes. The next session can then read both the result and the reason for it.
+## Inspect or assign work
+
+The accountable identity comes from `ANB_BY`, otherwise Git's `user.name`. `by` records authorship; `taken-by` records a Task's assignment. Neither is the session identity.
+
+| Intent | Command |
+|---|---|
+| Inspect your work | `status --mine` |
+| Inspect the team | `status --team` |
+| Inspect Grace's work | `status --by Grace` |
+| Inspect unassigned work | `ready --untaken` |
+| Assign a Task to Grace | `edit <id> --taken-by Grace` |
+| Release an assignment | `edit <id> --clear taken-by` |
+| Request acceptance from Grace | `submit <id> --to Grace` |
+| Address a Question to Grace | `add question "<title>" --to Grace` |
+
+Explicit assignments require the user's direction. Reading another person's work does not authorize taking it.
+
+Recall, its automatic hook and the other work views honor the same notebook `scope`: `mine` for personal work, `team` for everyone's work. The default is `team`; explicit audience flags override it for one request. Knowledge-only lists remain shared even under `scope: mine`; an explicit `--mine` or `--by` still filters their authorship. In Recall those flags narrow work, not shared knowledge. Replies identify narrowed reads and supply a command to widen them.
+
+## Leave a useful continuation
+
+```sh
+anb comment task.customer-exports --via codex --body "The export remains tenant-scoped. The CSV fixture passes. Next: verify the empty-workspace case."
+```
+
+Write the result, supporting evidence and next concrete action. A multiline comment stays one attributed log entry. Each active Task retains its own latest entry, so parallel continuations do not overwrite one another.
+
+Use a Question when an uncertainty must survive independently, a Decision for an established choice and a Note for reusable knowledge. A routine check need not become another record.
+
+## Finish, wait or read further
+
+Close verified work with an outcome on the Task. Archive that record when it no longer belongs in the working set; related knowledge stays live until it is explicitly retired or superseded.
+
+Hold work only when something prevents progress, with a reason naming that condition. Changing attention is not a hold. `unhold` makes it eligible again when the condition is resolved.
+
+Truncated replies name the omitted content and an expansion command. `recall --all` expands the complete memory read; `status --budget 0` removes dashboard budget cuts. `debt` lists matters needing attention, not instructions to discard old records. See [the reply contract](../reference/replies.md) for exact bounds.
+
+After notebook changes, run `anb check`. Commit shared memory with the related work only when the user has authorized commits.

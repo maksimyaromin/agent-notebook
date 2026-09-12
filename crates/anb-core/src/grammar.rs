@@ -1,19 +1,15 @@
-//! The envelope line grammar: parse, render, normalize.
+//! Record frontmatter: a flat YAML mapping followed by an opaque Markdown body.
 //!
-//! A record file opens with a `---`-fenced envelope of single-line
-//! `key: value` fields and continues as an opaque markdown body. Values are
-//! typed by key through the field table, never guessed from their shape, so
-//! implicit-typing corruption (`state: no` becoming a boolean) is
-//! unrepresentable. Parsing is total: any input yields a [`RecordFile`] whose
-//! [`render`](RecordFile::render) reproduces the input byte-exact; rejection
-//! happens through named findings, never by dropping bytes.
-//!
-//! Reading and judging a file is anyone's; changing one is the notebook's,
-//! whose write-time invariants bind whoever writes — so the splicing
-//! methods stay inside the crate and a record is changed through a verb.
+//! Reads also accept legacy unquoted text and repeated keys. Parsed input
+//! retains its bytes; a mutation writes quoted scalars and block sequences
+//! so ordinary YAML readers receive the same values and relationships.
+//! Field meaning comes from its key, without implicit scalar typing.
 
 use crate::date;
+use crate::encode;
 use crate::finding::{Finding, FindingCode};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 const FENCE: &str = "---";
 const BOM: char = '\u{feff}';
@@ -200,15 +196,86 @@ impl Envelope {
 }
 
 fn canonical_line(key: &str, value: &str) -> String {
-    debug_assert!(
-        !value.contains('\n'),
-        "a field value is one line; multi-line content belongs in the body"
-    );
-    if value.is_empty() {
-        format!("{key}:\n")
+    format!(
+        "{}: {}\n",
+        encode_scalar("", key),
+        encode_scalar(key, value)
+    )
+}
+
+fn encode_scalar(key: &str, value: &str) -> String {
+    let indicator = value.starts_with([
+        '-', '+', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%',
+        '@', '`',
+    ]);
+    let typed = matches!(
+        value.to_ascii_lowercase().as_str(),
+        "y" | "n"
+            | "yes"
+            | "no"
+            | "on"
+            | "off"
+            | "true"
+            | "false"
+            | "null"
+            | "~"
+            | ".nan"
+            | ".inf"
+            | "+.inf"
+            | "-.inf"
+    ) || (!field_spec(key)
+        .is_some_and(|spec| matches!(spec.form, Form::Date | Form::Priority))
+        && (value.starts_with(|character: char| character.is_ascii_digit())
+            || value.parse::<f64>().is_ok()));
+    let quoted = value.is_empty()
+        || value.trim() != value
+        || indicator
+        || typed
+        || value.contains(": ")
+        || value.contains(":\t")
+        || value.ends_with(':')
+        || value.contains(" #")
+        || value.contains("\t#")
+        || value.chars().any(|character| {
+            character.is_control()
+                || matches!(character, '\u{2028}' | '\u{2029}' | '\u{fffe}' | '\u{ffff}')
+        });
+    if quoted {
+        encode::json_quoted(value)
     } else {
-        format!("{key}: {value}\n")
+        value.to_owned()
     }
+}
+
+fn render_canonical(envelope: &Envelope, body: &str) -> String {
+    let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for field in envelope.fields() {
+        groups.entry(&field.key).or_default().push(&field.value);
+    }
+    let mut keys: Vec<_> = groups.keys().copied().collect();
+    keys.sort_by_key(|key| canonical_rank(key));
+    let mut out = String::from("---\n");
+    for key in keys {
+        let values = &groups[key];
+        if values.len() == 1 {
+            out.push_str(&canonical_line(key, values[0]));
+        } else {
+            let _ = writeln!(out, "{}:", encode_scalar("", key));
+            for value in values {
+                let _ = writeln!(out, "  - {}", encode_scalar(key, value));
+            }
+        }
+    }
+    for line in &envelope.lines {
+        if let EnvelopeLine::Raw(raw) = line {
+            out.push_str(raw);
+        }
+    }
+    if envelope.close_fence.is_some() {
+        out.push_str("---\n");
+    }
+    out.push_str(body);
+    out
 }
 
 fn field_line(key: &str, value: &str, raw: String) -> EnvelopeLine {
@@ -245,6 +312,7 @@ pub struct RecordFile {
     envelope: Option<Envelope>,
     body: String,
     findings: Vec<Finding>,
+    changed: bool,
 }
 
 impl RecordFile {
@@ -265,9 +333,15 @@ impl RecordFile {
         file
     }
 
-    /// Reproduce the parsed input byte-exact, whatever the findings were.
+    /// Preserve parsed input byte-exact until a mutation. Changed records
+    /// receive a canonical YAML envelope; the body retains its bytes.
     #[must_use]
     pub fn render(&self) -> String {
+        if self.changed
+            && let Some(envelope) = &self.envelope
+        {
+            return render_canonical(envelope, &self.body);
+        }
         let mut out = String::new();
         if self.bom {
             out.push(BOM);
@@ -299,22 +373,7 @@ impl RecordFile {
         let Some(envelope) = &self.envelope else {
             return self.render();
         };
-        let mut fields: Vec<&FieldLine> = envelope.fields().collect();
-        fields.sort_by_key(|field| canonical_rank(&field.key));
-
-        let mut out = String::from("---\n");
-        for field in fields {
-            out.push_str(&field.key);
-            out.push(':');
-            if !field.value.is_empty() {
-                out.push(' ');
-                out.push_str(&field.value);
-            }
-            out.push('\n');
-        }
-        out.push_str("---\n");
-        out.push_str(&self.body);
-        out
+        render_canonical(envelope, &self.body)
     }
 
     #[must_use]
@@ -382,13 +441,9 @@ impl RecordFile {
         self.envelope.is_some()
     }
 
-    /// Replace `key`'s line with its canonical form, or insert a new line at
-    /// the key's canonical position; every other byte of the file stays
-    /// verbatim, so splicing into a CRLF file leaves its untouched lines
-    /// CRLF while the spliced line is canonical LF. Returns whether any
-    /// byte changed.
+    /// Replace or insert a field. An equal value leaves the file untouched.
     ///
-    /// The value must be one line — multi-line content belongs in the body.
+    /// The value must fit on one line. Multiline content belongs in the body.
     ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
@@ -396,15 +451,17 @@ impl RecordFile {
         let canonical = canonical_line(key, value);
         let envelope = self.envelope_for_mutation();
         if let Some(field) = envelope.first_mut(key) {
-            if field.raw == canonical {
+            if field.value == value {
                 return false;
             }
             value.clone_into(&mut field.value);
             field.raw = canonical;
+            self.changed = true;
             return true;
         }
         let at = insertion_index(envelope, key);
         envelope.lines.insert(at, field_line(key, value, canonical));
+        self.changed = true;
         true
     }
 
@@ -422,9 +479,10 @@ impl RecordFile {
             None => insertion_index(envelope, key),
         };
         envelope.lines.insert(at, field_line(key, value, canonical));
+        self.changed = true;
     }
 
-    /// Remove every line of `key`; every other byte stays verbatim.
+    /// Remove every value of `key` without changing other values or the body.
     /// Returns whether any line was removed.
     ///
     /// # Panics
@@ -435,11 +493,13 @@ impl RecordFile {
         envelope
             .lines
             .retain(|line| !matches!(line, EnvelopeLine::Field(field) if field.key == key));
-        envelope.lines.len() != before
+        let changed = envelope.lines.len() != before;
+        self.changed |= changed;
+        changed
     }
 
     /// Remove every line of a repeatable `key` carrying exactly `value`;
-    /// every other byte stays verbatim. Returns whether any line was removed.
+    /// other values and the body remain unchanged. Returns whether a value was removed.
     ///
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
@@ -449,10 +509,12 @@ impl RecordFile {
         envelope.lines.retain(|line| {
             !matches!(line, EnvelopeLine::Field(field) if field.key == key && field.value == value)
         });
-        envelope.lines.len() != before
+        let changed = envelope.lines.len() != before;
+        self.changed |= changed;
+        changed
     }
 
-    /// Append one line at EOF — the body's only mutation.
+    /// Append text at EOF, separating it from the existing body with a newline.
     /// A missing newline before the appended line is supplied, whether the
     /// file ended inside the envelope or mid-body-line.
     ///
@@ -471,6 +533,7 @@ impl RecordFile {
         }
         self.body.push_str(line);
         self.body.push('\n');
+        self.changed = true;
     }
 
     /// Replace the body wholesale — the deliberate correction `edit` makes,
@@ -481,6 +544,9 @@ impl RecordFile {
     /// # Panics
     /// On a file with no envelope; a caller mutates only accepted records.
     pub(crate) fn set_body(&mut self, body: &str) {
+        if body == self.body {
+            return;
+        }
         if !body.is_empty() {
             let close_fence = &mut self.envelope_for_mutation().close_fence;
             if let Some(fence) = close_fence
@@ -490,6 +556,7 @@ impl RecordFile {
             }
         }
         body.clone_into(&mut self.body);
+        self.changed = true;
     }
 
     fn envelope_for_mutation(&mut self) -> &mut Envelope {
@@ -589,6 +656,7 @@ fn parse_structure(text: &str) -> RecordFile {
         envelope: Some(scan.envelope),
         body,
         findings,
+        changed: false,
     }
 }
 
@@ -599,6 +667,7 @@ fn file_without_envelope(text: &str) -> RecordFile {
         envelope: None,
         body: text.to_owned(),
         findings: vec![Finding::at(1, FindingCode::NoEnvelope, message)],
+        changed: false,
     }
 }
 
@@ -618,6 +687,8 @@ fn scan_envelope(open_fence: &str, field_rows: &[&str]) -> EnvelopeScan {
     let (_, open_fence_crlf) = line_content(open_fence);
     let mut first_crlf_line = open_fence_crlf.then_some(1);
     let mut body_start = open_fence.len();
+    let mut sequence: Option<String> = None;
+    let mut sequence_header = String::new();
 
     // File line 1 is the open fence; these rows start at line 2.
     for (index, raw) in field_rows.iter().enumerate() {
@@ -631,13 +702,38 @@ fn scan_envelope(open_fence: &str, field_rows: &[&str]) -> EnvelopeScan {
             close_fence = Some((*raw).to_owned());
             break;
         }
+        if let Some(value) = sequence_value(content)
+            && let Some(key) = &sequence
+        {
+            let raw = format!("{sequence_header}{raw}");
+            sequence_header.clear();
+            lines.push(parsed_field(key.clone(), value, raw, line, &mut findings));
+            continue;
+        }
+        sequence = None;
         if let Some((key, value)) = parse_field_line(content) {
-            lines.push(EnvelopeLine::Field(FieldLine {
-                key,
-                value,
-                raw: (*raw).to_owned(),
-                line: Some(line),
-            }));
+            let followed_by_sequence = field_rows
+                .get(index + 1)
+                .is_some_and(|next| sequence_value(line_content(next).0).is_some());
+            if value.is_empty() && followed_by_sequence {
+                if field_spec(&key).is_some_and(|spec| !spec.repeatable) {
+                    findings.push(Finding::at(
+                        line,
+                        FindingCode::BadValue,
+                        format!("{key}: a block sequence requires a repeatable field"),
+                    ));
+                }
+                sequence = Some(key);
+                (*raw).clone_into(&mut sequence_header);
+            } else {
+                lines.push(parsed_field(
+                    key,
+                    &value,
+                    (*raw).to_owned(),
+                    line,
+                    &mut findings,
+                ));
+            }
         } else {
             let message = "expected a `key: value` field or a `---` fence".to_owned();
             findings.push(Finding::at(line, FindingCode::BadEnvelopeLine, message));
@@ -657,6 +753,64 @@ fn scan_envelope(open_fence: &str, field_rows: &[&str]) -> EnvelopeScan {
     }
 }
 
+fn sequence_value(content: &str) -> Option<&str> {
+    if !content.starts_with(' ') {
+        return None;
+    }
+    content
+        .trim_start_matches(' ')
+        .strip_prefix("- ")
+        .map(str::trim_end)
+}
+
+fn parsed_field(
+    key: String,
+    value: &str,
+    raw: String,
+    line: usize,
+    findings: &mut Vec<Finding>,
+) -> EnvelopeLine {
+    let value = if let Ok(value) = decode_scalar(value) {
+        value
+    } else {
+        findings.push(Finding::at(
+            line,
+            FindingCode::BadValue,
+            format!(
+                "{key}: invalid quoted scalar; use JSON string escapes or doubled single quotes"
+            ),
+        ));
+        value.to_owned()
+    };
+    if value.contains(['\n', '\r']) {
+        findings.push(Finding::at(
+            line,
+            FindingCode::BadValue,
+            format!("{key}: a field value must fit on one line"),
+        ));
+    }
+    EnvelopeLine::Field(FieldLine {
+        key,
+        value,
+        raw,
+        line: Some(line),
+    })
+}
+
+fn decode_scalar(value: &str) -> Result<String, ()> {
+    if value.starts_with('"') {
+        return serde_json::from_str(value).map_err(|_| ());
+    }
+    if let Some(inner) = value.strip_prefix('\'') {
+        let inner = inner.strip_suffix('\'').ok_or(())?;
+        if inner.replace("''", "").contains('\'') {
+            return Err(());
+        }
+        return Ok(inner.replace("''", "'"));
+    }
+    Ok(value.to_owned())
+}
+
 /// The line without its terminator, and whether that terminator was CRLF.
 fn line_content(raw: &str) -> (&str, bool) {
     match raw.strip_suffix('\n') {
@@ -672,6 +826,7 @@ fn line_content(raw: &str) -> (&str, bool) {
 /// after `:` is accepted, and the value is trimmed of trailing whitespace.
 pub(crate) fn parse_field_line(content: &str) -> Option<(String, String)> {
     let (key, rest) = content.split_once(':')?;
+    let key = decode_scalar(key).ok()?;
     let mut chars = key.chars();
     if !chars.next()?.is_ascii_lowercase() {
         return None;
@@ -680,7 +835,7 @@ pub(crate) fn parse_field_line(content: &str) -> Option<(String, String)> {
         return None;
     }
     let value = rest.trim_start_matches([' ', '\t']).trim_end();
-    Some((key.to_owned(), value.to_owned()))
+    Some((key, value.to_owned()))
 }
 
 /// `archive/tasks/task.x.md` → (`Some("archive/tasks")`, `task.x.md`): the
@@ -996,7 +1151,7 @@ mod tests {
     }
 
     #[test]
-    fn set_field_replaces_only_its_own_line_and_keeps_every_other_quirk() {
+    fn a_field_change_canonicalizes_the_envelope_and_preserves_unknown_values() {
         let text = record(
             &[
                 "id:task.demo-record",
@@ -1014,12 +1169,12 @@ mod tests {
             file.render(),
             record(
                 &[
-                    "id:task.demo-record",
-                    "type:  task",
+                    "id: task.demo-record",
+                    "type: task",
                     "state: active",
-                    "custom: kept verbatim   ",
                     "title: A demo record",
                     "created: 2026-08-24",
+                    "custom: kept verbatim",
                 ],
                 "body\n",
             )
@@ -1055,13 +1210,13 @@ mod tests {
     }
 
     #[test]
-    fn splicing_into_a_crlf_file_writes_the_touched_line_lf_and_keeps_the_rest() {
+    fn a_field_change_normalizes_envelope_line_endings_and_preserves_the_body() {
         let text = record(&REQUIRED, "body\n").replace('\n', "\r\n");
         let mut file = RecordFile::parse(&text);
         file.set_field("state", "active");
         assert_eq!(
             file.render(),
-            text.replace("state: open\r\n", "state: active\n")
+            record(&required_with("state", "state: active"), "body\r\n")
         );
     }
 

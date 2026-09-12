@@ -14,63 +14,49 @@
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-667aeb?style=flat-square" /></a>
 </p>
 
-<p align="center">
-  <img alt="A terminal session: anb adds, starts and logs a Task, records a rule, shows Status to the next session, closes the Task with its report, archives it and passes the check." src="./apps/docs/public/demo.gif" />
-</p>
+agent-notebook gives agents a shared understanding of a project and a reliable place to resume work. It keeps the terms, decisions, findings and next steps that would otherwise disappear between conversations.
 
-agent-notebook helps coding agents continue work with the decisions, findings and open questions from earlier sessions. It keeps that knowledge connected to the work it came from, so another agent can understand how the project got here and what to do next.
+It is not another ticket system or a documentation site. Keep the ticket in Asana, the specification in Confluence and the code in Git. The notebook connects those sources to what the agent needs to know and do next. Record the useful difference, not a copy of everything the agent read.
 
-A deterministic CLI handles the records. It checks changes, reports their consequences and gives the agent a next step when a command is refused. The supplied skills describe a complete working method: how to organize work, maintain project knowledge and finish with evidence.
-
-The same method is used to develop agent-notebook itself. You can use it as supplied or rewrite the skills for your team. Reviews, task grouping and whether memory belongs in git are choices you can change without replacing the tool.
+Records are plain Markdown with small typed headers. Teammates and agents can read them without installing anything. A deterministic CLI handles changes and relationships; the supplied skills guide the judgment of what is worth remembering.
 
 ## Start using it
 
-Install with Node.js 20 or later, then run setup in your repository root:
+Install with Node.js 20 or later, then run setup anywhere in your repository:
 
 ```sh
 npm install -g @supolka/agent-notebook
 anb setup --agent claude-code
 ```
 
-Setup installs the instructions and skills the named agent reads, plus its session-start hook: `claude-code`, `codex`, or `agents-md` for any tool that reads `AGENTS.md`; repeat the flag for several. In Codex, trust the project and review the hook with `/hooks`. Then ask your agent to use the notebook for a piece of work.
+Choose `claude-code`, `codex` or `agents-md`; repeat `--agent` for several hosts. Setup installs the instructions and skills they read, plus a session-start hook where supported. For Codex, trust the project and review the hook with `/hooks`. Then ask your agent to use the notebook for a piece of work.
 
-By default, records live in `.agent-notebook/` at the repository root, created when the agent adds the first record. The supplied workflow keeps this memory in git with the code. [The quickstart](https://agent-notebook.supolka.dev/start/quickstart/) explains what happens from setup through the next session, including other installation options.
+Shared records live in `.agent-notebook/` at the repository root, created on the first write. Commit them with the project when they belong to the team. [The quickstart](https://agent-notebook.supolka.dev/start/quickstart/) covers setup through the next session, including other installation options.
 
 ## The default workflow
 
-A new request starts as an idea, whether it came from a ticket, a document or a conversation. The supplied skill helps the agent clarify the outcome, investigate questions and record decisions before decomposing the work. A small change needs little preparation; a larger one can have its own specification and domain model.
+Say “continue” or “take the next part of task X.” The agent starts with `anb recall`: current work, this conversation's remembered Task and relevant knowledge from the project and your personal notebooks. It reads what it needs and resumes from the last useful handoff.
 
-Each session starts from Status and resumes the relevant work. The default is one Task in flight, with larger deliveries organized as epics and dependencies. [The idea workflow](https://agent-notebook.supolka.dev/guides/ideas/) explains how the original request stays connected to the result.
+Several conversations can work on different Tasks at once. Session focus is separate from authorship and assignment, so “continue” does not mean whichever Task happens to appear first. Local session claims keep two agents from silently taking the same Task. Shared knowledge remains visible regardless of who wrote it. [Sessions and collaboration](https://agent-notebook.supolka.dev/guides/session/) explains parallel work, joining a Task and the limits of coordination across clones.
 
-While working, the agent logs progress, records rulings as Decisions and reusable knowledge as Notes, and files uncertainties as Questions tied to their origin. It closes Questions when answered and records a reason when work must pause. Maintaining the notebook is part of the agent's job.
+During work, the agent records changes of direction, useful findings and unresolved questions. A Task closes with a short outcome and the evidence needed to trust it. Reusable knowledge gets its own Note or Decision; routine completion does not require a separate report. Archive work when it no longer belongs in the current view, without retiring the knowledge it produced.
 
-Completed work closes with proof, normally a report saved as a Note. The agent archives the Task and report, checks the notebook, and includes it in the code's commits. History stays searchable; the next session gets a short summary:
-
-```text
-$ anb status
-ok: notebook — 1 task, 1 decision, 0 notes, 0 questions
-active: task.parser-accepts-fenced-bodies "Parser accepts fenced bodies"
-log: "- 2026-09-05 Alex: fences parse; the indented-body case is next"
-budget: ~65/1500 tokens
-```
-
-Ask for a map and the companion `anb-atlas` skill builds an interactive HTML page. Inspect records beside the map and return comments for the agent to apply through the CLI.
+Larger work can use epics, dependencies and domain records. Small changes need no ceremony. Ask for a map and the companion `anb-atlas` skill builds an interactive view for exploration and review.
 
 ## The CLI
 
-Commands enforce record lifecycles and reject dependency cycles. Replacing a Decision updates its predecessor too. Repeating an applied state transition returns `(already)` without rewriting the record. A notebook lock serializes CLI writes and coordinates readers across changes to several files.
+Commands enforce record lifecycles and reject dependency cycles. Replacing a Decision updates its predecessor too. Repeating an applied state transition reports `already: true` without rewriting the record. A notebook lock serializes local CLI writes and coordinates readers across changes to several files.
 
-Replies report consequences as well as success: newly unblocked Tasks, archived reports, possible conflicts. Refusals have stable codes and suggest a next action. Listings are bounded, Status has a configurable token budget, and JSON is available for programs. Command references and worked examples are generated by the binary and checked for drift in CI.
+Replies show what changed, what can start next and how to recover from a refusal. Standard TOON is the default; `--json` serializes the same structured result. Summaries have explicit omission counts and commands for reading more. Recall and Status share a configurable token budget. Command references and worked examples are generated by the binary and checked for drift in CI.
 
-The records are plain Markdown files, one per record. There is no database, server or account. `anb check` reports malformed records and broken references with their locations and available repairs. [The design](https://agent-notebook.supolka.dev/start/what-it-is/) and [reply contract](https://agent-notebook.supolka.dev/reference/replies/) explain the guarantees.
+There is no database, server or account. `anb check` reports malformed records and broken references with their locations and available repairs. [The design](https://agent-notebook.supolka.dev/start/what-it-is/) and [reply contract](https://agent-notebook.supolka.dev/reference/replies/) explain the guarantees.
 
 ## Using your own workflow
 
-Rewrite the skills to change reviews, task grouping or the session routine. Keep the notebook out of git, or choose another location. The CLI's record rules still apply. [Practical recipes](https://agent-notebook.supolka.dev/guides/customization/) show how to keep private memory in `.tmp/xxx`, preserve custom skills and require review before closing.
+Put team workflow choices in `.agents/anb.md`. Setup leaves that file alone while updating the supplied skills, so project policy does not need a fork. [Customization](https://agent-notebook.supolka.dev/guides/customization/) covers review requirements, custom instructions and other notebook locations.
 
-For personal rules and practices across projects, [the global notebook](https://agent-notebook.supolka.dev/guides/your-own-notebook/) keeps Decisions and Notes in your home directory.
+Keep personal practices personal: `--personal` stores Notes and Decisions for this project, and `--global` stores them across projects. Both stay in your home directory. Recall labels each audience and keeps shared project knowledge separate from personal preferences. [Personal memory](https://agent-notebook.supolka.dev/guides/your-own-notebook/) explains where each belongs.
 
-The project's own notebook is committed in this repository, including design decisions and reports of completed work. The [development guide](https://agent-notebook.supolka.dev/contributing/development/) explains the implementation and how to contribute improvements to the CLI or the skills.
+This repository uses its own notebook, including design decisions and completed work. The [development guide](https://agent-notebook.supolka.dev/contributing/development/) explains the implementation and contribution checks.
 
 By [Maksim Yaromin](https://github.com/maksimyaromin) · [Commands](https://agent-notebook.supolka.dev/reference/commands/) · [MIT license](LICENSE)

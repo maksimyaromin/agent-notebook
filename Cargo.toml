@@ -12,6 +12,9 @@ rust-version = "1.98"
 anb-core = { path = "crates/anb-core" }
 clap = { version = "4.6", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "suggestions"] }
 jiff = "0.2"
+getrandom = "0.4"
+sha2 = "0.11"
+serde = { version = "1.0", features = ["derive"] }
 # preserve_order lands reply keys in insertion order, so `ok` leads every object.
 serde_json = { version = "1.0", features = ["preserve_order"] }
 proptest = "1.11"
