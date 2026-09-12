@@ -1,17 +1,20 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./apps/docs/public/brand/anb-lockup-full-dark.svg" />
-    <img alt="supolka(agent-notebook)" src="./apps/docs/public/brand/anb-lockup-full-light.svg" width="380" />
+    <img alt="supolka(agent-notebook)" src="./apps/docs/public/brand/anb-lockup-full-light.svg" width="340" />
   </picture>
+  <br />
+  Working memory for projects built with coding agents.<br />
+  <a href="https://agent-notebook.supolka.dev"><b>Documentation</b></a>
 </p>
-
-<p align="center">Working memory for projects built with coding agents.</p>
-
-<p align="center"><a href="https://agent-notebook.supolka.dev"><b>Documentation</b></a></p>
 
 <p align="center">
   <a href="https://github.com/maksimyaromin/agent-notebook/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/maksimyaromin/agent-notebook/actions/workflows/ci.yml/badge.svg" /></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-667aeb?style=flat-square" /></a>
+</p>
+
+<p align="center">
+  <img alt="A terminal session: create a Task, record progress and a shared rule, resume the Task, close and archive it, then find the rule and check the notebook." src="./apps/docs/public/demo.gif" />
 </p>
 
 agent-notebook gives agents a shared understanding of a project and a reliable place to resume work. It keeps the terms, decisions, findings and next steps that would otherwise disappear between conversations.
