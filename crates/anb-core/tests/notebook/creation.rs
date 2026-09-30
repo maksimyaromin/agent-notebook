@@ -236,30 +236,62 @@ fn minted_from(title: &str) -> String {
 #[test]
 fn a_long_title_is_cut_at_a_word_boundary_so_every_kept_word_survives() {
     assert_eq!(
-        minted_from("GitHub dev flow: Actions CI, fmt + clippy + tests"),
-        "task.github-dev-flow-actions-ci-fmt-clippy"
+        minted_from(
+            "GitHub dev flow: Actions CI, fmt + clippy + tests, and the release gate on every pull request"
+        ),
+        "task.github-dev-flow-actions-ci-fmt-clippy-tests-and-the-release-gate"
     );
     assert_eq!(
-        minted_from("Epic pattern: scoped queries + Status hub grouping"),
-        "task.epic-pattern-scoped-queries-status-hub"
+        minted_from(
+            "Epic pattern: scoped queries, Status hub grouping and the queue that follows every descendant"
+        ),
+        "task.epic-pattern-scoped-queries-status-hub-grouping-and-the-queue"
+    );
+}
+
+#[test]
+fn an_explicit_id_may_take_ninety_six_bytes_and_no_more() {
+    let mut storage = MemoryStorage::new();
+    let mut notebook = Notebook::new(&mut storage);
+    let at_cap = format!("task.{}", "a".repeat(96 - "task.".len()));
+    let past_cap = format!("{at_cap}b");
+    let mut draft = Draft::new(RecordType::Task, "At the cap");
+    draft.id = Some(at_cap.clone());
+    assert_eq!(notebook.create(&draft, TODAY).unwrap().id, at_cap);
+    draft.id = Some(past_cap);
+    assert!(matches!(
+        notebook.create(&draft, TODAY).unwrap_err(),
+        NotebookError::InvalidArgument { .. }
+    ));
+}
+
+#[test]
+fn an_apostrophe_joins_its_word_instead_of_splitting_it() {
+    assert_eq!(
+        minted_from("A Decision's kind can be corrected"),
+        "task.a-decisions-kind-can-be-corrected"
+    );
+    assert_eq!(
+        minted_from("The adopter’s findings"),
+        "task.the-adopters-findings"
     );
 }
 
 #[test]
 fn a_boundary_landing_on_the_cap_keeps_the_word_before_it() {
-    // Forty characters of whole words, then one more word: the cut has
-    // a boundary to take at the cap itself.
-    let title = "aaaa bbbb cccc dddd eeee ffff gggg hhhhi jjjj";
+    // Sixty-four characters of whole words, then one more word: the cut
+    // has a boundary to take at the cap itself.
+    let title = "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn";
     assert_eq!(
         minted_from(title),
-        "task.aaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhhi"
+        "task.aaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhh-iiii-jjjj-kkkk-llll-mmmm"
     );
 }
 
 #[test]
 fn a_first_word_longer_than_the_cap_is_cut_short_for_want_of_a_boundary() {
-    let id = minted_from(&"z".repeat(60));
-    assert_eq!(id, format!("task.{}", "z".repeat(40)));
+    let id = minted_from(&"z".repeat(80));
+    assert_eq!(id, format!("task.{}", "z".repeat(64)));
 }
 
 #[test]
@@ -269,8 +301,10 @@ fn a_mint_collision_retries_with_a_two_character_suffix() {
     let first = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
     let second = Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
     assert_eq!(first.id, "task.a-demo-record");
+    assert_eq!(first.collision, None);
     assert_eq!(second.id.len(), first.id.len() + 3);
     assert!(second.id.starts_with("task.a-demo-record-"));
+    assert_eq!(second.collision.as_deref(), Some("task.a-demo-record"));
     assert!(storage.read(&second.path).is_ok());
 }
 

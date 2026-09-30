@@ -329,7 +329,7 @@ fn recall_follows_each_session_not_updated_date_or_another_sessions_focus() {
     );
     let ambiguous = recall(&mut storage, None);
     assert_eq!(ambiguous.focus, None);
-    assert_eq!(ambiguous.work.active.len(), 2);
+    assert_eq!(ambiguous.work.unwrap().active.len(), 2);
 }
 
 struct FaultStorage {

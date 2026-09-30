@@ -88,13 +88,9 @@ impl<'a> Notebook<'a> {
     /// Read maintained knowledge with the same selection rules as [`recall`].
     ///
     /// # Errors
-    /// A storage failure, or an unknown focus record.
-    pub fn recall(
-        &self,
-        text: Option<&str>,
-        focus: Option<&str>,
-    ) -> Result<crate::Knowledge, NotebookError> {
-        recall(self.storage, text, focus)
+    /// See [`recall`].
+    pub fn recall(&self, text: Option<&str>) -> Result<crate::Knowledge, NotebookError> {
+        recall(self.storage, text)
     }
 
     /// The identity as a record may carry it: one non-empty line. A host
@@ -444,32 +440,34 @@ impl<'a> Notebook<'a> {
     }
 
     /// Read one record whole, live or archived: every envelope field in file
-    /// order, the body, the ids its body cites, the live records whose
-    /// bodies cite it, and the live records whose `link` lines name it,
-    /// each under the kind its line gives the relation. A record's own id
-    /// never enters its blocks. Reading never gates: an invalid record
-    /// shows as it stands.
+    /// order, the body, and every record it is directly related to, in both
+    /// directions. Records relating to this one are read from the archive
+    /// too: an archived record relates to it as much as a live one. A
+    /// record's own id never enters its relations. Reading never gates: an
+    /// invalid record shows as it stands.
     ///
     /// # Errors
     /// See [`Notebook::record`].
     pub fn view(&self, id: &str) -> Result<View, NotebookError> {
         let record = self.record(id)?;
-        let live = self.live_corpus()?;
-        let mentions = mention::mentions(record.file().body())
-            .into_iter()
-            .filter(|target| *target != id)
-            .map(str::to_owned)
-            .collect();
-        let others = live
+        let corpus = self.whole_corpus()?;
+        let mut claimed = BTreeSet::from([id]);
+        let others: Vec<&Record> = corpus
             .records
             .iter()
-            .filter(|other| path_stem(other.path()) != id);
-        let mentioned_by = others
-            .clone()
-            .filter(|other| mention::mentions(other.file().body()).contains(&id))
-            .map(|other| path_stem(other.path()).to_owned())
+            .filter(|other| claimed.insert(path_stem(other.path())))
             .collect();
+        let collect_incoming = |edge: &dyn Fn(&Record) -> bool| -> Vec<String> {
+            let mut ids: Vec<String> = others
+                .iter()
+                .filter(|other| edge(other))
+                .map(|other| path_stem(other.path()).to_owned())
+                .collect();
+            ids.sort();
+            ids
+        };
         let mut linked_by: Vec<(String, String)> = others
+            .iter()
             .flat_map(|other| {
                 other
                     .linked_records()
@@ -478,6 +476,12 @@ impl<'a> Notebook<'a> {
             })
             .collect();
         linked_by.sort();
+        let collect_outgoing = |targets: &mut dyn Iterator<Item = &str>| -> Vec<String> {
+            targets
+                .filter(|target| *target != id && grammar::id_error(target).is_none())
+                .map(str::to_owned)
+                .collect()
+        };
         Ok(View {
             id: id.to_owned(),
             path: record.path().to_owned(),
@@ -488,9 +492,21 @@ impl<'a> Notebook<'a> {
                 .map(|(key, value)| (key.to_owned(), value.to_owned()))
                 .collect(),
             body: record.file().body().to_owned(),
-            mentions,
-            mentioned_by,
+            from: collect_outgoing(&mut record.origin().into_iter()),
+            born: collect_incoming(&|other| other.origin() == Some(id)),
+            task: collect_outgoing(&mut record.task().into_iter()),
+            bound: collect_incoming(&|other| other.task() == Some(id)),
+            blocked_by: collect_outgoing(&mut record.blocked_by()),
+            blocks: collect_incoming(&|other| other.blocked_by().any(|target| target == id)),
+            links: record
+                .linked_records()
+                .map(|(kind, target)| (kind.to_owned(), target.to_owned()))
+                .collect(),
             linked_by,
+            mentions: collect_outgoing(&mut mention::mentions(record.file().body()).into_iter()),
+            mentioned_by: collect_incoming(&|other| {
+                mention::mentions(other.file().body()).contains(&id)
+            }),
         })
     }
 
@@ -526,6 +542,9 @@ impl<'a> Notebook<'a> {
         if let Some(origin) = &draft.from {
             self.guard_ref_exists("from", origin)?;
         }
+        if let Some(task) = &draft.task {
+            self.guard_binding_target(task)?;
+        }
         for link in &draft.links {
             self.guard_link_target(link)?;
         }
@@ -534,7 +553,7 @@ impl<'a> Notebook<'a> {
         let corpus = self.live_corpus()?;
         let records = &corpus.records;
         let claims = write::id_claims(records, &corpus.archived);
-        let id = write::resolve_draft_id(draft, &claims, || write::title_id(draft))?;
+        let (id, collision) = write::resolve_draft_id(draft, &claims)?;
         let path = record_path(&id, draft.record_type, false);
         self.storage
             .write(&path, &write::render_draft(draft, &id, by, today))?;
@@ -548,6 +567,7 @@ impl<'a> Notebook<'a> {
         Ok(Created {
             id,
             path,
+            collision,
             superseded: draft.supersedes.clone(),
             dangling_mentions,
         })
@@ -740,7 +760,9 @@ impl<'a> Notebook<'a> {
 
     /// The reply every way of closing shares: the move, plus the
     /// consequences a close must not bury — the still-open Questions born
-    /// from the Task and the Tasks it was the last live blocker of.
+    /// from the Task or bound to it, the Tasks it was the last live blocker
+    /// of, and the knowledge born from it that no binding will carry into
+    /// the archive with it.
     fn closed(
         &self,
         id: &str,
@@ -755,6 +777,11 @@ impl<'a> Notebook<'a> {
             transition,
             open_questions: query::open_questions_from(records, &resolvable, id),
             unblocked: query::unblocked_by_close(records, &resolvable, id),
+            unbound: if write::parsed_type(id)? == RecordType::Task {
+                query::born_unbound(records, &resolvable, id)
+            } else {
+                Vec::new()
+            },
             resolved_by,
             dangling_mentions,
         })
@@ -1105,14 +1132,17 @@ impl<'a> Notebook<'a> {
     }
 
     /// Move one settled record into the archive without rewriting its
-    /// bytes. Linked records keep their state and location. The archive
-    /// copy is written before the live file is removed, so an interrupted
-    /// move leaves recoverable copies rather than losing the record.
+    /// bytes. A Task takes the records bound to it along, each in the
+    /// state it stands in, before it moves itself; any other linked record
+    /// keeps its state and location. Each archive copy is written before
+    /// its live file is removed, so an interrupted move leaves recoverable
+    /// copies rather than losing a record.
     ///
     /// # Errors
     /// [`NotebookError::InvalidTransition`] on a record still live, naming
-    /// the commands that settle it; [`NotebookError::DuplicateId`] on a
-    /// destination whose bytes differ from the source; plus the
+    /// the commands that settle it; [`NotebookError::OpenQuestions`] on a
+    /// Task an open Question is bound to; [`NotebookError::DuplicateId`]
+    /// on a destination whose bytes differ from the source; plus the
     /// resolution errors of [`Notebook::close`].
     pub fn archive(&mut self, id: &str) -> Result<Archived, NotebookError> {
         let record_type = write::parsed_type(id)?;
@@ -1120,6 +1150,7 @@ impl<'a> Notebook<'a> {
             id: id.to_owned(),
             from: record_path(id, record_type, false),
             to: record_path(id, record_type, true),
+            bound: Vec::new(),
             already: false,
         };
         let loaded = match self.resolve_live(id, record_type) {
@@ -1139,22 +1170,87 @@ impl<'a> Notebook<'a> {
             });
         }
         let source = loaded.record.file().render();
-        match self.held_at(&moved.to)? {
-            Holding::Absent => self.storage.write(&moved.to, &source)?,
+        // A conflicting copy of the Task is refused before its bound records
+        // move, so they never wait in the archive for a Task left behind.
+        if let Holding::Bytes(standing) = self.held_at(&moved.to)?
+            && standing != source
+        {
+            return Err(NotebookError::DuplicateId {
+                id: id.to_owned(),
+                holder: moved.to,
+            });
+        }
+        if record_type == RecordType::Task {
+            moved.bound = self.file_bound_records(id)?;
+        }
+        self.move_file(id, &moved.from, &moved.to, &source)?;
+        Ok(moved)
+    }
+
+    /// Move every live record bound to `task` into the archive. An open
+    /// Question bound to it refuses the whole move before any file moves,
+    /// since nobody would look for an unanswered Question in the archive.
+    fn file_bound_records(&mut self, task: &str) -> Result<Vec<String>, NotebookError> {
+        let records: Vec<Record> = self
+            .live_corpus()?
+            .records
+            .into_iter()
+            .filter(|record| record.task() == Some(task))
+            .collect();
+        let open_questions: Vec<String> = records
+            .iter()
+            .filter(|record| record.record_type() == Some(RecordType::Question) && record.is_live())
+            .map(|record| path_stem(record.path()).to_owned())
+            .collect();
+        if !open_questions.is_empty() {
+            return Err(NotebookError::OpenQuestions {
+                id: task.to_owned(),
+                questions: open_questions,
+            });
+        }
+        let mut ids = Vec::new();
+        for record in records {
+            let id = path_stem(record.path()).to_owned();
+            let Some(record_type) = record.record_type() else {
+                continue;
+            };
+            let to = record_path(&id, record_type, true);
+            self.move_file(&id, record.path(), &to, &record.file().render())?;
+            ids.push(id);
+        }
+        Ok(ids)
+    }
+
+    /// Write `source` at `to` unless the same bytes already stand there,
+    /// then remove `from`. Different bytes at `to` are another copy of `id`
+    /// that no move may discard.
+    fn move_file(
+        &mut self,
+        id: &str,
+        from: &str,
+        to: &str,
+        source: &str,
+    ) -> Result<(), NotebookError> {
+        match self.held_at(to)? {
+            Holding::Absent => self.storage.write(to, source)?,
             Holding::Bytes(standing) if source == standing => {}
             _ => {
                 return Err(NotebookError::DuplicateId {
                     id: id.to_owned(),
-                    holder: moved.to,
+                    holder: to.to_owned(),
                 });
             }
         }
-        self.storage.remove(&moved.from)?;
-        Ok(moved)
+        self.storage.remove(from)?;
+        Ok(())
     }
 
     /// Move one archived record back into the working set with the same
-    /// filename and bytes. Linked records keep their state and location.
+    /// filename and bytes. A Task brings back the records bound to it that
+    /// still bind, and is resumed doing so when a move was interrupted. A record
+    /// restored while the Task it is bound to stays archived returns
+    /// unbound, which keeps it after that Task is done.
+    /// Any other linked record keeps its state and location.
     ///
     /// Invalid but readable records can return for repair. When both homes
     /// hold a file, only byte-identical copies permit the move to resume.
@@ -1164,14 +1260,33 @@ impl<'a> Notebook<'a> {
     /// # Errors
     /// [`NotebookError::UnknownId`] when neither home holds the id,
     /// [`NotebookError::DuplicateId`] on a live destination taken by a
-    /// file whose bytes differ, [`NotebookError::InvalidRecord`]
-    /// on bytes that cannot cross the seam, or a storage failure.
-    pub fn restore(&mut self, id: &str) -> Result<Restored, NotebookError> {
+    /// file whose bytes differ, [`NotebookError::InvalidArgument`] on a
+    /// malformed `today`, [`NotebookError::InvalidRecord`] on bytes that
+    /// cannot cross the seam, or a storage failure.
+    pub fn restore(&mut self, id: &str, today: &str) -> Result<Restored, NotebookError> {
+        write::guard_today(today)?;
         let record_type = write::parsed_type(id)?;
+        let mut moved = self.restore_file(id, record_type)?;
+        if record_type == RecordType::Task {
+            moved.bound = self.return_bound_records(id)?;
+            moved.already &= moved.bound.is_empty();
+        } else if !moved.already {
+            moved.unbound = self.unbind_from_archived_task(&moved.to, today)?;
+        }
+        Ok(moved)
+    }
+
+    fn restore_file(
+        &mut self,
+        id: &str,
+        record_type: RecordType,
+    ) -> Result<Restored, NotebookError> {
         let moved = Restored {
             id: id.to_owned(),
             from: record_path(id, record_type, true),
             to: record_path(id, record_type, false),
+            bound: Vec::new(),
+            unbound: None,
             already: false,
         };
         match (self.held_at(&moved.from)?, self.held_at(&moved.to)?) {
@@ -1198,6 +1313,48 @@ impl<'a> Notebook<'a> {
                 holder: moved.to,
             }),
         }
+    }
+
+    fn return_bound_records(&mut self, task: &str) -> Result<Vec<String>, NotebookError> {
+        let mut ids = Vec::new();
+        for record in self.filed_records()? {
+            // A record settled and filed before its Task belongs in the
+            // archive whatever becomes of the Task.
+            if record.task() != Some(task) || !record.is_live() {
+                continue;
+            }
+            let Some(record_type) = record.record_type() else {
+                continue;
+            };
+            let id = path_stem(record.path()).to_owned();
+            if !self.restore_file(&id, record_type)?.already {
+                ids.push(id);
+            }
+        }
+        Ok(ids)
+    }
+
+    fn unbind_from_archived_task(
+        &mut self,
+        path: &str,
+        today: &str,
+    ) -> Result<Option<String>, NotebookError> {
+        let text = self.storage.read(path)?;
+        let record = Record::parse(path, &text);
+        let Some(task) = record.task().map(str::to_owned) else {
+            return Ok(None);
+        };
+        if self
+            .storage
+            .exists(&record_path(&task, RecordType::Task, false))?
+        {
+            return Ok(None);
+        }
+        let mut file = record.into_file();
+        file.remove_field("task");
+        file.set_field("updated", today);
+        self.storage.write(path, &file.render())?;
+        Ok(Some(task))
     }
 
     /// What one home holds for a move that judges names and bytes, never
@@ -1288,6 +1445,9 @@ impl<'a> Notebook<'a> {
             self.guard_ref_exists("from", origin)?;
             self.guard_lineage_stays_open(id, origin)?;
         }
+        if let Some(task) = &edit.task {
+            self.guard_binding_target(task)?;
+        }
         for link in &edit.add_links {
             if link.target.trim() == id {
                 return Err(NotebookError::InvalidArgument {
@@ -1298,6 +1458,13 @@ impl<'a> Notebook<'a> {
         }
 
         let repairing = self.resolve_live_repairing(id, record_type)?;
+        let standing = repairing.record().file();
+        let bound_after =
+            edit.task.is_some() || (standing.field("task").is_some() && !cleared.contains(&"task"));
+        if bound_after {
+            let kind_after = edit.kind.as_deref().or_else(|| standing.field("kind"));
+            write::guard_bindable(record_type, kind_after)?;
+        }
         let dangling_mentions = match &edit.body {
             Some(body) => self.dangling_mentions(body)?,
             None => Vec::new(),
@@ -1466,6 +1633,26 @@ impl<'a> Notebook<'a> {
             }
         }
         Ok(dangling)
+    }
+
+    /// A record is bound only to a Task in the working set, closed or not,
+    /// so the binding can carry it into the archive when that Task leaves.
+    /// An archived Task is restored first.
+    fn guard_binding_target(&self, target: &str) -> Result<(), NotebookError> {
+        self.guard_ref_exists("task", target)?;
+        if write::parsed_type(target)? != RecordType::Task {
+            return Err(NotebookError::WrongType {
+                id: target.to_owned(),
+                expected: "a task".to_owned(),
+            });
+        }
+        let task = self.record(target)?;
+        if is_archived(task.path()) {
+            return Err(NotebookError::Archived {
+                id: target.to_owned(),
+            });
+        }
+        Ok(())
     }
 
     /// Record-shaped links resolve in this notebook. Other targets are

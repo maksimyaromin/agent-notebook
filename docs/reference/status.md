@@ -3,7 +3,7 @@ title: Status and Debt
 description: 'Work summaries, shared output budgets, personal scope and computed maintenance signals.'
 ---
 
-`anb status` summarizes work: active Tasks, reviews, holds, ready work and open Questions. `anb recall` combines that summary with relevant project knowledge and personal practices. Both provide ids and commands for deeper reads. Neither chooses a session's Task merely because it appears first.
+`anb status` summarizes work: active Tasks, reviews, holds, ready work and open Questions. `anb recall` opens a session with that summary, the session's focus and the standing rules from every notebook it reads. Both provide ids and commands for deeper reads. Neither chooses a session's Task merely because it appears first.
 
 ## The sections
 
@@ -37,15 +37,17 @@ Narrowing changes visibility, not validity. A Task blocked by a colleague's work
 
 ## The budget
 
-Status and Recall default to 1500 estimated tokens. Set `budget` in notebook config; Status also accepts `--budget <N>` for one call. Status `--budget 0` disables cuts and includes every row. Recall `--all` lifts its selection and text bounds.
+Status and Recall default to 1500 estimated tokens. Set `budget` in notebook config; Status also accepts `--budget <N>` for one call. Status `--budget 0` disables cuts and includes every row. Recall `--all` lifts its row and text bounds.
 
 The CLI selects one reply document for both formats and measures its actual TOON encoding, including the trailing newline. `budget.limit` is the requested ceiling, or `null` when unbounded; `budget.spent` is the resulting estimate. JSON carries those same values and selections.
 
 A bounded Status starts with at most five rows per section. To fit the ceiling, it removes ready rows first, then Questions, holds and reviews, then active log text and extra active rows. Counts and omission markers remain. The minimum retains notebook counts, section counts, navigation and the first active row when present. That row is an ordered summary, not remembered session focus. If the minimum exceeds a tiny requested ceiling, `spent` reports the excess honestly.
 
-Recall budgets its entire composite once. Selection takes turns across project, personal and global knowledge, preserving relevance order within each source. A large project therefore cannot consume every initial memory slot. The reply's `sources` array reports matching and omitted record counts for each audience; this selection order is not a rule for resolving conflicting instructions.
+Recall budgets its entire composite once. A session opening carries the work, the focus as an id and a title, and every live `rule` and `drift` Decision from the project, personal and global notebooks. Rules apply to any work the session takes on. A drift is an agreed exception to a rule, and it comes along because the rule alone would mislead. Other Decisions and Notes are read when the work cites them. Each source counts them as `other` and gives the `more` command that lists them. Selection takes turns across the sources, so a large project cannot take every row. This order does not decide which instruction wins a conflict.
 
-To fit the budget, Recall first reduces work rows and long memory excerpts, keeping up to 256 characters before dropping lower-ranked records from sources with more than one visible record. It then trims focused-record text, fields and relationship rows. Under tighter ceilings it can further shorten excerpts, omit the last record from a source or reduce invalid-file rows. Counts, audience omissions and expansion commands remain explicit. The focused record's identity is separate from Status ordering.
+To fit the budget, an opening shortens memory bodies to 256 characters first. If that is not enough, it drops the bodies and prints the memories as a table of scope, id, title, kind and read command, with `bodies-omitted` set. Work rows are reduced after that. Memory rows go last: first from sources that still show more than one, then from any source. The title of a rule usually states the rule, and the read command gives the body.
+
+`recall "<phrase>"` searches instead. It returns every live Note and Decision that matches the phrase, from every source, without work or focus. The reply lists every match even when that exceeds the budget. To fit, it shortens the bodies, then drops them, and cuts invalid-file rows last.
 
 The estimate is byte-based, not a provider's tokenizer. It controls context size but does not predict billed tokens exactly. Core callers receive complete ordered models; output selection belongs to the CLI.
 
@@ -71,10 +73,10 @@ External evidence checks inspect filesystem paths and git commits without modify
 
 ## The hook payload
 
-The installed `anb hook` adapter wraps a budgeted Recall document in the host's `SessionStart` JSON envelope, under `additionalContext`. It identifies that content as notebook data, not instructions, and carries the current session's focus when available. Unreadable state produces a diagnostic rather than an empty-memory report, without failing the session hook. [Wiring agents](../guides/agents.md#enable-the-session-hook) covers installation, session input and environment propagation. `status` is a work query; it has no hook flag.
+The installed `anb hook` adapter wraps a budgeted Recall document in the host's `SessionStart` JSON envelope, under `additionalContext`. It identifies that content as notebook data, not instructions, and carries the current session's focus when available: its id, title and read command. Unreadable state produces a diagnostic rather than an empty-memory report, without failing the session hook. [Wiring agents](../guides/agents.md#enable-the-session-hook) covers installation, session input and environment propagation. `status` is a work query; it has no hook flag.
 
 ## JSON
 
 `anb --json status` has the same document described above. A row carries `by`, `taken-by` and `to` when present. Debt rows carry `code`, the fields in the table and a human-readable `line`; programs should use the named fields.
 
-Recall adds `work`, `focus`, `memories`, `sources`, `count`, `omitted`, `invalid`, `more` and the single outer `budget`. Each memory names its scope and read command. Each source carries `{scope, count, omitted}`; omitted body characters are reported on the individual body. Equal ids in different notebooks remain distinct; personal guidance is not merged into team knowledge.
+Recall adds `work`, `focus`, `memories`, `sources`, `count`, `omitted`, `invalid`, `more` and the single outer `budget`; a search leaves out `work` and `focus`. `focus` carries `id`, `title` and the `read` command. Each memory names its scope and read command. Each source carries `{scope, count, omitted}`, and on an opening `other` and `more` when it holds knowledge the opening left out; omitted body characters are reported on the individual body. Equal ids in different notebooks remain distinct; personal guidance is not merged into team knowledge.

@@ -103,7 +103,6 @@ fn a_query_about_live_work_opens_nothing_in_the_archive() {
     let notebook = Notebook::new(&mut storage);
     notebook.ready(&Filter::default()).unwrap();
     notebook.list(&Filter::default()).unwrap();
-    notebook.view("task.live-0").unwrap();
 
     assert_eq!(
         storage.archived_reads(),
@@ -113,16 +112,11 @@ fn a_query_about_live_work_opens_nothing_in_the_archive() {
 }
 
 #[test]
-fn recall_opens_only_the_explicit_archived_focus() {
+fn recall_opens_nothing_in_the_archive() {
     let mut storage = watched(3, 200);
-    Notebook::new(&mut storage).recall(None, None).unwrap();
+    Notebook::new(&mut storage).recall(None).unwrap();
+    Notebook::new(&mut storage).recall(Some("filed")).unwrap();
     assert!(storage.archived_reads().is_empty());
-
-    Notebook::new(&mut storage)
-        .recall(None, Some("task.filed-7"))
-        .unwrap();
-
-    assert_eq!(storage.archived_reads(), ["archive/tasks/task.filed-7.md"]);
 }
 
 /// The dashboard is about the work in flight, and every fact on it is a

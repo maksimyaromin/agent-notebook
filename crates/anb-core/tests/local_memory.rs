@@ -43,7 +43,7 @@ fn a_hub_can_be_started_before_its_children_but_not_completed_before_them() {
         .close("task.hub", None, "Overall result verified.", "2026-09-12")
         .unwrap();
     let closed = notebook.record("task.hub").unwrap().file().render();
-    notebook.restore("task.child").unwrap();
+    notebook.restore("task.child", "2026-09-12").unwrap();
     notebook.reopen("task.child", "2026-09-12").unwrap();
     assert!(
         notebook
@@ -124,72 +124,73 @@ fn subject_membership_excludes_dependencies_and_context_links_but_keeps_descenda
     );
 }
 
-#[test]
-fn invalid_archived_focus_is_reported_without_ranking_its_claims() {
-    let mut storage = MemoryStorage::from_files([(
-        "archive/tasks/task.history.md",
-        "---\nid: task.history\n---\n\nFollow note.evidence.\n",
-    )]);
+/// The live knowledge of a notebook holding one record of every standing
+/// and non-standing kind, plus one of each settled away.
+fn knowledge_of_every_kind() -> MemoryStorage {
+    let mut storage = MemoryStorage::new();
     let mut notebook = Notebook::new(&mut storage);
-    let mut note = Draft::new(RecordType::Note, "Maintained evidence");
-    note.id = Some("note.evidence".to_owned());
-    notebook.create(&note, "2026-09-12").unwrap();
-
-    let knowledge = notebook.recall(None, Some("task.history")).unwrap();
-
-    assert_eq!(knowledge.invalid, ["archive/tasks/task.history.md"]);
-    assert_eq!(knowledge.records.len(), 1);
-    assert_eq!(knowledge.records[0].id, "note.evidence");
-    assert!(!knowledge.records[0].related);
-}
-
-#[test]
-fn an_archived_focus_prioritizes_live_knowledge_without_returning_history() {
-    for record_type in [RecordType::Task, RecordType::Note] {
-        let mut storage = MemoryStorage::new();
-        let mut notebook = Notebook::new(&mut storage);
-        for (kind, id) in [
-            (RecordType::Note, "note.evidence"),
-            (RecordType::Decision, "decision.rule"),
-            (RecordType::Note, "note.history"),
-        ] {
-            let mut draft = Draft::new(kind, id);
-            draft.id = Some(id.to_owned());
-            notebook.create(&draft, "2026-09-12").unwrap();
-        }
-        notebook.retire("note.history", "2026-09-12").unwrap();
-        notebook.archive("note.history").unwrap();
-        let mut root = Draft::new(record_type, "The completed investigation");
-        let id = format!("{}.investigation", record_type.word());
-        root.id = Some(id.clone());
-        root.body = "The maintained conclusion is in note.evidence.".to_owned();
-        notebook.create(&root, "2026-09-12").unwrap();
-        if record_type == RecordType::Task {
-            notebook.start(&id, "2026-09-12").unwrap();
-            notebook
-                .close(&id, None, "Recorded the conclusion.", "2026-09-12")
-                .unwrap();
-        } else {
-            notebook.retire(&id, "2026-09-12").unwrap();
-        }
-        notebook.archive(&id).unwrap();
-
-        let knowledge = notebook.recall(None, Some(&id)).unwrap();
-
-        assert_eq!(
-            knowledge
-                .records
-                .iter()
-                .map(|record| (record.id.as_str(), record.related))
-                .collect::<Vec<_>>(),
-            [("note.evidence", true), ("decision.rule", false)]
-        );
-        assert!(knowledge.invalid.is_empty());
+    for (record_type, kind, id) in [
+        (RecordType::Decision, "shape", "decision.fences-are-lines"),
+        (RecordType::Decision, "drift", "decision.legacy-fences-nest"),
+        (RecordType::Decision, "rule", "decision.fences-never-nest"),
+        (RecordType::Note, "term", "note.fence"),
+        (RecordType::Decision, "rule", "decision.retired-rule"),
+    ] {
+        let mut draft = Draft::new(record_type, &format!("Fence knowledge {id}"));
+        draft.id = Some(id.to_owned());
+        draft.kind = Some(kind.to_owned());
+        notebook.create(&draft, "2026-09-12").unwrap();
     }
+    notebook
+        .retire("decision.retired-rule", "2026-09-12")
+        .unwrap();
+    storage
 }
 
 #[test]
-fn prose_citations_connect_focus_but_quoted_examples_do_not() {
+fn a_session_opens_with_the_live_rules_and_their_agreed_exceptions() {
+    let mut storage = knowledge_of_every_kind();
+    let knowledge = Notebook::new(&mut storage).recall(None).unwrap();
+    assert_eq!(
+        knowledge
+            .records
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        ["decision.fences-never-nest", "decision.legacy-fences-nest"],
+        "rules lead, then the drifts that depart from them"
+    );
+    assert_eq!(
+        knowledge.other,
+        Some(2),
+        "the shape and the term are left to the work that cites them"
+    );
+}
+
+#[test]
+fn a_search_reaches_live_knowledge_of_every_kind() {
+    let mut storage = knowledge_of_every_kind();
+    let knowledge = Notebook::new(&mut storage)
+        .recall(Some("fence knowledge"))
+        .unwrap();
+    assert_eq!(
+        knowledge
+            .records
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "decision.fences-never-nest",
+            "decision.legacy-fences-nest",
+            "decision.fences-are-lines",
+            "note.fence"
+        ]
+    );
+    assert_eq!(knowledge.other, None, "a search leaves nothing unasked");
+}
+
+#[test]
+fn prose_citations_connect_a_graph_focus_but_quoted_examples_do_not() {
     let mut storage = MemoryStorage::new();
     let mut notebook = Notebook::new(&mut storage);
     for id in ["note.context", "note.quoted", "note.fenced"] {
@@ -227,48 +228,6 @@ fn prose_citations_connect_focus_but_quoted_examples_do_not() {
             .map(|edge| (edge.from, edge.to, edge.kind.word()))
             .collect::<Vec<_>>(),
         [("task.work", "note.context", "mentions")]
-    );
-    assert_eq!(
-        notebook
-            .recall(None, Some("task.work"))
-            .unwrap()
-            .records
-            .iter()
-            .map(|record| (record.id.as_str(), record.related))
-            .collect::<Vec<_>>(),
-        [
-            ("note.context", true),
-            ("note.fenced", false),
-            ("note.quoted", false)
-        ]
-    );
-}
-
-#[test]
-fn recall_prioritizes_knowledge_from_the_same_origin_without_hiding_other_rules() {
-    let mut storage = MemoryStorage::new();
-    let mut notebook = Notebook::new(&mut storage);
-    for (record_type, id, origin) in [
-        (RecordType::Task, "task.hub", None),
-        (RecordType::Task, "task.child", Some("task.hub")),
-        (RecordType::Note, "note.evidence", Some("task.hub")),
-        (RecordType::Decision, "decision.rule", None),
-    ] {
-        let mut draft = Draft::new(record_type, id);
-        draft.id = Some(id.to_owned());
-        draft.from = origin.map(str::to_owned);
-        notebook.create(&draft, "2026-09-12").unwrap();
-    }
-
-    let knowledge = notebook.recall(None, Some("task.child")).unwrap();
-
-    assert_eq!(
-        knowledge
-            .records
-            .iter()
-            .map(|record| (record.id.as_str(), record.related))
-            .collect::<Vec<_>>(),
-        [("note.evidence", true), ("decision.rule", false)]
     );
 }
 

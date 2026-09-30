@@ -34,7 +34,7 @@ The first record write creates `.agent-notebook/`. Shared records are Markdown f
 
 > What is Grace working on?
 
-`recall` combines current work, shared knowledge and private practices. A known session focus identifies the intended Task even when the same person has another session working elsewhere. If several Tasks could match a fresh session's request, the agent asks rather than guessing from the most recent timestamp.
+`recall` combines current work, the project's standing rules and your private practices. A known session focus identifies the intended Task even when the same person has another session working elsewhere. If several Tasks could match a fresh session's request, the agent asks rather than guessing from the most recent timestamp.
 
 For a personal work queue by default, set `scope: mine` in `.agent-notebook/config`. The work views then follow each person's assignments while project knowledge stays shared. `--team` opens the team view; `--by Grace` opens Grace's. Without that setting, work views default to the team. See [configuration](../reference/records.md#configuration).
 
@@ -52,7 +52,7 @@ That practice belongs in `--global`. Shared project rules remain in the project 
 
 ## The same workflow through the CLI
 
-These explicit ids make the example reproducible. Ordinary `add` commands allocate independent random ids and return them.
+The explicit ids keep the example short. Without `--id`, `add` derives the id from the title: `task.clarify-the-export-label`.
 
 ```sh
 anb add task "Clarify the export label" --id task.export-label --body "Rename Export to Download CSV. Preserve the action and file contents."

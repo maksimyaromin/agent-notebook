@@ -1,10 +1,11 @@
-//! Independent clones allocate ids without a shared counter or clock.
+//! A record's id is read far more often than it is written, so `add`
+//! derives it from the title unless the caller chooses one.
 
 use serde_json::Value;
-use std::process::Command;
+use std::process::{Command, Output};
 use tempfile::TempDir;
 
-fn create(root: &std::path::Path, title: &str, explicit: Option<&str>) -> Value {
+fn add(root: &std::path::Path, title: &str, explicit: Option<&str>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_anb"));
     command
         .current_dir(root)
@@ -17,7 +18,11 @@ fn create(root: &std::path::Path, title: &str, explicit: Option<&str>) -> Value 
     if let Some(id) = explicit {
         command.args(["--id", id]);
     }
-    let result = command.output().unwrap();
+    command.output().unwrap()
+}
+
+fn created(root: &std::path::Path, title: &str, explicit: Option<&str>) -> Value {
+    let result = add(root, title, explicit);
     assert!(
         result.status.success(),
         "{}",
@@ -27,49 +32,43 @@ fn create(root: &std::path::Path, title: &str, explicit: Option<&str>) -> Value 
 }
 
 #[test]
-fn independent_clones_can_create_the_same_title_without_colliding() {
-    let first = TempDir::new().unwrap();
-    let second = TempDir::new().unwrap();
-    let first_id = create(first.path(), "The same task", None)["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let second_id = create(second.path(), "The same task", None)["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_ne!(first_id, second_id);
-    for id in [first_id, second_id] {
-        let suffix = id.strip_prefix("task.").unwrap();
-        assert_eq!(suffix.len(), 32);
-        assert!(
-            suffix
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        );
-    }
+fn the_title_becomes_the_id() {
+    let root = TempDir::new().unwrap();
+    let reply = created(root.path(), "Parser accepts fenced bodies", None);
+    assert_eq!(reply["id"], "task.parser-accepts-fenced-bodies");
+    assert!(reply.get("collision").is_none(), "{reply}");
 }
 
 #[test]
-fn an_explicit_id_is_preserved() {
+fn a_title_already_taken_gets_a_suffix_and_the_reply_names_the_holder() {
     let root = TempDir::new().unwrap();
+    created(root.path(), "Parser accepts fenced bodies", None);
+    let second = created(root.path(), "Parser accepts fenced bodies", None);
+    let id = second["id"].as_str().unwrap();
+    assert!(
+        id.starts_with("task.parser-accepts-fenced-bodies-"),
+        "{second}"
+    );
+    assert_eq!(second["collision"], "task.parser-accepts-fenced-bodies");
+}
+
+#[test]
+fn a_title_without_an_ascii_word_is_refused_until_an_id_is_chosen() {
+    let root = TempDir::new().unwrap();
+    let refused = add(root.path(), "Одинаковая задача", None);
+    assert!(!refused.status.success());
+    let payload: Value = serde_json::from_slice(&refused.stderr).unwrap();
+    assert_eq!(payload["error"], "invalid-argument");
+    assert!(
+        !root.path().join(".agent-notebook/tasks").exists(),
+        "a refused add writes no record"
+    );
     assert_eq!(
-        create(
+        created(
             root.path(),
             "Одинаковая задача",
             Some("task.customer-export")
         )["id"],
         "task.customer-export"
-    );
-}
-
-#[test]
-fn a_non_ascii_title_needs_no_handmade_id() {
-    let root = TempDir::new().unwrap();
-    assert!(
-        create(root.path(), "Одинаковая задача", None)["id"]
-            .as_str()
-            .unwrap()
-            .starts_with("task.")
     );
 }

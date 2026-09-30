@@ -9,7 +9,7 @@ use crate::debt;
 use crate::grammar::{self, Residence};
 use crate::graph::{TaskGraph, TaskNode};
 use crate::mention;
-use crate::record::{REF_KEYS, Record, RecordType, TaskState, linked_record};
+use crate::record::{BINDABLE, REF_KEYS, Record, RecordType, TaskState, linked_record};
 use crate::reply::{
     Attribution, Blocker, CitedProof, Counts, Epic, GraphNode, ListedRecord, ReadyTask,
 };
@@ -26,8 +26,9 @@ pub(super) struct Admission {
     filter: Filter,
     /// The ids inside the hub's scope, when the filter names a hub.
     scope: Option<BTreeSet<String>>,
-    /// The text to find, lowered once rather than once per record.
-    needle: Option<String>,
+    /// The words of the text to find, lowered once rather than once per
+    /// record.
+    words: Option<Vec<String>>,
 }
 
 impl Admission {
@@ -35,7 +36,12 @@ impl Admission {
         Admission {
             filter: filter.clone(),
             scope,
-            needle: filter.text.as_ref().map(|text| text.trim().to_lowercase()),
+            words: filter.text.as_ref().map(|text| {
+                text.to_lowercase()
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect()
+            }),
         }
     }
 
@@ -65,9 +71,9 @@ impl Admission {
                 .as_deref()
                 .is_none_or(|to| record.addressee() == Some(to))
             && self
-                .needle
+                .words
                 .as_deref()
-                .is_none_or(|needle| holds_text(record, needle))
+                .is_none_or(|words| holds_words(record, words))
     }
 }
 
@@ -121,13 +127,15 @@ fn created(record: &Record) -> &str {
     record.file().field("created").unwrap_or_default()
 }
 
-/// The records this one names as a blocker, as its Origin or as a link
-/// target: the edges a walk follows, from the end that carries them.
+/// The records this one names as a blocker, as its Origin, as the Task it
+/// is bound to or as a link target: the edges a walk follows, from the end
+/// that carries them.
 pub(super) fn kin_of(record: &Record) -> impl Iterator<Item = &str> {
     record
         .file()
         .field_values("blocked-by")
         .chain(record.origin())
+        .chain(record.task())
         .chain(record.linked_records().map(|(_, target)| target))
 }
 
@@ -244,6 +252,7 @@ pub(super) fn graph_node(
         archived: is_archived(record.path()),
         blocked_by: file.field_values("blocked-by").map(str::to_owned).collect(),
         origin: record.origin().map(str::to_owned),
+        task: record.task().map(str::to_owned),
         links: record
             .linked_records()
             .map(|(kind, target)| (kind.to_owned(), target.to_owned()))
@@ -264,11 +273,13 @@ pub(super) fn graph_node(
     }
 }
 
-/// Whether the record holds the text: in its id, its title, its tags, its
-/// people, or its body, case folded.
-fn holds_text(record: &Record, needle: &str) -> bool {
+/// Whether every one of `words` starts a word in the record: in its id,
+/// its title, its tags, its people, or its body, case folded. A word must
+/// start where the record's word does, so `lock` finds `locking` and
+/// never the `block` inside `blocked-by`.
+fn holds_words(record: &Record, words: &[String]) -> bool {
     let file = record.file();
-    [
+    let surfaces: Vec<String> = [
         Some(path_stem(record.path())),
         file.field("title"),
         file.field("tags"),
@@ -279,7 +290,22 @@ fn holds_text(record: &Record, needle: &str) -> bool {
     ]
     .into_iter()
     .flatten()
-    .any(|surface| surface.to_lowercase().contains(needle))
+    .map(str::to_lowercase)
+    .collect();
+    words
+        .iter()
+        .all(|word| surfaces.iter().any(|surface| starts_a_word(surface, word)))
+}
+
+/// Whether `word` stands in `text` where a word begins: at the start, or
+/// after a character that is no letter or digit.
+fn starts_a_word(text: &str, word: &str) -> bool {
+    let mut previous: Option<char> = None;
+    text.char_indices().any(|(at, character)| {
+        let begins = previous.is_none_or(|previous| !previous.is_alphanumeric());
+        previous = Some(character);
+        begins && text[at..].starts_with(word)
+    })
 }
 
 /// Whether the record's file sits in `record_type`'s live directory —
@@ -484,8 +510,9 @@ pub(super) fn epic_rows(
         .collect()
 }
 
-/// The still-open, valid Questions whose Origin is this Task; an invalid
-/// one is `check`'s to name, as everywhere.
+/// The still-open, valid Questions born from this Task or bound to it: the
+/// doubts it leaves behind, and the ones that hold its archive back. An
+/// invalid one is `check`'s to name, as everywhere.
 pub(super) fn open_questions_from(
     records: &[Record],
     resolvable: &Resolver<'_>,
@@ -496,8 +523,33 @@ pub(super) fn open_questions_from(
         .filter(|record| {
             record.record_type() == Some(RecordType::Question)
                 && !is_archived(record.path())
-                && record.origin() == Some(task_id)
+                && (record.origin() == Some(task_id) || record.task() == Some(task_id))
                 && record.state() == Some("open")
+                && !debt::is_excluded(record, resolvable)
+        })
+        .map(|record| path_stem(record.path()).to_owned())
+        .collect()
+}
+
+/// The live, valid Decisions, Notes and Questions born from this Task and
+/// bound to no Task: what outlives it unless bound before it is archived.
+/// A rule is left out, since it is bound to nothing.
+pub(super) fn born_unbound(
+    records: &[Record],
+    resolvable: &Resolver<'_>,
+    task_id: &str,
+) -> Vec<String> {
+    records
+        .iter()
+        .filter(|record| {
+            record
+                .record_type()
+                .is_some_and(|record_type| BINDABLE.contains(&record_type))
+                && !is_archived(record.path())
+                && record.is_live()
+                && record.origin() == Some(task_id)
+                && record.file().field("task").is_none()
+                && record.file().field("kind") != Some("rule")
                 && !debt::is_excluded(record, resolvable)
         })
         .map(|record| path_stem(record.path()).to_owned())

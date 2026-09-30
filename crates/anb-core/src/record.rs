@@ -353,6 +353,15 @@ impl Record {
         self.file.field("from")
     }
 
+    /// The Task this record is bound to (`task`): it leaves for the archive
+    /// with that Task and returns with it. A line no binding can hold, on a
+    /// type that is never bound or naming no Task, is a finding `check`
+    /// names, never a binding.
+    #[must_use]
+    pub fn task(&self) -> Option<&str> {
+        binding(self.record_type()?, &self.file)
+    }
+
     #[must_use]
     pub fn supersedes(&self) -> Option<&str> {
         self.file.field("supersedes")
@@ -448,8 +457,15 @@ pub(crate) fn not_utf8_finding() -> Finding {
     )
 }
 
+/// The types a record bound to a Task can be: the knowledge and the doubts
+/// a piece of work produces. Work is related to work by `from` and
+/// `blocked-by` instead.
+pub(crate) const BINDABLE: &[RecordType] =
+    &[RecordType::Decision, RecordType::Note, RecordType::Question];
+
 /// Fields legal only on some types; elsewhere they are orphans.
 const TYPE_BOUND_FIELDS: &[(&str, &[RecordType])] = &[
+    ("task", BINDABLE),
     ("taken-by", &[RecordType::Task]),
     ("to", &[RecordType::Task, RecordType::Question]),
     ("priority", &[RecordType::Task]),
@@ -474,6 +490,7 @@ fn semantic_findings(file: &RecordFile) -> Vec<Finding> {
     check_hold_pairing(record_type, file, &mut findings);
     check_resolution(record_type, file, &mut findings);
     check_dependencies(record_type, file, &mut findings);
+    check_binding(record_type, file, &mut findings);
     findings
 }
 
@@ -497,6 +514,10 @@ fn residence_finding(path: &str, file: &RecordFile) -> Option<Finding> {
     let binds = record_type.live_states().contains(&state);
     let directory = record_type.directory();
     match (binds, grammar::residence(path, type_word)?) {
+        // A bound record leaves with its Task in whatever state it stands,
+        // so whether it may bind from the archive depends on where its Task
+        // is: a second record, and `check`'s to judge.
+        (true, Residence::Archive) if binding(record_type, file).is_some() => None,
         (true, Residence::Archive) => Some(Finding::located(
             line,
             FindingCode::ArchivedLiveRecord,
@@ -608,6 +629,36 @@ fn check_dependencies(record_type: RecordType, file: &RecordFile, findings: &mut
     }
 }
 
+/// The Task a file of `record_type` is bound to, when its `task` line can
+/// hold a binding at all: on a Decision that is no rule, a Note or a
+/// Question, naming a well-formed Task id.
+fn binding(record_type: RecordType, file: &RecordFile) -> Option<&str> {
+    let target = file.field("task")?;
+    let bindable = BINDABLE.contains(&record_type)
+        && !(record_type == RecordType::Decision && file.field("kind") == Some("rule"));
+    (bindable && grammar::id_error(target).is_none() && target.starts_with("task."))
+        .then_some(target)
+}
+
+/// A binding names a Task and is carried by no rule, since a rule applies
+/// whatever the work. On a type
+/// that cannot be bound the whole field is an orphan, named once there.
+fn check_binding(record_type: RecordType, file: &RecordFile, findings: &mut Vec<Finding>) {
+    let Some((target, line)) = file.field_entry("task") else {
+        return;
+    };
+    if !BINDABLE.contains(&record_type) || grammar::id_error(target).is_some() {
+        return;
+    }
+    if !target.starts_with("task.") {
+        let message = format!("task: a record is bound to a task, not `{target}`");
+        findings.push(Finding::located(line, FindingCode::BadValue, message));
+    } else if record_type == RecordType::Decision && file.field("kind") == Some("rule") {
+        let message = "task: a rule is standing knowledge and is bound to no task".to_owned();
+        findings.push(Finding::located(line, FindingCode::BadValue, message));
+    }
+}
+
 /// A closed Question names what settled it: the Decision or Task it
 /// resolved into, or the reason it closed without one. A reason on a record
 /// that is not closed contradicts its own state. Whether a named resolver
@@ -650,8 +701,9 @@ fn check_resolution(record_type: RecordType, file: &RecordFile, findings: &mut V
 }
 
 /// The envelope keys whose values point at other records.
-pub(crate) const REF_KEYS: [&str; 5] = [
+pub(crate) const REF_KEYS: [&str; 6] = [
     "from",
+    "task",
     "supersedes",
     "superseded-by",
     "resolved-by",

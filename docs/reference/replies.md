@@ -19,9 +19,9 @@ to: active
 already: false
 ```
 
-Consequences have their own fields: `unblocked`, `open-questions`, `dangling-mention` and `resolved-by`. Closing a Task keeps its outcome on the Task. Archiving moves only the named record; a linked Note has an independent lifecycle.
+Consequences have their own fields: `unblocked`, `open-questions`, `unbound`, `bound`, `collision`, `dangling-mention` and `resolved-by`. Closing a Task keeps its outcome on the Task, and its `unbound` rows each carry a `bind` command. `archive` and `restore` of a Task name the records that moved with it as `bound`. [Records and files](records.md#the-layout) explains which records those are.
 
-A start bound to `--session` also reports `session` and `joined`. Session focus is separate from the first active row in Status.
+A start also carries the Task under `record`, in the same shape `show` prints, so the agent that takes the work has its context in the same reply. A start bound to `--session` reports `session` and `joined` as well. Session focus is separate from the first active row in Status.
 
 ## Repeating a command
 
@@ -29,7 +29,7 @@ Idempotent operations report `already: true` and preserve record bytes. An immed
 
 Repeating `close` or `retire` preserves the original outcome. Use `comment` to add an explanation to a settled record.
 
-Creation is different: `add` can create another record with the same title. An explicit id already in use produces `duplicate-id`. Read that record before deciding whether another is needed.
+Creation is different: `add` can create another record with the same title. Its id then takes a suffix, and `collision` names the record holding the id the title would have had. An explicit id already in use produces `duplicate-id`. Read that record before deciding whether another is needed.
 
 ## Tables
 
@@ -48,6 +48,8 @@ An array header always counts the rows actually present. `count` is the complete
 
 `list`, `ready` and `graph` share the work filters: `--for`, `--tag`, `--match`, `--by`, `--mine`, `--team`, `--untaken` and `--to`. `list` and `graph` also accept `--type`, `--kind` and `--archive`. Filters intersect; they do not change dependency validity.
 
+`--match` and a `recall` phrase share one match. A record matches when every word of the text starts a word in its id, title, tags, people or body, ignoring case: `lock` finds `locks` and `locking` but not `blocked-by`. The match compares words, not meanings. To find a subject, search for the words the project uses for it, and try another word when the first search misses.
+
 A read narrowed to one person reports `by` and a `team` command that removes only the identity filter. A `more` command lifts the display limit while retaining the original filters. Suggested actions preserve the selected notebook, including `--personal`, `--global` or an explicit path. Recall's mixed-audience memories keep their own scoped read commands. Names, paths and search text are shell-quoted.
 
 The notebook's `scope` setting controls unqualified work reads. Explicit knowledge queries, such as `list --type note,decision` or `list --kind rule`, include team authors by default even under `scope: mine`. Explicit `--mine` or `--by` still narrows them.
@@ -56,7 +58,7 @@ The notebook's `scope` setting controls unqualified work reads. Explicit knowled
 
 Flat lists and consequence lists show at most 20 rows by default. Grouped lists use `{count, omitted, rows}`. Listings include `more` when rows were omitted; `--all` restores them. Consequences are summaries of a completed operation; use the affected record's view or the queue for subsequent reads.
 
-`show` bounds envelope rows, long field values, body text and incoming references. Its `more` command reads the complete record. A body carries `lines`, `characters`, `head`, optional `tail` and `omitted`. Here `omitted` counts characters. The default preserves up to 20 lines and 1000 characters at each end; a body of at most 41 lines and 2000 characters is kept whole.
+`show` bounds envelope rows, long field values and body text. Its relation groups are never bounded. Its `more` command reads the complete record. A body carries `lines`, `characters`, `head`, optional `tail` and `omitted`. Here `omitted` counts characters. The default preserves up to 20 lines and 1000 characters at each end; a body of at most 41 lines and 2000 characters is kept whole.
 
 Summary text is limited to 200 characters, with the omitted length marked inside the summary. Core data and stored records remain unchanged. `show --all` restores original values. Graph nodes and edges are complete in both formats; `--full` includes record content, and `--all` lifts its text bounds.
 

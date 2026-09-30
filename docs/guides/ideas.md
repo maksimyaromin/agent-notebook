@@ -53,8 +53,8 @@ The [Task guide](tasks.md#hubs-and-epics) shows the commands. These relationship
 
 ## Continue in another session
 
-Ask the agent to continue the idea or delivery by name. `anb list --match <text>` finds ids, titles, tags, people and bodies, and `--tag` narrows to one subject, so consistent subject tags make the associated work easier to find; `--archive` reaches archived records.
+Ask the agent to continue the idea or delivery by name. `anb list --match <words>` finds records in which every word starts a word of the id, title, tags, people or body, and `--tag` narrows to one subject, so consistent subject tags make the associated work easier to find; `--archive` reaches archived records.
 
 The Task log records the established result and next action. Follow that Task's context, including an idea, hub or canonical document when present. Progress stays with the work rather than being copied into status tables across several Notes.
 
-Archive finished Tasks when they no longer belong in the working set. Archiving a Task does not retire or archive its linked knowledge. Ideas and specs remain live while they are useful. A deferred idea can retain its reason and revisit condition without creating ready implementation work; retire it when it is no longer worth pursuing.
+Archive finished Tasks when they no longer belong in the working set. Archiving a Task archives the records bound to it with `--task` and does not retire or archive any other linked knowledge. Ideas and specs remain live while they are useful. A deferred idea can retain its reason and revisit condition without creating ready implementation work; retire it when it is no longer worth pursuing.

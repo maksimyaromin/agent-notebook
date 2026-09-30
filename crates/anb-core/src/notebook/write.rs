@@ -6,9 +6,9 @@ use super::error::NotebookError;
 use crate::date;
 use crate::encode;
 use crate::grammar::{self, RecordFile};
-use crate::record::{Record, RecordType};
+use crate::record::{BINDABLE, Record, RecordType};
 use crate::reply::EdgeKind;
-use crate::request::{CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, REVIEW_BY, TAKEN_BY, TO};
+use crate::request::{CLEARABLE, Draft, Edit, FROM, Link, PRIORITY, REVIEW_BY, TAKEN_BY, TASK, TO};
 use crate::resolve::{path_stem, record_path, type_of};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -31,22 +31,7 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     }
 
     if let Some(kind) = &draft.kind {
-        match draft.record_type.kinds() {
-            None => {
-                return invalid(format!(
-                    "kind: a {} carries no kind",
-                    draft.record_type.word()
-                ));
-            }
-            Some(kinds) if !kinds.contains(&kind.as_str()) => {
-                return invalid(format!(
-                    "kind: `{kind}` is not one of {} for a {}",
-                    kinds.join(", "),
-                    draft.record_type.word()
-                ));
-            }
-            Some(_) => {}
-        }
+        guard_kind(draft.record_type, kind)?;
     }
 
     if let Some(priority) = draft.priority {
@@ -62,6 +47,9 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     }
     if let Some(to) = &draft.to {
         guard_addressee(draft.record_type, to)?;
+    }
+    if draft.task.is_some() {
+        guard_bindable(draft.record_type, draft.kind.as_deref())?;
     }
     if draft.supersedes.is_some()
         && !matches!(draft.record_type, RecordType::Decision | RecordType::Note)
@@ -83,6 +71,21 @@ pub(super) fn validate_draft(draft: &Draft) -> Result<(), NotebookError> {
     Ok(())
 }
 
+/// A kind is one word of the record type's own vocabulary, and a type
+/// without one takes none.
+fn guard_kind(record_type: RecordType, kind: &str) -> Result<(), NotebookError> {
+    let invalid = |reason: String| Err(NotebookError::InvalidArgument { reason });
+    match record_type.kinds() {
+        None => invalid(format!("kind: a {} carries no kind", record_type.word())),
+        Some(kinds) if !kinds.contains(&kind) => invalid(format!(
+            "kind: `{kind}` is not one of {} for a {}",
+            kinds.join(", "),
+            record_type.word()
+        )),
+        Some(_) => Ok(()),
+    }
+}
+
 /// Who holds a Task is one non-empty line, and only a Task is held; the
 /// eraser is `--clear`, not an empty name.
 fn guard_taken_by(record_type: RecordType, taken_by: &str) -> Result<(), NotebookError> {
@@ -96,6 +99,30 @@ fn guard_taken_by(record_type: RecordType, taken_by: &str) -> Result<(), Noteboo
         return Err(NotebookError::InvalidArgument {
             reason: "taken-by: must not be empty; --clear taken-by erases it".to_owned(),
         });
+    }
+    Ok(())
+}
+
+/// Only the knowledge and doubts a piece of work produces are bound to it,
+/// and never a rule, which applies whatever the work.
+pub(super) fn guard_bindable(
+    record_type: RecordType,
+    kind: Option<&str>,
+) -> Result<(), NotebookError> {
+    let refused = |reason: &str| {
+        Err(NotebookError::InvalidArgument {
+            reason: reason.to_owned(),
+        })
+    };
+    if !BINDABLE.contains(&record_type) {
+        return refused(
+            "task: binds a decision, note or question to a task; relate tasks with --from or block",
+        );
+    }
+    if record_type == RecordType::Decision && kind == Some("rule") {
+        return refused(
+            "task: a rule applies to any work and is bound to no task; drop --task or pass --clear task",
+        );
     }
     Ok(())
 }
@@ -159,7 +186,7 @@ pub(super) fn validate_edit(
 
     if edit.changes_nothing() {
         return invalid(
-            "edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, --taken-by, --to, or --clear"
+            "edit: nothing to change; pass --title, --kind, --body, --tag, --untag, --link, --unlink, --from, --task, --priority, --review-by, --taken-by, --to, or --clear"
                 .to_owned(),
         );
     }
@@ -169,6 +196,9 @@ pub(super) fn validate_edit(
         if title.is_empty() {
             return invalid("title: must not be empty".to_owned());
         }
+    }
+    if let Some(kind) = &edit.kind {
+        guard_kind(record_type, kind)?;
     }
     for tag in edit.add_tags.iter().chain(&edit.remove_tags) {
         if !grammar::is_token(tag) {
@@ -199,6 +229,9 @@ pub(super) fn validate_edit(
     }
     if let Some(to) = &edit.to {
         guard_addressee(record_type, to)?;
+    }
+    if edit.task.is_some() {
+        guard_bindable(record_type, None)?;
     }
     let mut cleared = Vec::new();
     for field in &edit.clear {
@@ -292,16 +325,20 @@ pub(super) fn parsed_type(id: &str) -> Result<RecordType, NotebookError> {
     }
 }
 
-/// The draft's id: the caller's, validated and free, or one minted on the
-/// base `minted` names, retried with a two-character suffix on collision,
-/// since ids are never reused.
+/// The draft's id: the caller's, validated and free, or one minted from
+/// the title, retried with a two-character suffix on collision, since ids
+/// are never reused. A suffixed id comes back with the id its title named
+/// first: another record already holds that one, and it may be the same
+/// work written twice.
 pub(super) fn resolve_draft_id(
     draft: &Draft,
     claims: &BTreeMap<String, String>,
-    minted: impl FnOnce() -> Result<String, NotebookError>,
-) -> Result<String, NotebookError> {
+) -> Result<(String, Option<String>), NotebookError> {
     let Some(id) = &draft.id else {
-        return free_id(&minted()?, claims);
+        let base = title_id(draft)?;
+        let id = free_id(&base, claims)?;
+        let collision = (id != base).then_some(base);
+        return Ok((id, collision));
     };
     if let Some(why) = grammar::id_error(id) {
         return Err(NotebookError::InvalidArgument {
@@ -324,7 +361,7 @@ pub(super) fn resolve_draft_id(
             holder: holder.clone(),
         });
     }
-    Ok(id.clone())
+    Ok((id.clone(), None))
 }
 
 /// The id a draft mints from its title: the type word and the title's
@@ -332,11 +369,11 @@ pub(super) fn resolve_draft_id(
 ///
 /// # Errors
 /// [`NotebookError::InvalidArgument`] when the title has no slug in it.
-pub(super) fn title_id(draft: &Draft) -> Result<String, NotebookError> {
+fn title_id(draft: &Draft) -> Result<String, NotebookError> {
     let slug = slugify(&draft.title);
     if slug.is_empty() {
         return Err(NotebookError::InvalidArgument {
-            reason: "title: yields an empty id; pass an explicit id".to_owned(),
+            reason: "title: has no ASCII letter or digit to make an id from; pass --id".to_owned(),
         });
     }
     Ok(format!("{}.{slug}", draft.record_type.word()))
@@ -436,7 +473,9 @@ fn edited_fields(edit: &Edit, cleared: &[&'static str]) -> Vec<(&'static str, Op
             "title",
             edit.title.as_deref().map(str::trim).map(str::to_owned),
         ),
+        ("kind", edit.kind.clone()),
         (FROM, edit.from.clone()),
+        (TASK, edit.task.clone()),
         (PRIORITY, edit.priority.map(|priority| priority.to_string())),
         (REVIEW_BY, edit.review_by.clone()),
         (
@@ -540,6 +579,7 @@ pub(super) fn render_draft(draft: &Draft, id: &str, by: Option<&str>, today: &st
         (TAKEN_BY, &draft.taken_by),
         (TO, &draft.to),
         ("from", &draft.from),
+        (TASK, &draft.task),
         ("supersedes", &draft.supersedes),
     ] {
         if let Some(value) = value {
@@ -561,20 +601,27 @@ pub(super) fn render_draft(draft: &Draft, id: &str, by: Option<&str>, today: &st
     file.render()
 }
 
-/// How much of a title an id carries. An id must stay recognisable at a
-/// glance and must fit the id grammar's own length limit with room for a
-/// collision suffix; the rest of the title is a `show` away.
-const SLUG_CAP: usize = 40;
+/// How much of a title an id carries: enough for a title of a dozen words
+/// to survive whole, while the longest type word, the slug and a collision
+/// suffix still fit the id grammar's own limit.
+const SLUG_CAP: usize = 64;
+
+const _: () = assert!("question.".len() + SLUG_CAP + "-00".len() <= grammar::ID_CAP);
 
 /// The slug an id takes from a title: ASCII alphanumerics lowercased, every
-/// other run a single hyphen, cut to [`SLUG_CAP`] at a word boundary.
+/// other run a single hyphen, cut to [`SLUG_CAP`] at a word boundary. An
+/// apostrophe belongs to its word, so `Decision's` reads `decisions`, not
+/// `decision-s`.
 ///
 /// An id is read far more often than it is minted, and a mid-word cut costs
 /// its reader more than the characters it saves. A first word longer than
 /// the cap offers no boundary to cut at, so it is cut short.
 fn slugify(title: &str) -> String {
     let mut slug = String::new();
-    for character in title.chars() {
+    for character in title
+        .chars()
+        .filter(|character| !matches!(character, '\'' | '’'))
+    {
         if character.is_ascii_alphanumeric() {
             slug.push(character.to_ascii_lowercase());
         } else if !slug.is_empty() && !slug.ends_with('-') {

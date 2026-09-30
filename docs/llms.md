@@ -17,7 +17,7 @@ Use the index to choose a page, or the full export when the task needs the whole
 
 ## Use a notebook in a project
 
-`anb setup --agent <host>` installs the workflow skill and references alongside the agent instructions. Choose `claude-code`, `codex` or `agents-md`. Start with `anb recall` for current work, the conversation's remembered Task and relevant knowledge. Read the selected Task before continuing; several active Tasks do not imply that the first one is yours.
+`anb setup --agent <host>` installs the workflow skill and references alongside the agent instructions. Choose `claude-code`, `codex` or `agents-md`. Start with `anb recall` for current work, the conversation's remembered Task and the standing rules. Read the selected Task before continuing; several active Tasks do not imply that the first one is yours.
 
 Use `anb --help` or `anb <verb> --help` to look up commands. Default replies use standard TOON, and `--json` provides the same structured result. The installed skill includes the working method, examples and recovery guidance without requiring this site. Team workflow extensions belong in `.agents/anb.md`; personal practices can stay in a personal notebook.
 

@@ -90,6 +90,12 @@ pub enum NotebookError {
     WouldCycle {
         chain: Vec<String>,
     },
+    /// The Task cannot leave for the archive while Questions bound to it
+    /// are open: each is closed or unbound first.
+    OpenQuestions {
+        id: String,
+        questions: Vec<String>,
+    },
     Storage(StorageError),
 }
 
@@ -113,6 +119,7 @@ impl NotebookError {
             NotebookError::DanglingRef { .. } => "dangling-ref",
             NotebookError::CannotSupersede { .. } => "cannot-supersede",
             NotebookError::WouldCycle { .. } => "would-cycle",
+            NotebookError::OpenQuestions { .. } => "open-questions",
             // The command-level code and the Check finding share one
             // vocabulary.
             NotebookError::Storage(StorageError::NotUtf8 { .. }) => "not-utf8",
@@ -194,6 +201,13 @@ impl std::fmt::Display for NotebookError {
                     f,
                     "the edge would close a dependency cycle: {}",
                     encode::id_chain(chain)
+                )
+            }
+            NotebookError::OpenQuestions { id, questions } => {
+                write!(
+                    f,
+                    "`{id}` has {} bound to it; close each or clear its task first",
+                    counted(questions.len(), "open question")
                 )
             }
             NotebookError::Storage(error) => error.fmt(f),

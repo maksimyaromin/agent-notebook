@@ -170,6 +170,9 @@ impl Recovery {
                     .map(|edge| format!("anb unblock {} {}", edge[0], edge[1]))
                     .collect();
             }
+            NotebookError::OpenQuestions { questions, .. } => {
+                recovery.open_questions(questions);
+            }
             NotebookError::Storage(StorageError::NotUtf8 { .. }) => {
                 recovery.tries.push("anb check".to_owned());
             }
@@ -203,6 +206,17 @@ impl Recovery {
                 .take(ROW_BOUND)
                 .map(|blocker| format!("anb show {blocker}")),
         );
+    }
+
+    /// Each open Question holding a Task's archive back, with the two moves
+    /// that release it: settle it, or let it outlive the Task.
+    fn open_questions(&mut self, questions: &[String]) {
+        self.details = questions.to_vec();
+        for question in questions.iter().take(ROW_BOUND / 2) {
+            self.tries
+                .push(format!("anb close {question} --resolved-by <id>"));
+            self.tries.push(format!("anb edit {question} --clear task"));
+        }
     }
 
     fn duplicate_id(&mut self, id: &str, holder: &str, verb: &str) {
@@ -347,6 +361,14 @@ fn unknown_argument_retries(error: &clap::Error) -> Vec<String> {
     match verb {
         "comment" => tries.push("anb comment <id> -- \"<text>\"".to_owned()),
         "edit" => tries.push("anb edit <id> --body=\"<text>\"".to_owned()),
+        // `show` reads a record's context; recall takes no record.
+        "recall"
+            if context_strings(error, ContextKind::InvalidArg)
+                .iter()
+                .any(|argument| argument.starts_with("--for")) =>
+        {
+            tries.insert(0, "anb show <id>".to_owned());
+        }
         _ => {}
     }
     tries

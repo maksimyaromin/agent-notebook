@@ -2,12 +2,13 @@
 id: decision.concurrent-access-serializes-on-a
 type: decision
 state: active
+kind: rule
 title: Concurrent access serializes on a notebook lock, readers included
 by: Maksim Yaromin
 tags: storage, concurrency
 supersedes: decision.concurrent-mutations-serialize-on-a
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-09-30
 ---
 
 Two agents on one notebook are serialized by the host, not by the Core. A mutating command takes an exclusive advisory lock on a single lock file in the notebook root for its whole read-modify-write window; a read-only command takes a shared one on the same file, and readers never block each other.

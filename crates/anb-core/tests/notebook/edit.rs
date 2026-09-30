@@ -874,3 +874,102 @@ mod edit_verb {
         assert_eq!(edited.dangling_mentions, vec!["task.ghost"]);
     }
 }
+
+mod correcting_the_kind {
+    use crate::*;
+
+    fn kind_edit(kind: &str) -> Edit {
+        Edit {
+            kind: Some(kind.to_owned()),
+            ..Edit::default()
+        }
+    }
+
+    #[test]
+    fn a_kindless_decision_becomes_a_rule() {
+        let mut storage = storage_with(&[(
+            "decisions/decision.lock.md",
+            &record_file("decision.lock", "decision", "active", &[], ""),
+        )]);
+        let edited = Notebook::new(&mut storage)
+            .edit("decision.lock", &kind_edit("rule"), TODAY)
+            .unwrap();
+        assert_eq!(edited.changed, ["kind"]);
+        let replayed = Notebook::new(&mut storage)
+            .edit("decision.lock", &kind_edit("rule"), TODAY)
+            .unwrap();
+        assert!(
+            replayed.changed.is_empty(),
+            "the same kind again moves nothing"
+        );
+        assert_eq!(
+            Notebook::new(&mut storage)
+                .record("decision.lock")
+                .unwrap()
+                .file()
+                .field("kind"),
+            Some("rule")
+        );
+    }
+
+    #[test]
+    fn a_kind_outside_the_types_vocabulary_or_on_a_task_is_refused() {
+        let mut storage = storage_with(&[
+            (
+                "notes/note.fact.md",
+                &record_file("note.fact", "note", "active", &["kind: fact"], ""),
+            ),
+            ("tasks/task.demo.md", &task_file("open", &[])),
+            (
+                "decisions/decision.shape.md",
+                &record_file("decision.shape", "decision", "active", &["kind: shape"], ""),
+            ),
+        ]);
+        let mut notebook = Notebook::new(&mut storage);
+        for (id, kind) in [
+            ("note.fact", "rule"),
+            ("decision.shape", "fact"),
+            ("task.demo", "shape"),
+        ] {
+            assert!(
+                matches!(
+                    notebook.edit(id, &kind_edit(kind), TODAY).unwrap_err(),
+                    NotebookError::InvalidArgument { .. }
+                ),
+                "{id} as {kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bound_decision_becomes_a_rule_only_by_leaving_its_task() {
+        let mut storage = storage_with(&[
+            ("tasks/task.demo.md", &task_file("open", &[])),
+            (
+                "decisions/decision.shape.md",
+                &record_file(
+                    "decision.shape",
+                    "decision",
+                    "active",
+                    &["kind: shape", "task: task.demo"],
+                    "",
+                ),
+            ),
+        ]);
+        let mut notebook = Notebook::new(&mut storage);
+        assert!(matches!(
+            notebook
+                .edit("decision.shape", &kind_edit("rule"), TODAY)
+                .unwrap_err(),
+            NotebookError::InvalidArgument { .. }
+        ));
+        let leaving = Edit {
+            clear: vec!["task".to_owned()],
+            ..kind_edit("rule")
+        };
+        notebook.edit("decision.shape", &leaving, TODAY).unwrap();
+        let record = notebook.record("decision.shape").unwrap();
+        assert_eq!(record.file().field("kind"), Some("rule"));
+        assert_eq!(record.task(), None);
+    }
+}

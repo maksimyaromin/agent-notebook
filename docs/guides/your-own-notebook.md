@@ -24,7 +24,7 @@ The agent can make these choices from ordinary requests. “For me here” means
 
 ## Recall without locating the file
 
-`anb recall` combines shared project knowledge, your project-specific practices and your cross-project practices. Each memory includes its audience and a read command that selects the right notebook. Different notebooks may contain the same id without becoming the same record.
+`anb recall` combines the project's standing rules with your project-specific and cross-project practices; `anb recall "<words>"` searches all three. Each memory includes its audience and a read command that selects the right notebook. Record a practice that every session should see as a `rule` Decision. Recall counts your other Decisions and Notes and gives the `list` command that shows them. Different notebooks may contain the same id without becoming the same record.
 
 ```sh
 anb recall "review"

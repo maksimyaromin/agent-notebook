@@ -727,7 +727,7 @@ mod record_view {
     }
 
     #[test]
-    fn mentioned_by_reads_only_live_records() {
+    fn mentioned_by_reaches_the_records_filed_in_the_archive() {
         let mut storage = storage_with(&[
             ("tasks/task.demo.md", &task_file("active", &[])),
             (
@@ -742,16 +742,16 @@ mod record_view {
             ),
         ]);
         let view = Notebook::new(&mut storage).view("task.demo").unwrap();
-        assert_eq!(view.mentioned_by, Vec::<String>::new());
+        assert_eq!(view.mentioned_by, vec!["note.gone"]);
     }
 
     /// A link whose target is a record id relates the two records, and
     /// the target can read the relation back: each carrier under the kind
     /// its line gives, kind by kind so one relation's members stand
     /// together. A mention in prose stays a mention, a link to a path
-    /// relates no record, and a carrier filed away is history.
+    /// relates no record, and a carrier filed away still relates.
     #[test]
-    fn linked_by_lists_the_live_records_whose_link_lines_name_it_by_kind() {
+    fn linked_by_lists_the_records_whose_link_lines_name_it_by_kind() {
         let mut storage = a_schema_and_its_documents();
         let view = Notebook::new(&mut storage).view("note.schema").unwrap();
         assert_eq!(
@@ -759,6 +759,7 @@ mod record_view {
             vec![
                 ("example".to_owned(), "note.sample".to_owned()),
                 ("schema".to_owned(), "note.credits".to_owned()),
+                ("schema".to_owned(), "note.old".to_owned()),
                 ("schema".to_owned(), "note.tenancy".to_owned()),
             ]
         );
@@ -897,6 +898,73 @@ mod narrowed_by_text {
             .map(|row| row.id)
             .collect();
         assert_eq!(ids, ["task.parser", "task.spike"]);
+    }
+
+    fn locking_notebook() -> MemoryStorage {
+        storage_with(&[
+            (
+                "decisions/decision.writers-lock.md",
+                &record_file(
+                    "decision.writers-lock",
+                    "decision",
+                    "active",
+                    &[],
+                    "Concurrent writers take the notebook lock.\n",
+                ),
+            ),
+            (
+                "tasks/task.waiting.md",
+                &record_file(
+                    "task.waiting",
+                    "task",
+                    "open",
+                    &["blocked-by: task.parser"],
+                    "Blocked until the parser lands.\n",
+                ),
+            ),
+            (
+                "tasks/task.parser.md",
+                &record_file("task.parser", "task", "open", &[], "The grammar work.\n"),
+            ),
+        ])
+    }
+
+    fn matching(storage: &mut MemoryStorage, text: &str) -> Vec<String> {
+        Notebook::new(storage)
+            .list(&holding(text))
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect()
+    }
+
+    #[test]
+    fn a_word_matches_only_where_a_word_of_the_record_begins() {
+        let mut storage = locking_notebook();
+        assert_eq!(
+            matching(&mut storage, "lock"),
+            ["decision.writers-lock"],
+            "`blocked-by` and `Blocked` hold `lock` inside a word"
+        );
+        assert_eq!(
+            matching(&mut storage, "concurren"),
+            ["decision.writers-lock"],
+            "a word's beginning finds its longer forms"
+        );
+    }
+
+    #[test]
+    fn every_word_of_the_text_must_match() {
+        let mut storage = locking_notebook();
+        assert_eq!(
+            matching(&mut storage, "writers lock"),
+            ["decision.writers-lock"]
+        );
+        assert_eq!(
+            matching(&mut storage, "lock parser"),
+            Vec::<String>::new(),
+            "no record holds both words"
+        );
     }
 
     #[test]

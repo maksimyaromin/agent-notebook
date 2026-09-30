@@ -2,7 +2,6 @@
 //! and print one reply.
 
 mod actions;
-mod ids;
 mod locations;
 
 use anb::cli::{Cli, Command};
@@ -96,7 +95,7 @@ fn run(cli: Cli) -> Result<(String, ExitCode), String> {
     }
 }
 
-fn invoked(mut cli: Cli, actions: &actions::Actions) -> Result<(String, ExitCode), NotebookError> {
+fn invoked(cli: Cli, actions: &actions::Actions) -> Result<(String, ExitCode), NotebookError> {
     let native = matches!(cli.command, Command::Hook);
     let session = if native {
         anb::hook::session(cli.session.clone())?
@@ -136,7 +135,6 @@ fn invoked(mut cli: Cli, actions: &actions::Actions) -> Result<(String, ExitCode
         project_dir: &locations.cwd,
         today: &today,
     };
-    ids::assign(&mut cli.command)?;
     let reply = execute(cli.command, &mut storage, host)?;
     let exit = if reply.failed() {
         ExitCode::FAILURE

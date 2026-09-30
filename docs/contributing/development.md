@@ -27,7 +27,7 @@ Record validity belongs in the Core; working conventions belong in skills. For e
 
 `crates/anb-core` implements the grammar, record model, operations, queries and validation. Its `Storage` trait exchanges strings and relative paths. The in-memory adapter lets tests exercise the same notebook operations as a filesystem host, without a temporary repository or a shell. The Core receives dates and identity from its caller.
 
-`crates/anb` supplies filesystem storage, random creation ids, command parsing, audience composition, session coordination, rendering, locks, Git queries and agent setup. Concurrency belongs here: the host protects a whole operation, including changes to several files. Per-file atomic writes alone would let a concurrent reader mistake an unfinished archive move for a duplicate record. Private session state is not committed and is not a distributed lock.
+`crates/anb` supplies filesystem storage, command parsing, audience composition, session coordination, rendering, locks, Git queries and agent setup. Concurrency belongs here: the host protects a whole operation, including changes to several files. Per-file atomic writes alone would let a concurrent reader mistake an unfinished archive move for a duplicate record. Private session state is not committed and is not a distributed lock.
 
 This separation leaves room for other hosts to reuse the Core. A proposed host still has to define its storage and concurrency behavior; the trait does not provide transactions or synchronization.
 

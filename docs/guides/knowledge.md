@@ -54,6 +54,8 @@ Correct a Note with `anb edit <id> --body "<text>"` as understanding changes, or
 
 A finding from completed work becomes a Note when it needs independent maintenance. Create it with `anb add note --from <task>` and link its sources. The Task's outcome stays on the Task; archiving the Task does not retire its knowledge.
 
+Knowledge that only serves one piece of work is bound to it instead, with `--task <task>` on `add` or `edit`. It then leaves for the archive with that Task, so the design choices of an epic stop crowding the working set once the epic is done, and the Tasks that cite them by id still reach them through `show`. A `rule` cannot be bound, because it applies to any work. [Records and files](../reference/records.md#the-layout) describes the archive and restore rules.
+
 ## Questions
 
 Record a Question when work exposes an uncertainty that deserves its own resolution:
@@ -90,7 +92,7 @@ This allows a forward reference. If it was a typo, correct it; if it was an exam
 
 ## Archive settled knowledge
 
-Archive a superseded or retired Decision, a retired Note, or a closed Question with `anb archive <id>`. `show` still reads an archived record, and `list --archive` still lists it. `anb restore <id>` returns one to the working set without changing its state or contents.
+Archive a superseded or retired Decision, a retired Note, or a closed Question with `anb archive <id>`. `show` still reads an archived record, and `list --archive` still lists it. `anb restore <id>` returns one to the working set without changing its state.
 
 When an idea ends or a ruling stops applying, record why before archiving it. `retire --body` appends the outcome and retires the Note or Decision in one write; `--body-file` reads a longer outcome. No separate report is required:
 
