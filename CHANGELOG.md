@@ -1,5 +1,35 @@
 # Changelog
 
+## agent-notebook v2026.09.30.0.10.0
+
+Knowledge that serves one piece of work can now leave with it. Bind a design's Decisions, specs and Questions to its Task, and they move to the archive when the Task does, while the Tasks that cite them still reach them. A session opens on its work and the rules that bind it, and one command reads everything a record connects to.
+
+This is a pre-stable minor release, package version 0.10.0, with interface changes. Read the upgrade notes before updating scripts that parse replies or call `recall --for`.
+
+### New
+
+- **Records bound to a Task.** `add --task` and `edit --task` bind a Decision, Note or Question to the Task it serves, and `edit --clear task` removes the binding. Archiving the Task takes its bound records along in their current state and lists them as `bound`. An open bound Question refuses the archive. Restoring the Task brings back the records that still bind, and a record restored on its own returns unbound. A `rule` is never bound. (#96)
+- **The close reply names what would outlive the work.** Closing a Task lists, as `unbound`, the Decisions, Notes and Questions born from it that no binding covers, each with the command that binds it. (#96)
+- **`show` reads every relation.** It lists every record the named one relates to directly, as ids grouped by relation in both directions, archived records included and never cut. `start` replies with the same read under `record`. (#96)
+- **`edit --kind`.** A Decision's or Note's kind can be corrected in place. A bound record becomes a rule only when the same edit clears its task. (#96)
+- **`check` finds references the tool cannot read.** A `[[slug]]` in a body whose slug names a record is reported as `unreadable-reference`, with the full id to write. A record left in the working set by its archived Task is reported as `broken-binding`. (#96)
+
+### Improved
+
+- **A session opens with work and rules.** A bare `recall` and the session hook carry the work, the session's focus as its id and title, and every live `rule` and `drift` Decision from the project, personal and global notebooks. Each source counts the Decisions and Notes it left out and gives the command that lists them. Under the budget, rule bodies are shortened and then dropped before any work or rule row. (#91, #96)
+- **Search matches words from their start.** `list --match` and `recall "<phrase>"` share one match: every word of the phrase must start a word in the record, so `lock` finds `locking` but not `blocked-by`. A recall phrase is a search that lists every match. (#96)
+- **Readable ids.** `add` derives the id from the title, cut at a word boundary within 64 characters, and names the record that already held a taken id as `collision`. Ids may take 96 bytes. A title with no ASCII letter or digit is refused until an id is chosen with `--id`. (#92, #96)
+- **The skill teaches when to bind and how to cite.** It adds a table of the reads that answer a question, the rule to cite a governing Decision by its full id, and when a record should leave with its Task. The worked session runs a design Task end to end. (#96)
+
+### Upgrade notes
+
+- `recall --for <id>` is removed. Use `anb show <id>` to read a record with everything it relates to; `start` already replies with that read.
+- A bare `recall` and the hook no longer carry `shape` Decisions or Notes. Record a practice every session should see as a `rule` Decision, correcting an existing one with `edit --kind rule`. The reply's `focus` is now `{id, title, read}`, memories no longer carry `related`, and each source may carry `other` and `more`. A recall phrase returns no `work` or `focus`.
+- `show` and the `record` block of `start` print relations as plain id arrays named `from`, `born`, `task`, `bound`, `blocked-by`, `blocks`, `links`, `linked-by`, `mentions` and `mentioned-by`. The previous `{count, omitted, rows}` sections for mentions and incoming links are gone.
+- `add` without `--id` no longer creates a random id. Scripts that create a record and name it in a later command should pass `--id`. Existing ids remain valid.
+- The graph document is contract version 5 and draws a `bound` edge. `bound` joins `waits`, `born` and `mentions` as a word a link kind cannot use.
+- Older binaries report an id longer than 64 bytes as `bad-id` and treat a `task` field as unknown. Update every agent that writes to a notebook before using longer ids or bindings in it.
+
 ## agent-notebook v2026.09.12.0.9.0
 
 Project knowledge, personal practices and unfinished work now meet in one working-memory workflow. A conversation can resume its own Task while other conversations and colleagues work independently. Records remain plain Markdown, and a small piece of work needs only a clear outcome, not a separate report or a prescribed planning ceremony.
