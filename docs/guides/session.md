@@ -3,16 +3,16 @@ title: Sessions and collaboration
 description: 'Continue the intended work, keep parallel sessions separate and inspect a colleague’s context without claiming it.'
 ---
 
-Start with `anb recall`. It combines work with shared project knowledge and private practices. Follow the user's subject, open the relevant record and read source material when the current decision depends on it. `status` is the work-only dashboard; `recall` adds the knowledge needed to interpret it.
+Start with `anb recall`. It shows the work, this session's focus, and the standing rules from the project and from your private notebooks. Follow the user's subject: `show <id>` reads a record with every record it connects to, and `recall "<words>"` searches knowledge. Read source material when the current decision depends on it. `status` is the work-only dashboard.
 
 ## Resume the intended Task
 
 ```sh
 anb start
-anb recall --for task.customer-exports
+anb show task.customer-exports
 ```
 
-`start` without an id resumes a remembered session focus. The host supplies that session through `--session`, `ANB_SESSION` or `CODEX_THREAD_ID`, in that order. A session id identifies an agent conversation, not a person.
+`start` without an id resumes a remembered session focus and replies with the Task as `show` prints it. The host supplies that session through `--session`, `ANB_SESSION` or `CODEX_THREAD_ID`, in that order. A session id identifies an agent conversation, not a person.
 
 `start <id>` names the Task explicitly. If no unambiguous focus exists, the command reports the choice the agent needs to make. The latest update is not evidence that a Task belongs to this conversation.
 
@@ -76,10 +76,10 @@ Use a Question when an uncertainty must survive independently, a Decision for an
 
 ## Finish, wait or read further
 
-Close verified work with an outcome on the Task. Archive that record when it no longer belongs in the working set; related knowledge stays live until it is explicitly retired or superseded.
+Close verified work with an outcome on the Task. Archive that record when it no longer belongs in the working set; the records bound to it leave with it, and other related knowledge stays live until it is explicitly retired or superseded.
 
 Hold work only when something prevents progress, with a reason naming that condition. Changing attention is not a hold. `unhold` makes it eligible again when the condition is resolved.
 
-Truncated replies name the omitted content and an expansion command. `recall --all` expands the complete memory read; `status --budget 0` removes dashboard budget cuts. `debt` lists matters needing attention, not instructions to discard old records. See [the reply contract](../reference/replies.md) for exact bounds.
+Truncated replies name the omitted content and an expansion command. `recall --all` lifts the opening's row and body bounds; `status --budget 0` removes dashboard budget cuts. `debt` lists matters needing attention, not instructions to discard old records. See [the reply contract](../reference/replies.md) for exact bounds.
 
 After notebook changes, run `anb check`. Commit shared memory with the related work only when the user has authorized commits.

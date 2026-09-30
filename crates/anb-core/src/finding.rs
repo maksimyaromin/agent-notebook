@@ -48,6 +48,8 @@ pub enum FindingCode {
     OriginCycle,
     DuplicateId,
     BrokenSupersession,
+    BrokenBinding,
+    UnreadableReference,
     NotUtf8,
     Crlf,
     Bom,
@@ -58,7 +60,7 @@ impl FindingCode {
     /// Every code, in the order the grammar and the record model raise
     /// them, for a surface that lists the vocabulary rather than one file's
     /// findings.
-    pub const ALL: [FindingCode; 23] = [
+    pub const ALL: [FindingCode; 25] = [
         FindingCode::NoEnvelope,
         FindingCode::UnclosedEnvelope,
         FindingCode::BadEnvelopeLine,
@@ -78,6 +80,8 @@ impl FindingCode {
         FindingCode::OriginCycle,
         FindingCode::DuplicateId,
         FindingCode::BrokenSupersession,
+        FindingCode::BrokenBinding,
+        FindingCode::UnreadableReference,
         FindingCode::NotUtf8,
         FindingCode::Crlf,
         FindingCode::Bom,
@@ -109,10 +113,12 @@ impl FindingCode {
             | FindingCode::OriginCycle
             | FindingCode::DuplicateId
             | FindingCode::BrokenSupersession
+            | FindingCode::BrokenBinding
             | FindingCode::NotUtf8 => Severity::Error,
             FindingCode::UnknownField
             | FindingCode::UnarchivedSettledRecord
             | FindingCode::OrphanField
+            | FindingCode::UnreadableReference
             | FindingCode::Crlf
             | FindingCode::Bom
             | FindingCode::NoFinalNewline => Severity::Warning,
@@ -141,6 +147,8 @@ impl FindingCode {
             FindingCode::OriginCycle => "origin-cycle",
             FindingCode::DuplicateId => "duplicate-id",
             FindingCode::BrokenSupersession => "broken-supersession",
+            FindingCode::BrokenBinding => "broken-binding",
+            FindingCode::UnreadableReference => "unreadable-reference",
             FindingCode::NotUtf8 => "not-utf8",
             FindingCode::Crlf => "crlf",
             FindingCode::Bom => "bom",
@@ -225,6 +233,8 @@ mod tests {
                 | FindingCode::OriginCycle
                 | FindingCode::DuplicateId
                 | FindingCode::BrokenSupersession
+                | FindingCode::BrokenBinding
+                | FindingCode::UnreadableReference
                 | FindingCode::NotUtf8
                 | FindingCode::Crlf
                 | FindingCode::Bom

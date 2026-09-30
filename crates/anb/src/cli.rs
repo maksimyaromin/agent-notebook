@@ -41,15 +41,13 @@ pub enum Command {
     /// Native `SessionStart` adapter installed by setup.
     #[command(hide = true)]
     Hook,
-    /// Recall your work, shared knowledge and personal practices. Search by
-    /// a phrase, or name a record with --for to prioritize its context.
+    /// Open a session with your work and the standing rules of every
+    /// audience, or search Notes and Decisions by a phrase.
     Recall {
-        /// Match this phrase in record titles, tags, authors or bodies.
+        /// Find Notes and Decisions in which every word of this phrase starts
+        /// a word of the id, title, tags, people or body.
         text: Option<String>,
-        /// Prioritize knowledge related to this project record.
-        #[arg(long = "for", value_name = "ID")]
-        focus: Option<String>,
-        /// Include every matching record and its full body.
+        /// Every row and full bodies, without the token budget.
         #[arg(long)]
         all: bool,
         #[command(flatten)]
@@ -58,7 +56,8 @@ pub enum Command {
     /// Create a record: `add task|decision|note|question "<title>"`. The
     /// notebook appears on first write.
     Add(AddArgs),
-    /// Start or resume a Task. Records your assignment and refuses work held by someone else.
+    /// Start or resume a Task. Records your assignment, refuses work held by someone else,
+    /// and replies with the Task as `show` reads it.
     Start {
         /// The Task to start; omitted, resume the current session's focus.
         id: Option<String>,
@@ -158,10 +157,10 @@ pub enum Command {
         #[command(flatten)]
         extent: Extent,
     },
-    /// Read one record and its incoming and outgoing relationships.
+    /// Read one record and the ids of every record it relates to, in both directions.
     Show {
         id: String,
-        /// Include complete fields, body and relationships without display limits.
+        /// Include complete fields and body without display limits.
         #[arg(long)]
         all: bool,
     },
@@ -200,9 +199,10 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Move a settled record into the archive; history moves with it.
+    /// Move a settled record into the archive; a Task takes the records bound to it along.
     Archive { id: String },
-    /// Move an archived record back into the working set: same filename, same bytes.
+    /// Move an archived record back into the working set under the same filename.
+    /// A Task brings back the live records bound to it; a record restored alone comes back unbound.
     Restore { id: String },
     /// Delete a record born by mistake; refuses while anything cites it.
     Delete { id: String },
@@ -243,12 +243,18 @@ pub struct AddArgs {
     pub record_type: RecordType,
     #[arg(allow_hyphen_values = true)]
     pub title: String,
-    /// Choose a stable id. By default the CLI allocates a random 128-bit id.
+    /// Choose the id, `<type>.<slug>` in at most 96 bytes. Omitted, the title's words
+    /// become it, cut at a word boundary within 64 characters and suffixed when taken:
+    /// pass --id when a later command in the same script names the record.
     #[arg(long)]
     pub id: Option<String>,
     /// Origin: the record this record was born from.
     #[arg(long)]
     pub from: Option<String>,
+    /// Bind a Decision, Note or Question to the Task it serves; it leaves
+    /// for the archive with that Task.
+    #[arg(long, value_name = "ID")]
+    pub task: Option<String>,
     /// A tag; repeatable.
     #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
@@ -295,6 +301,9 @@ pub struct EditArgs {
     /// The whole title, replaced.
     #[arg(long, allow_hyphen_values = true)]
     pub title: Option<String>,
+    /// A decision's rule, shape, or drift; a note's fact, term, guide, idea, model, or spec.
+    #[arg(long)]
+    pub kind: Option<String>,
     /// The whole body, replaced; empty clears it.
     #[arg(long, allow_hyphen_values = true)]
     pub body: Option<String>,
@@ -317,6 +326,10 @@ pub struct EditArgs {
     /// Origin: the record this record was born from.
     #[arg(long)]
     pub from: Option<String>,
+    /// Bind a Decision, Note or Question to the Task it serves; it leaves
+    /// for the archive with that Task.
+    #[arg(long, value_name = "ID")]
+    pub task: Option<String>,
     /// 0 to 4, 0 the most urgent.
     #[arg(long)]
     pub priority: Option<u32>,
@@ -329,8 +342,8 @@ pub struct EditArgs {
     /// Whom the task or question waits on.
     #[arg(long, value_name = "NAME")]
     pub to: Option<String>,
-    /// The optional field to erase: `from`, `priority`, `review-by`,
-    /// `taken-by`, or `to`; repeatable.
+    /// The optional field to erase: `from`, `task`, `priority`,
+    /// `review-by`, `taken-by`, or `to`; repeatable.
     #[arg(long = "clear", value_name = "FIELD")]
     pub clear: Vec<String>,
 }
@@ -416,7 +429,8 @@ pub struct Narrowing {
     /// Only records carrying this tag; repeated, carrying every one.
     #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
-    /// Match text in record ids, titles, tags, people or bodies, ignoring case.
+    /// Only records in which every word of this text starts a word of the
+    /// id, title, tags, people or body, ignoring case.
     #[arg(long = "match", value_name = "TEXT")]
     pub text: Option<String>,
 }

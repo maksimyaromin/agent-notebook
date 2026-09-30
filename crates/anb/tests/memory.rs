@@ -46,11 +46,12 @@ fn every_work_read_uses_the_same_configured_audience() {
                     Reply::Recalled(recalled) => {
                         assert_eq!(
                             recalled.memories.len(),
-                            2,
-                            "shared knowledge is independent of work audience"
+                            1,
+                            "a standing rule binds whatever the work audience"
                         );
                         recalled
                             .work
+                            .expect("a session opens with its work")
                             .ready
                             .into_iter()
                             .map(|row| row.id)
@@ -100,8 +101,9 @@ fn run_with_practices(
 
 fn practice(body: &str) -> MemoryStorage {
     let mut storage = MemoryStorage::new();
-    let mut draft = Draft::new(RecordType::Note, "Review practice");
-    draft.id = Some("note.review".to_owned());
+    let mut draft = Draft::new(RecordType::Decision, "Review practice");
+    draft.id = Some("decision.review".to_owned());
+    draft.kind = Some("rule".to_owned());
     body.clone_into(&mut draft.body);
     Notebook::new(&mut storage).create(&draft, TODAY).unwrap();
     storage
@@ -117,7 +119,10 @@ fn recall_composes_shared_knowledge_and_both_personal_scopes() {
     else {
         panic!("expected composed recall");
     };
-    assert_eq!(recalled.work.by.as_deref(), Some("Grace"));
+    assert_eq!(
+        recalled.work.as_ref().and_then(|work| work.by.as_deref()),
+        Some("Grace")
+    );
     let memories = recalled
         .memories
         .iter()
@@ -133,15 +138,14 @@ fn recall_composes_shared_knowledge_and_both_personal_scopes() {
         memories,
         [
             ("project", "decision.tenant-scope", ""),
-            ("project", "note.workspace", ""),
             (
                 "personal",
-                "note.review",
+                "decision.review",
                 "Ask before running slow project integration tests."
             ),
             (
                 "global",
-                "note.review",
+                "decision.review",
                 "Review behavior before formatting."
             ),
         ]
@@ -154,7 +158,7 @@ fn a_colleague_without_the_private_stores_recalls_only_shared_knowledge() {
     let Reply::Recalled(recalled) = run(&mut shared, &["recall"]) else {
         panic!("expected composed recall");
     };
-    assert_eq!(recalled.memories.len(), 2);
+    assert_eq!(recalled.memories.len(), 1);
     assert!(
         recalled
             .memories
@@ -195,7 +199,8 @@ fn recall_searches_personal_practices_without_needing_to_know_their_location() {
 fn a_large_project_does_not_starve_personal_practices_from_bounded_recall() {
     let mut shared = MemoryStorage::new();
     for index in 0..40 {
-        let mut draft = Draft::new(RecordType::Note, &format!("Project component {index}"));
+        let mut draft = Draft::new(RecordType::Decision, &format!("Project component {index}"));
+        draft.kind = Some("rule".to_owned());
         draft.body = "Component context remains readable. ".repeat(40);
         Notebook::new(&mut shared).create(&draft, TODAY).unwrap();
     }
@@ -204,19 +209,14 @@ fn a_large_project_does_not_starve_personal_practices_from_bounded_recall() {
     let reply = run_with_practices(&mut shared, &["recall"], Some(&personal), Some(&global));
     let document = anb::json::value(&reply);
     let memories = document["memories"].as_array().unwrap();
-    for (scope, body) in [
-        (
-            "personal",
-            "Ask before running slow project integration tests.",
-        ),
-        ("global", "Review behavior before formatting."),
-    ] {
-        let memory = memories
-            .iter()
-            .find(|memory| memory["scope"] == scope)
-            .expect("private practice was starved by the project");
-        assert!(memory["body"]["head"].as_str().unwrap().contains(body));
-        assert_eq!(memory["body"]["omitted"], 0);
+    for scope in ["personal", "global"] {
+        assert!(
+            memories.iter().any(|memory| memory["scope"] == scope
+                && memory["read"]
+                    .as_str()
+                    .is_some_and(|read| read.contains(&format!("--{scope}")))),
+            "the {scope} practice was starved by the project"
+        );
     }
     let project = document["sources"]
         .as_array()
@@ -239,13 +239,15 @@ fn a_large_project_does_not_starve_personal_practices_from_bounded_recall() {
 fn recall_keeps_retired_knowledge_out_of_the_working_set_without_erasing_it() {
     let mut shared = practice("An old review rule.");
     let mut notebook = Notebook::new(&mut shared);
-    notebook.retire("note.review", TODAY).unwrap();
-    notebook.archive("note.review").unwrap();
+    notebook.retire("decision.review", TODAY).unwrap();
+    notebook.archive("decision.review").unwrap();
     let Reply::Recalled(recalled) = run(&mut shared, &["recall"]) else {
         panic!("expected composed recall");
     };
     assert!(recalled.memories.is_empty());
-    let archived = Notebook::new(&mut shared).record("note.review").unwrap();
+    let archived = Notebook::new(&mut shared)
+        .record("decision.review")
+        .unwrap();
     assert!(archived.file().body().contains("An old review rule."));
 }
 
@@ -290,9 +292,7 @@ fn an_unreadable_knowledge_envelope_is_not_silently_an_empty_memory() {
 #[test]
 fn recall_rejects_an_empty_search_like_other_queries() {
     let mut shared = shared_knowledge();
-    let error = Notebook::new(&mut shared)
-        .recall(Some("   "), None)
-        .unwrap_err();
+    let error = Notebook::new(&mut shared).recall(Some("   ")).unwrap_err();
     assert!(matches!(
         error,
         anb_core::NotebookError::InvalidArgument { .. }
@@ -300,27 +300,52 @@ fn recall_rejects_an_empty_search_like_other_queries() {
 }
 
 #[test]
-fn a_focus_prioritizes_related_knowledge_without_hiding_other_standing_rules() {
+fn a_session_opening_counts_the_knowledge_it_leaves_to_the_work() {
     let mut shared = shared_knowledge();
-    let mut notebook = Notebook::new(&mut shared);
-    let mut task = Draft::new(RecordType::Task, "Verify customer exports");
-    task.id = Some("task.exports".to_owned());
-    notebook.create(&task, TODAY).unwrap();
-    let mut finding = Draft::new(RecordType::Note, "Export boundary evidence");
-    finding.id = Some("note.export-evidence".to_owned());
-    finding.from = Some("task.exports".to_owned());
-    notebook.create(&finding, TODAY).unwrap();
-    let Reply::Recalled(recalled) = run(&mut shared, &["recall", "--for", "task.exports"]) else {
-        panic!("expected focused recall");
-    };
-    assert_eq!(recalled.focus.unwrap().id, "task.exports");
-    assert_eq!(recalled.memories[0].memory.id, "note.export-evidence");
-    assert!(recalled.memories[0].memory.related);
+    let document = anb::json::value(&run(&mut shared, &["recall"]));
+    let memories = document["memories"].as_array().unwrap();
+    assert_eq!(memories.len(), 1);
+    assert_eq!(memories[0]["id"], "decision.tenant-scope");
+    assert_eq!(
+        document["sources"][0],
+        serde_json::json!({
+            "scope": "project",
+            "count": 1,
+            "omitted": 0,
+            "other": 1,
+            "more": "anb list --type decision,note",
+        }),
+        "the model Note is counted and one command away"
+    );
+}
+
+#[test]
+fn a_search_names_every_match_whatever_the_budget() {
+    let mut shared = MemoryStorage::new();
+    for index in 0..30 {
+        let mut draft = Draft::new(RecordType::Note, &format!("Export component {index}"));
+        draft.body = "Export context remains readable. ".repeat(40);
+        Notebook::new(&mut shared).create(&draft, TODAY).unwrap();
+    }
+    let document = anb::json::value(&run(&mut shared, &["recall", "export"]));
+    assert_eq!(document["count"], 30);
+    assert_eq!(document["memories"].as_array().unwrap().len(), 30);
+    assert_eq!(document["omitted"], 0);
     assert!(
-        recalled
-            .memories
-            .iter()
-            .any(|item| item.memory.id == "decision.tenant-scope")
+        document.get("work").is_none(),
+        "a search answers what it found, not the dashboard"
+    );
+}
+
+#[test]
+fn recall_names_show_when_asked_for_a_records_context() {
+    let error = Cli::try_parse_from(["anb", "recall", "--for", "task.exports"])
+        .err()
+        .expect("recall takes no record");
+    let recovery = anb::recovery::parse_recovery(&error).expect("a structured refusal");
+    assert_eq!(
+        recovery.tries.first().map(String::as_str),
+        Some("anb show <id>")
     );
 }
 
@@ -329,11 +354,11 @@ fn recall_does_not_rewrite_legacy_records_or_personal_practices() {
     let mut shared = shared_knowledge();
     let personal = practice("Review behavior first.");
     let before = shared.read("notes/note.workspace.md").unwrap();
-    let before_personal = personal.read("notes/note.review.md").unwrap();
+    let before_personal = personal.read("decisions/decision.review.md").unwrap();
     run_with_practices(&mut shared, &["recall"], Some(&personal), None);
     assert_eq!(shared.read("notes/note.workspace.md").unwrap(), before);
     assert_eq!(
-        personal.read("notes/note.review.md").unwrap(),
+        personal.read("decisions/decision.review.md").unwrap(),
         before_personal
     );
 }
@@ -391,4 +416,29 @@ fn explicit_personal_knowledge_filter_still_selects_its_author() {
     };
     assert!(rows.is_empty());
     assert_eq!(filter.by.as_deref(), Some("Grace"));
+}
+
+#[test]
+fn an_opening_over_budget_drops_rule_bodies_before_any_rule_or_work_row() {
+    let mut shared = MemoryStorage::new();
+    for index in 0..20 {
+        let mut draft = Draft::new(RecordType::Decision, &format!("Project rule {index}"));
+        draft.kind = Some("rule".to_owned());
+        draft.body = "The rule explains itself at length. ".repeat(40);
+        Notebook::new(&mut shared).create(&draft, TODAY).unwrap();
+    }
+    let mut task = Draft::new(RecordType::Task, "Ship the export");
+    task.id = Some("task.export".to_owned());
+    Notebook::new(&mut shared).create(&task, TODAY).unwrap();
+
+    let document = anb::json::value(&run(&mut shared, &["recall"]));
+
+    assert_eq!(document["bodies-omitted"], true);
+    assert_eq!(document["memories"].as_array().unwrap().len(), 20);
+    assert!(
+        document["memories"][0].get("body").is_none(),
+        "the rows print as one table of names and read commands"
+    );
+    assert_eq!(document["work"]["ready"]["rows"][0]["id"], "task.export");
+    assert!(document["budget"]["spent"].as_u64().unwrap() <= 1500);
 }

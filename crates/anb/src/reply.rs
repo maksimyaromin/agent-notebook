@@ -117,7 +117,10 @@ pub fn repair_command(repair: &Repair, path: &str) -> String {
 /// What a command came to; the renderers turn one of these into text.
 #[derive(Debug)]
 pub enum Reply {
-    Started(crate::session::Started),
+    Started {
+        started: crate::session::Started,
+        record: View,
+    },
     Imported(anb_core::FileBatch),
     Migrated(anb_core::FileBatch),
     Recalled(Box<Recall>),
@@ -289,10 +292,7 @@ pub fn execute(
         ..
     } = host;
     let identity = identity();
-    let session_focus = if matches!(
-        &command,
-        Command::Recall { focus: None, .. } | Command::Hook
-    ) {
+    let session_focus = if matches!(&command, Command::Recall { text: None, .. } | Command::Hook) {
         crate::session::focus(storage, session, identity.as_deref())?
     } else {
         None
@@ -319,17 +319,12 @@ pub fn execute(
             Ok(Reply::Imported(notebook.import(&source, check)?))
         }
         Command::Migrate { check } => Ok(Reply::Migrated(notebook.migrate(check)?)),
-        Command::Recall {
-            text,
-            focus,
-            all,
-            whose,
-        } => {
+        Command::Recall { text, all, whose } => {
             let by = named(whose, notebook.config()?.scope(), identity.as_deref())?;
             recalled(
                 &notebook,
                 text.as_deref(),
-                focus.or(session_focus).as_deref(),
+                session_focus.as_deref(),
                 all,
                 by.as_deref(),
                 host,
@@ -351,18 +346,22 @@ pub fn execute(
             next,
             hub,
             join,
-        } => Ok(Reply::Started(crate::session::start(
-            storage,
-            session,
-            identity.as_deref(),
-            &crate::session::Start {
-                id,
-                next,
-                hub,
-                join,
-            },
-            today,
-        )?)),
+        } => {
+            let started = crate::session::start(
+                storage,
+                session,
+                identity.as_deref(),
+                &crate::session::Start {
+                    id,
+                    next,
+                    hub,
+                    join,
+                },
+                today,
+            )?;
+            let record = Notebook::new(storage).view(&started.transition.id)?;
+            Ok(Reply::Started { started, record })
+        }
         Command::Submit { id, to } => {
             Ok(moved("submit", notebook.submit(&id, to.as_deref(), today)?))
         }
@@ -419,7 +418,7 @@ pub fn execute(
             all,
         }),
         Command::Archive { id } => Ok(Reply::Archived(notebook.archive(&id)?)),
-        Command::Restore { id } => Ok(Reply::Restored(notebook.restore(&id)?)),
+        Command::Restore { id } => Ok(Reply::Restored(notebook.restore(&id, today)?)),
         Command::Delete { id } => Ok(Reply::Deleted(notebook.delete(&id)?)),
         Command::Edit(args) => edited(&mut notebook, args, read_file, today),
         Command::Graph(args) => graphed(&notebook, identity.as_deref(), args),
@@ -493,7 +492,9 @@ fn import_source(
     Ok(source)
 }
 
-/// Compose one bounded memory read without merging audience identities.
+/// Compose one bounded memory read without merging audience identities:
+/// a session opening without `text`, a search across every audience with
+/// it.
 fn recalled(
     notebook: &Notebook<'_>,
     text: Option<&str>,
@@ -505,21 +506,25 @@ fn recalled(
     let mut more = "anb recall".to_owned();
     if let Some(text) = text {
         let _ = write!(more, " {}", shell_word(text));
-    }
-    if let Some(id) = focus {
-        let _ = write!(more, " --for {}", shell_word(id));
-    }
-    if let Some(by) = by {
+    } else if let Some(by) = by {
         let _ = write!(more, " --by {}", shell_word(by));
     } else {
         more.push_str(" --team");
     }
     let _ = write!(more, "{} --all", host.audience.flag());
+    let is_opening = text.is_none();
     let mut recalled = Recall {
-        work: notebook.status(host.today, Budget::Unbounded, by, host.lost_proofs)?,
-        focus: focus.map(|id| notebook.view(id)).transpose()?,
+        work: is_opening
+            .then(|| notebook.status(host.today, Budget::Unbounded, by, host.lost_proofs))
+            .transpose()?,
+        focus: focus
+            .filter(|_| is_opening)
+            .map(|id| read_focus(notebook, id))
+            .transpose()?,
+        text: text.map(str::to_owned),
         memories: Vec::new(),
         invalid: Vec::new(),
+        other: Vec::new(),
         all,
         budget: if all {
             Budget::Unbounded
@@ -528,16 +533,24 @@ fn recalled(
         },
         more,
     };
-    recalled.include(host.audience, notebook.recall(text, focus)?);
+    recalled.include(host.audience, notebook.recall(text)?);
     for (scope, source) in [
         (Audience::Personal, host.personal_notebook),
         (Audience::Global, host.user_notebook),
     ] {
         if let Some(source) = source {
-            recalled.include(scope, anb_core::recall(source, text, None)?);
+            recalled.include(scope, anb_core::recall(source, text)?);
         }
     }
     Ok(Reply::Recalled(Box::new(recalled)))
+}
+
+fn read_focus(notebook: &Notebook<'_>, id: &str) -> Result<crate::recall::Focus, NotebookError> {
+    let record = notebook.record(id)?;
+    Ok(crate::recall::Focus {
+        id: id.to_owned(),
+        title: record.file().field("title").unwrap_or_default().to_owned(),
+    })
 }
 
 fn created(
@@ -637,6 +650,7 @@ fn edited(
     let EditArgs {
         id,
         title,
+        kind,
         body,
         body_file,
         add_tags,
@@ -644,6 +658,7 @@ fn edited(
         add_links,
         remove_links,
         from,
+        task,
         priority,
         review_by,
         taken_by,
@@ -652,12 +667,14 @@ fn edited(
     } = args;
     let edit = Edit {
         title,
+        kind,
         body: body_text(body, body_file, read_file)?,
         add_tags,
         remove_tags,
         add_links: add_links.iter().map(|raw| parsed_link(raw)).collect(),
         remove_links: remove_links.iter().map(|raw| parsed_link(raw)).collect(),
         from,
+        task,
         priority,
         review_by,
         taken_by,
@@ -703,6 +720,7 @@ fn draft(args: AddArgs, body: String, identity: Option<&str>) -> Result<Draft, N
     };
     draft.to = args.to;
     draft.from = args.from;
+    draft.task = args.task;
     draft.tags = args.tags;
     draft.links = args.links.iter().map(|raw| parsed_link(raw)).collect();
     draft.body = body;

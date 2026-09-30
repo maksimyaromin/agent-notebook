@@ -5,6 +5,7 @@
 //! format's canonical form, never from running the code.
 
 mod archive;
+mod binding;
 mod budget;
 mod check;
 mod creation;

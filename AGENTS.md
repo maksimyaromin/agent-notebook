@@ -18,14 +18,14 @@ pnpm install && pnpm docs:check # the docs job: the site builds, every page reac
 This repository keeps its working memory in `.agent-notebook/` and changes it only through the tool, never by editing the files:
 
 ```sh
-cargo run --quiet -- recall     # session focus, current work and relevant knowledge
+cargo run --quiet -- recall     # session focus, current work and standing rules
 cargo run --quiet -- ready      # what can start now
 cargo run --quiet -- --help     # every command
 ```
 
 `cargo install --path crates/anb` puts `anb` on the path so the prefix can go. Follow the shipped skill, [`.agents/skills/anb/SKILL.md`](./.agents/skills/anb/SKILL.md). Open with Recall and resume the user's named Task or the session's remembered focus. Several Tasks can be active; the first row is not an instruction to switch work. Use separate session ids for parallel conversations and respect another session's claim.
 
-Record the useful difference: a finding, a decision, a remaining uncertainty or a next step that another session would otherwise lose. Keep routine progress on the Task with `comment`; create a Note, Decision or Question when it deserves an independent lifetime. Close work with a short outcome and relevant evidence using `--body` or `--body-file`. Answer Questions when they settle, hold blocked work with a reason, and archive records when they leave the current scope. Archiving a Task does not archive its knowledge. Leave `anb check` green, and commit notebook changes only when the user authorizes commits.
+Record the useful difference: a finding, a decision, a remaining uncertainty or a next step that another session would otherwise lose. Keep routine progress on the Task with `comment`; create a Note, Decision or Question when it deserves an independent lifetime. Close work with a short outcome and relevant evidence using `--body` or `--body-file`. Answer Questions when they settle, hold blocked work with a reason, and archive records when they leave the current scope. Archiving a Task archives only the records bound to it with `--task`. Leave `anb check` green, and commit notebook changes only when the user authorizes commits.
 
 Shared project meaning belongs in the project notebook. Personal practices belong in `--personal` for this project or `--global` across projects; neither audience silently supplies missing shared records. Team workflow extensions belong in `.agents/anb.md`, separate from the generated skill. A friction met with the tool itself is a finding: a comment on the Task it burdens, or a Task or Question born `--from` it when follow-up work is needed.
 

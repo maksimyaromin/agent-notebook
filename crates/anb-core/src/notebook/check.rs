@@ -8,6 +8,7 @@ use crate::encode;
 use crate::finding::{Finding, FindingCode, Severity};
 use crate::grammar;
 use crate::graph;
+use crate::mention;
 use crate::record::{
     REF_KEYS, Record, RecordType, dangling_finding, linked_record, not_utf8_finding,
 };
@@ -43,6 +44,8 @@ impl Notebook<'_> {
             }
             check_refs(record, &resolvable, &mut located);
             check_supersession_pair(record, &by_stem, &mut located);
+            check_binding_residence(record, &resolvable, &mut located);
+            check_wiki_references(record, &resolvable, &mut located);
         }
         check_duplicate_ids(records, &mut located);
         check_dep_cycles(records, &by_stem, &mut located);
@@ -182,6 +185,81 @@ fn check_refs(record: &Record, resolvable: &Resolver<'_>, out: &mut Vec<FileFind
         if let Some(target) = linked_record(link) {
             dangling("link", target, line);
         }
+    }
+}
+
+/// A bound record lives where its Task lives: it leaves for the archive
+/// with the Task and returns with it, so the two can part only by a hand
+/// edit or a merge. A record left in the working set by a filed Task is a
+/// broken binding; a record binding from the archive while its Task is
+/// back in play is a live record in the archive like any other.
+fn check_binding_residence(record: &Record, resolvable: &Resolver<'_>, out: &mut Vec<FileFinding>) {
+    let Some(task) = record.task() else {
+        return;
+    };
+    // A target that is no Task is a bad value named on the record itself.
+    let Some(holder) = resolvable
+        .read(task)
+        .filter(|holder| holder.record_type() == Some(RecordType::Task))
+    else {
+        return;
+    };
+    let line = record.file().field_entry("task").and_then(|(_, line)| line);
+    match (is_archived(record.path()), is_archived(holder.path())) {
+        (false, true) => out.push(FileFinding::on(
+            record.path(),
+            Finding::located(
+                line,
+                FindingCode::BrokenBinding,
+                format!("task: `{task}` is archived, and a record bound to it leaves with it"),
+            ),
+        )),
+        (true, false) if record.is_live() => {
+            let (state, state_line) = record.file().field_entry("state").unwrap_or_default();
+            out.push(FileFinding::on(
+                record.path(),
+                Finding::located(
+                    state_line,
+                    FindingCode::ArchivedLiveRecord,
+                    format!(
+                        "state: `{state}` still binds, and its task `{task}` is back in the working set"
+                    ),
+                ),
+            ));
+        }
+        _ => {}
+    }
+}
+
+/// A `[[slug]]` in a body reads as a reference to whoever wrote it, but
+/// the tool sees no edge: show, the graph and every read that follows
+/// edges miss the record it meant. When a slug names a record once a type
+/// prefix is added, the finding names the full id to write instead.
+fn check_wiki_references(record: &Record, resolvable: &Resolver<'_>, out: &mut Vec<FileFinding>) {
+    // History is not edited, so a finding there would stand forever.
+    if is_archived(record.path()) {
+        return;
+    }
+    for target in mention::wiki_targets(record.file().body()) {
+        let ids: Vec<String> = RecordType::ALL
+            .into_iter()
+            .map(|record_type| format!("{}.{target}", record_type.word()))
+            .filter(|id| resolvable.resolves(id))
+            .collect();
+        if ids.is_empty() {
+            continue;
+        }
+        let written: Vec<String> = ids.iter().map(|id| format!("`{id}`")).collect();
+        out.push(FileFinding::on(
+            record.path(),
+            Finding::for_file(
+                FindingCode::UnreadableReference,
+                format!(
+                    "body: `[[{target}]]` is no reference the tool reads; write {}",
+                    written.join(" or ")
+                ),
+            ),
+        ));
     }
 }
 

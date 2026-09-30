@@ -64,10 +64,12 @@ fn personal_and_global_practices_follow_their_declared_audiences() {
         "Ada",
         &[
             "add",
-            "note",
+            "decision",
             "Project rule",
+            "--kind",
+            "rule",
             "--id",
-            "note.shared",
+            "decision.shared",
             "--body",
             "Customer exports are tenant-scoped.",
         ],
@@ -79,10 +81,12 @@ fn personal_and_global_practices_follow_their_declared_audiences() {
         &[
             "--personal",
             "add",
-            "note",
+            "decision",
             "Project practice",
+            "--kind",
+            "rule",
             "--id",
-            "note.practice",
+            "decision.practice",
             "--body",
             "Ask me before running this project's slow suite.",
         ],
@@ -94,10 +98,12 @@ fn personal_and_global_practices_follow_their_declared_audiences() {
         &[
             "--global",
             "add",
-            "note",
+            "decision",
             "General practice",
+            "--kind",
+            "rule",
             "--id",
-            "note.practice",
+            "decision.practice",
             "--body",
             "Review behavior before formatting.",
         ],
@@ -127,7 +133,7 @@ fn personal_and_global_practices_follow_their_declared_audiences() {
     assert_eq!(bodies(&elsewhere)[0].0, "global");
     assert!(
         !project
-            .join(".agent-notebook/notes/note.practice.md")
+            .join(".agent-notebook/decisions/decision.practice.md")
             .exists()
     );
     assert!(
@@ -244,10 +250,12 @@ fn linked_worktrees_share_personal_practices_but_independent_clones_do_not() {
         &[
             "--personal",
             "add",
-            "note",
+            "decision",
             "Practice",
+            "--kind",
+            "rule",
             "--id",
-            "note.practice",
+            "decision.practice",
             "--body",
             "Ask before the slow suite.",
         ],

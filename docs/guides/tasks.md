@@ -27,7 +27,7 @@ An invalid move returns `invalid-transition` with valid next commands. For examp
 
 `anb start --next` selects and starts one eligible Task under the same command lock. It prefers work assigned to you, then untaken work. It never takes a colleague's Task. Add `--for <id>` to select only the subject and its transitive origin descendants. Dependencies and contextual links do not make a record part of that work. Readiness still uses the complete dependency graph, including work assigned to colleagues.
 
-A session remembers one Task. The CLI uses `--session <id>`, then `ANB_SESSION`, then the agent's `CODEX_THREAD_ID`. Once a Task is remembered, `anb start` resumes it and `anb recall` opens its context. `start --next` also resumes that Task while it remains active and unheld; after you close, hold or submit it, the command selects the next eligible Task. To switch before then, name the other Task explicitly.
+A session remembers one Task. The CLI uses `--session <id>`, then `ANB_SESSION`, then the agent's `CODEX_THREAD_ID`. Once a Task is remembered, `anb start` resumes it and replies with its context, and `anb recall` names it as the focus. `start --next` also resumes that Task while it remains active and unheld; after you close, hold or submit it, the command selects the next eligible Task. To switch before then, name the other Task explicitly.
 
 Two sessions can work on different Tasks for the same person. A second session starting the same Task receives `session-conflict`; use `anb start <id> --join` only when both sessions are meant to work together. Joining keeps the first session's focus. Human ownership remains `taken-by`, so joining does not bypass a colleague's ownership. Without a session id, multiple active Tasks remain visible and no Task is chosen as the current focus.
 
@@ -51,7 +51,7 @@ anb close task.parser-accepts-fenced-bodies --body "Nested and indented fences p
 
 Cite a pull request, commit or external report in the outcome. If a finding deserves independent maintenance, create a Note with `anb add note --from <task>` and link it where needed. Choose one closing option. `--via <tool>` attributes an outcome supplied with `--body` or `--body-file`.
 
-The reply lists newly unblocked Tasks and any Questions still open from this Task. Resolve those Questions or record why they remain open. Then run `anb archive <id>` to archive that Task. Linked knowledge keeps its own lifecycle. The body and id are preserved. Repeating a close does not append or replace its outcome; use `comment` to add a correction before archiving.
+The reply lists newly unblocked Tasks, the Questions still open from this Task or bound to it, and, as `unbound`, the records created from it that no binding will carry into the archive. Resolve those Questions or record why they remain open, and bind what served only this work. Then run `anb archive <id>`; the records bound to the Task leave with it, as [Records and files](../reference/records.md#the-layout) describes. The body and id are preserved. Repeating a close does not append or replace its outcome; use `comment` to add a correction before archiving.
 
 The tool records evidence; it does not evaluate its quality. Write the outcome for someone who did not see the work happen.
 
@@ -87,7 +87,7 @@ A child Task should produce one independently reviewable result. Add dependencie
 
 You can use your own grouping convention; the automatic epic summary recognizes a hub by that pair of relationships: it depends on a Task whose origin points back to it. The `epic` tag helps you find the hub; it does not establish membership. If you missed an origin when creating a child, set it with `anb edit <id> --from <hub>`.
 
-`anb ready --for <hub>` is the epic's own queue and `anb list --for <hub>` its live membership, following `from` through nested work; `--archive` adds the children already filed. External prerequisites can block that queue without joining it. Use `graph --focus <hub>` or `recall --for <hub>` for the wider context. A hub's node in `anb graph` carries how many of its direct dependencies are closed and the next ready Task in its scope. Once all dependencies close, the hub becomes ready for acceptance. Close and archive it when the overall result is complete.
+`anb ready --for <hub>` is the epic's own queue and `anb list --for <hub>` its live membership, following `from` through nested work; `--archive` adds the children already filed. External prerequisites can block that queue without joining it. Use `show <hub>` for every record it connects to, or `graph --focus <hub> --depth <n>` for the wider neighbourhood. A hub's node in `anb graph` carries how many of its direct dependencies are closed and the next ready Task in its scope. Once all dependencies close, the hub becomes ready for acceptance. Close and archive it when the overall result is complete.
 
 ## Correcting a record
 

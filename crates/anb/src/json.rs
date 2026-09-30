@@ -31,7 +31,7 @@ pub fn value(reply: &Reply) -> Value {
 #[must_use]
 pub fn value_with(reply: &Reply, transform: impl Fn(&mut Value)) -> Value {
     let mut document = match reply {
-        Reply::Started(started) => started_value(started),
+        Reply::Started { started, record } => started_value(started, record),
         Reply::Imported(batch) => batch_value("import", batch),
         Reply::Migrated(batch) => batch_value("migrate", batch),
         Reply::Recalled(recalled) => return recall_value(recalled, &transform),
@@ -138,12 +138,15 @@ fn batch_value(command: &str, batch: &anb_core::FileBatch) -> Value {
     ]))
 }
 
-fn started_value(started: &crate::session::Started) -> Value {
+/// The move, then the Task as `show` prints it, so the agent that takes
+/// the work has its context without a second read.
+fn started_value(started: &crate::session::Started, record: &View) -> Value {
     let mut object = transition_map("start", &started.transition);
     if let Some(session) = &started.session {
         object.insert("session".to_owned(), json!(session));
         object.insert("joined".to_owned(), json!(started.joined));
     }
+    object.insert("record".to_owned(), view_value(record, false));
     Value::Object(object)
 }
 
@@ -158,9 +161,87 @@ pub fn toon(value: &Value) -> String {
 }
 
 fn recall_value(recalled: &crate::recall::Recall, transform: &impl Fn(&mut Value)) -> Value {
-    let visible = shown(recalled.memories.len(), recalled.all);
+    let is_search = recalled.text.is_some();
+    // Every record a search found is named: the budget cuts bodies only.
+    let visible = if is_search {
+        recalled.memories.len()
+    } else {
+        shown(recalled.memories.len(), recalled.all)
+    };
     let ordered = fair_memories(&recalled.memories);
-    let sources = [
+    let mut document = Value::Object(fields([
+        (
+            "work",
+            recalled
+                .work
+                .as_ref()
+                .map_or(Value::Null, |work| status_document(work, recalled.all)),
+        ),
+        (
+            "focus",
+            recalled.focus.as_ref().map_or(Value::Null, |focus| {
+                json!({
+                    "id": focus.id,
+                    "title": encode::bounded_text(focus.title.clone()),
+                    "read": format!("anb show {}", focus.id),
+                })
+            }),
+        ),
+        ("count", json!(recalled.memories.len())),
+        ("sources", json!(source_rows(recalled, &ordered, visible))),
+        (
+            "memories",
+            json!(
+                ordered
+                    .iter()
+                    .take(visible)
+                    .map(|item| memory_row(item, recalled.all))
+                    .collect::<Vec<_>>()
+            ),
+        ),
+        ("omitted", json!(recalled.memories.len() - visible)),
+        (
+            "invalid",
+            section(
+                &recalled.invalid,
+                shown(recalled.invalid.len(), recalled.all),
+                |invalid| {
+                    json!({
+                        "scope": invalid.audience.word(),
+                        "path": invalid.path,
+                        "repair": format!("anb check{}", invalid.audience.flag()),
+                    })
+                },
+            ),
+        ),
+        ("more", json!(recalled.more)),
+    ]));
+    transform(&mut document);
+    fit(document, recalled.budget, |document| {
+        if is_search {
+            return trim_memory_bodies(document, RECALL_EXCERPT_CHARACTERS)
+                || trim_memory_bodies(document, 0)
+                || strip_memories(document)
+                || trim_section(document, "/invalid", 0);
+        }
+        // The work and the rule titles are what an opening is for, so the
+        // rule bodies are cut before either loses a row.
+        trim_memory_bodies(document, RECALL_EXCERPT_CHARACTERS)
+            || trim_memory_bodies(document, 0)
+            || strip_memories(document)
+            || trim_work(document, "/work")
+            || trim_memories(document, true)
+            || trim_memories(document, false)
+            || trim_section(document, "/invalid", 0)
+    })
+}
+
+fn source_rows(
+    recalled: &crate::recall::Recall,
+    ordered: &[&crate::recall::ScopedMemory],
+    visible: usize,
+) -> Vec<Value> {
+    [
         crate::recall::Audience::Project,
         crate::recall::Audience::Personal,
         crate::recall::Audience::Global,
@@ -176,51 +257,49 @@ fn recall_value(recalled: &crate::recall::Recall, transform: &impl Fn(&mut Value
             .take(visible)
             .filter(|item| item.audience == audience)
             .count();
-        (count > 0)
-            .then(|| json!({"scope": audience.word(), "count": count, "omitted": count - shown}))
+        let other = recalled
+            .other
+            .iter()
+            .find(|(scope, _)| *scope == audience)
+            .map_or(0, |(_, other)| *other);
+        (count > 0 || other > 0).then(|| {
+            Value::Object(fields([
+                ("scope", json!(audience.word())),
+                ("count", json!(count)),
+                ("omitted", json!(count - shown)),
+                ("other", json!((other > 0).then_some(other))),
+                (
+                    "more",
+                    json!(
+                        (other > 0)
+                            .then(|| format!("anb list{} --type decision,note", audience.flag()))
+                    ),
+                ),
+            ]))
+        })
     })
-    .collect::<Vec<_>>();
-    let mut document = json!({
-        "work": status_document(&recalled.work, recalled.all),
-        "focus": recalled.focus.as_ref().map(|view| view_value(view, recalled.all)),
-        "count": recalled.memories.len(),
-        "sources": sources,
-        "memories": ordered.iter().take(visible).map(|item| {
-            let memory = &item.memory;
-            json!({
-                "scope": item.audience.word(),
-                "id": memory.id,
-                "title": memory.title,
-                "kind": memory.kind,
-                "by": memory.by,
-                "body": body_value(&memory.body, recalled.all),
-                "links": memory.links,
-                "related": memory.related,
-                "read": format!("anb show {}{} --all", memory.id, item.audience.flag()),
-            })
-        }).collect::<Vec<_>>(),
-        "omitted": recalled.memories.len() - visible,
-        "invalid": section(&recalled.invalid, shown(recalled.invalid.len(), recalled.all), |invalid| json!({
-            "scope": invalid.audience.word(),
-            "path": invalid.path,
-            "repair": format!("anb check{}", invalid.audience.flag()),
-        })),
-        "more": recalled.more,
-    });
-    transform(&mut document);
-    fit(document, recalled.budget, |document| {
-        trim_work(document, "/work")
-            || trim_memory_bodies(document, RECALL_EXCERPT_CHARACTERS)
-            || trim_memories(document, true)
-            || trim_body(document.pointer_mut("/focus/body"))
-            || trim_section(document, "/focus/fields", 0)
-            || trim_section(document, "/focus/mentions", 0)
-            || trim_section(document, "/focus/mentioned-by", 0)
-            || trim_section(document, "/focus/linked-by", 0)
-            || trim_memory_bodies(document, 0)
-            || trim_memories(document, false)
-            || trim_section(document, "/invalid", 0)
-    })
+    .collect()
+}
+
+fn memory_row(item: &crate::recall::ScopedMemory, all: bool) -> Value {
+    let memory = &item.memory;
+    Value::Object(fields([
+        ("scope", json!(item.audience.word())),
+        ("id", json!(memory.id)),
+        ("title", json!(memory.title)),
+        ("kind", json!(memory.kind)),
+        ("by", json!(memory.by)),
+        ("body", body_value(&memory.body, all)),
+        ("links", json!(memory.links)),
+        (
+            "read",
+            json!(format!(
+                "anb show {}{} --all",
+                memory.id,
+                item.audience.flag()
+            )),
+        ),
+    ]))
 }
 
 /// Round-robin selection prevents a large source from hiding another audience.
@@ -289,6 +368,7 @@ fn created_value(command: &str, created: &anb_core::Created) -> Value {
         ("ok", json!(command)),
         ("id", json!(created.id)),
         ("path", json!(created.path)),
+        ("collision", json!(created.collision)),
         ("superseded", json!(created.superseded)),
         (
             "dangling-mention",
@@ -342,6 +422,12 @@ fn closed_value(closed: &anb_core::Closed) -> Value {
         (
             "open-questions",
             bounded_section(&closed.open_questions, |id| json!(id)),
+        ),
+        (
+            "unbound",
+            consequence(&closed.unbound, |id| {
+                json!({"id": id, "bind": format!("anb edit {id} --task {}", closed.transition.id)})
+            }),
         ),
     ]));
     Value::Object(object)
@@ -420,6 +506,7 @@ fn archived_value(moved: &anb_core::Archived) -> Value {
         ("id", json!(moved.id)),
         ("from", json!(moved.from)),
         ("to", json!(moved.to)),
+        ("bound", consequence(&moved.bound, |id| json!(id))),
         ("already", json!(moved.already)),
     ]))
 }
@@ -430,6 +517,8 @@ fn restored_value(moved: &anb_core::Restored) -> Value {
         ("id", json!(moved.id)),
         ("from", json!(moved.from)),
         ("to", json!(moved.to)),
+        ("bound", consequence(&moved.bound, |id| json!(id))),
+        ("unbound", json!(moved.unbound)),
         ("already", json!(moved.already)),
     ]))
 }
@@ -476,7 +565,7 @@ fn epic_value(epic: &anb_core::Epic) -> Value {
 }
 
 /// Version of the graph document consumed by atlas and other graph readers.
-const GRAPH_CONTRACT: u8 = 4;
+const GRAPH_CONTRACT: u8 = 5;
 
 /// Graph structure is complete. Only optional record content has display bounds.
 fn graph_value(graph: &Graph, full: bool, all: bool) -> Value {
@@ -627,7 +716,15 @@ fn field_value(value: &str, all: bool) -> String {
     }
 }
 
+/// The relations carry no bound: a record left out of one could not be
+/// reached by the next `show`.
 fn view_value(view: &View, all: bool) -> Value {
+    let kind_rows = |edges: &[(String, String)]| {
+        edges
+            .iter()
+            .map(|(kind, id)| json!({"kind": kind, "id": id}))
+            .collect::<Vec<Value>>()
+    };
     json!({
         "id": view.id,
         "path": view.path,
@@ -637,11 +734,16 @@ fn view_value(view: &View, all: bool) -> Value {
             json!([key, field_value(value, all)])
         }),
         "body": body_value(&view.body, all),
-        "mentions": section(&view.mentions, shown(view.mentions.len(), all), |id| json!(id)),
-        "mentioned-by": section(&view.mentioned_by, shown(view.mentioned_by.len(), all), |id| json!(id)),
-        "linked-by": section(&view.linked_by, shown(view.linked_by.len(), all), |(kind, id)| {
-            json!({"id": id, "kind": kind})
-        }),
+        "from": view.from,
+        "born": view.born,
+        "task": view.task,
+        "bound": view.bound,
+        "blocked-by": view.blocked_by,
+        "blocks": view.blocks,
+        "links": kind_rows(&view.links),
+        "linked-by": kind_rows(&view.linked_by),
+        "mentions": view.mentions,
+        "mentioned-by": view.mentioned_by,
     })
 }
 
@@ -766,10 +868,6 @@ fn trim_section(document: &mut Value, path: &str, minimum: usize) -> bool {
     true
 }
 
-fn trim_body(body: Option<&mut Value>) -> bool {
-    trim_body_above(body, 0)
-}
-
 fn trim_body_above(body: Option<&mut Value>, minimum: usize) -> bool {
     let Some(body) = body else {
         return false;
@@ -808,6 +906,24 @@ fn trim_memory_bodies(document: &mut Value, minimum: usize) -> bool {
         .iter_mut()
         .rev()
         .any(|memory| trim_body_above(memory.get_mut("body"), minimum))
+}
+
+/// Reduce every recalled row to what names it and how to read it, so the
+/// rows print as one table; `bodies-omitted` says the cut was made.
+fn strip_memories(document: &mut Value) -> bool {
+    let Some(memories) = document["memories"].as_array_mut() else {
+        return false;
+    };
+    let mut any_removed = false;
+    for memory in memories.iter_mut().filter_map(Value::as_object_mut) {
+        for key in ["by", "body", "links"] {
+            any_removed |= memory.remove(key).is_some();
+        }
+    }
+    if any_removed {
+        document["bodies-omitted"] = json!(true);
+    }
+    any_removed
 }
 
 fn trim_memories(document: &mut Value, keep_sources: bool) -> bool {

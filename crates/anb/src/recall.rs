@@ -1,6 +1,6 @@
 //! Compose project knowledge and personal practices without merging their identities.
 
-use anb_core::{Knowledge, Memory, Status, View};
+use anb_core::{Knowledge, Memory, Status};
 
 /// Where a record applies and which notebook a follow-up read must select.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -43,14 +43,29 @@ pub struct ScopedInvalid {
     pub path: String,
 }
 
-/// A session opening. Distinct notebooks may contain the same record id;
-/// audience and read command keep those records distinguishable.
+/// The Task a session is focused on, named rather than read: `show` reads
+/// it whole when the work needs it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Focus {
+    pub id: String,
+    pub title: String,
+}
+
+/// A session opening, or a search across every audience. Distinct
+/// notebooks may contain the same record id; audience and read command keep
+/// those records distinguishable.
 #[derive(Debug)]
 pub struct Recall {
-    pub work: Status,
-    pub focus: Option<View>,
+    /// The work a session opens with; a search answers only what it found.
+    pub work: Option<Status>,
+    pub focus: Option<Focus>,
+    /// The phrase a search looked for; `None` for a session opening.
+    pub text: Option<String>,
     pub memories: Vec<ScopedMemory>,
     pub invalid: Vec<ScopedInvalid>,
+    /// Per audience, the live Notes and Decisions a session opening leaves
+    /// to the work that cites them.
+    pub other: Vec<(Audience, usize)>,
     pub all: bool,
     pub budget: anb_core::Budget,
     pub more: String,
@@ -70,5 +85,8 @@ impl Recall {
                 .into_iter()
                 .map(|memory| ScopedMemory { audience, memory }),
         );
+        if let Some(other) = knowledge.other {
+            self.other.push((audience, other));
+        }
     }
 }

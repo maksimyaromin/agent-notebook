@@ -38,11 +38,11 @@ Shared records live in `.agent-notebook/` at the repository root, created on the
 
 ## The default workflow
 
-Say “continue” or “take the next part of task X.” The agent starts with `anb recall`: current work, this conversation's remembered Task and relevant knowledge from the project and your personal notebooks. It reads what it needs and resumes from the last useful handoff.
+Say “continue” or “take the next part of task X.” The agent starts with `anb recall`: current work, this conversation's remembered Task and the standing rules from the project and your personal notebooks. It reads what it needs and resumes from the last useful handoff.
 
 Several conversations can work on different Tasks at once. Session focus is separate from authorship and assignment, so “continue” does not mean whichever Task happens to appear first. Local session claims keep two agents from silently taking the same Task. Shared knowledge remains visible regardless of who wrote it. [Sessions and collaboration](https://agent-notebook.supolka.dev/guides/session/) explains parallel work, joining a Task and the limits of coordination across clones.
 
-During work, the agent records changes of direction, useful findings and unresolved questions. A Task closes with a short outcome and the evidence needed to trust it. Reusable knowledge gets its own Note or Decision; routine completion does not require a separate report. Archive work when it no longer belongs in the current view, without retiring the knowledge it produced.
+During work, the agent records changes of direction, useful findings and unresolved questions. A Task closes with a short outcome and the evidence needed to trust it. Reusable knowledge gets its own Note or Decision; routine completion does not require a separate report. Archive work when it no longer belongs in the current view: knowledge bound to the work leaves with it, and the rest stays.
 
 Larger work can use epics, dependencies and domain records. Small changes need no ceremony. Ask for a map and the companion `anb-atlas` skill builds an interactive view for exploration and review.
 

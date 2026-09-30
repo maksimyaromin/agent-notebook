@@ -28,21 +28,20 @@ A read answers with the records its narrowing admits. Each flag is a predicate o
 | `--to <NAME>` | Only the records addressed to this person |
 | `--for <ID>` | Only this subject and records created from it, following origins through every descendant. Dependencies still govern readiness |
 | `--tag <TAG>` | Only records carrying this tag; repeated, carrying every one |
-| `--match <TEXT>` | Match text in record ids, titles, tags, people or bodies, ignoring case |
+| `--match <TEXT>` | Only records in which every word of this text starts a word of the id, title, tags, people or body, ignoring case |
 | `--type <TYPE>` | Select record types, comma-separated or repeated. By default, include every type and records whose type could not be parsed |
 | `--kind <KIND>` | Only records of these kinds, comma-separated or repeated: a Decision's rule, shape or drift; a Note's fact, term, guide, idea, model or spec |
 | `--archive` | The archive too; by default only the work still in play |
 
 ### anb recall
 
-Recall your work, shared knowledge and personal practices. Search by a phrase, or name a record with --for to prioritize its context
+Open a session with your work and the standing rules of every audience, or search Notes and Decisions by a phrase
 
 Arguments: `[TEXT]`
 
 | Flag | Meaning |
 |---|---|
-| `--for <ID>` | Prioritize knowledge related to this project record |
-| `--all` | Include every matching record and its full body |
+| `--all` | Every row and full bodies, without the token budget |
 
 Narrowing: `--by`, `--mine`, `--team`.
 
@@ -54,8 +53,9 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 
 | Flag | Meaning |
 |---|---|
-| `--id <ID>` | Choose a stable id. By default the CLI allocates a random 128-bit id |
+| `--id <ID>` | Choose the id, `<type>.<slug>` in at most 96 bytes. Omitted, the title's words become it, cut at a word boundary within 64 characters and suffixed when taken: pass --id when a later command in the same script names the record |
 | `--from <FROM>` | Origin: the record this record was born from |
+| `--task <ID>` | Bind a Decision, Note or Question to the Task it serves; it leaves for the archive with that Task |
 | `--tag <TAG>` | A tag; repeatable |
 | `--link <LINK>` | `<kind> <target>`, e.g. `pr https://…`; repeatable |
 | `--body <BODY>` | Record body text; omitted, the body starts empty |
@@ -71,7 +71,7 @@ Arguments: `<RECORD_TYPE> <TITLE>`
 
 ### anb start
 
-Start or resume a Task. Records your assignment and refuses work held by someone else
+Start or resume a Task. Records your assignment, refuses work held by someone else, and replies with the Task as `show` reads it
 
 Arguments: `[ID]`
 
@@ -186,13 +186,13 @@ Narrowing: `--by`, `--mine`, `--team`, `--untaken`, `--to`, `--for`, `--tag`, `-
 
 ### anb show
 
-Read one record and its incoming and outgoing relationships
+Read one record and the ids of every record it relates to, in both directions
 
 Arguments: `<ID>`
 
 | Flag | Meaning |
 |---|---|
-| `--all` | Include complete fields, body and relationships without display limits |
+| `--all` | Include complete fields and body without display limits |
 
 ### anb status
 
@@ -240,13 +240,13 @@ List stale work, unresolved references and other items needing attention
 
 ### anb archive
 
-Move a settled record into the archive; history moves with it
+Move a settled record into the archive; a Task takes the records bound to it along
 
 Arguments: `<ID>`
 
 ### anb restore
 
-Move an archived record back into the working set: same filename, same bytes
+Move an archived record back into the working set under the same filename. A Task brings back the live records bound to it; a record restored alone comes back unbound
 
 Arguments: `<ID>`
 
@@ -265,6 +265,7 @@ Arguments: `<ID>`
 | Flag | Meaning |
 |---|---|
 | `--title <TITLE>` | The whole title, replaced |
+| `--kind <KIND>` | A decision's rule, shape, or drift; a note's fact, term, guide, idea, model, or spec |
 | `--body <BODY>` | The whole body, replaced; empty clears it |
 | `--body-file <PATH>` | Replace the body with a file's text; `-` reads standard input. Cannot combine with --body |
 | `--tag <TAG>` | Add a tag; repeatable |
@@ -272,11 +273,12 @@ Arguments: `<ID>`
 | `--link <LINK>` | Add a link, `<kind> <target>`; repeatable. Use a record id for a shared relationship or a URL for an external source |
 | `--unlink <LINK>` | Remove a link, spelled as it stands; repeatable |
 | `--from <FROM>` | Origin: the record this record was born from |
+| `--task <ID>` | Bind a Decision, Note or Question to the Task it serves; it leaves for the archive with that Task |
 | `--priority <PRIORITY>` | 0 to 4, 0 the most urgent |
 | `--review-by <DATE>` | The explicit resurfacing date |
 | `--taken-by <NAME>` | Assign the Task to this person, allowing them to start it |
 | `--to <NAME>` | Whom the task or question waits on |
-| `--clear <FIELD>` | The optional field to erase: `from`, `priority`, `review-by`, `taken-by`, or `to`; repeatable |
+| `--clear <FIELD>` | The optional field to erase: `from`, `task`, `priority`, `review-by`, `taken-by`, or `to`; repeatable |
 
 ### anb graph
 

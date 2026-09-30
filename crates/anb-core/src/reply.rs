@@ -24,6 +24,9 @@ pub struct FileBatch {
 pub struct Knowledge {
     pub records: Vec<Memory>,
     pub invalid: Vec<String>,
+    /// The live Notes and Decisions a read without a phrase leaves to the
+    /// work that cites them; `None` for a search.
+    pub other: Option<usize>,
 }
 
 /// A recalled record. The source notebook supplies its audience; `by` is
@@ -38,7 +41,22 @@ pub struct Memory {
     pub body: String,
     pub by: Option<String>,
     pub links: Vec<String>,
-    pub related: bool,
+}
+
+impl Memory {
+    pub(crate) fn of(record: &Record, record_type: RecordType) -> Memory {
+        let file = record.file();
+        Memory {
+            id: crate::resolve::path_stem(record.path()).to_owned(),
+            path: record.path().to_owned(),
+            record_type,
+            kind: file.field("kind").map(str::to_owned),
+            title: file.field("title").unwrap_or_default().to_owned(),
+            body: file.body().to_owned(),
+            by: file.field("by").map(str::to_owned),
+            links: file.field_values("link").map(str::to_owned).collect(),
+        }
+    }
 }
 
 /// A state move; on a replay `already` is true and `from` equals `to`.
@@ -71,6 +89,10 @@ pub struct Closed {
     pub transition: Transitioned,
     pub open_questions: Vec<String>,
     pub unblocked: Vec<String>,
+    /// The live Decisions, Notes and Questions born from this Task that are
+    /// bound to no Task: they outlive it unless bound to it before it is
+    /// archived.
+    pub unbound: Vec<String>,
     /// The Decision or Task a Question resolved into, when it did.
     pub resolved_by: Option<String>,
     /// Unresolved citations in the outcome or reason written by this close.
@@ -130,6 +152,9 @@ pub struct ReadyTask {
 pub struct Created {
     pub id: String,
     pub path: String,
+    /// The id the title derived, when another record already held it and
+    /// the new one took a suffix. That record may hold the same work.
+    pub collision: Option<String>,
     pub superseded: Option<String>,
     pub dangling_mentions: Vec<String>,
 }
@@ -176,21 +201,28 @@ pub struct Deleted {
     pub paths: Vec<String>,
 }
 
-/// A record moved into the archive; `already` marks the replay.
+/// A record moved into the archive; `already` marks the replay. `bound`
+/// names the records bound to an archived Task, which left with it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Archived {
     pub id: String,
     pub from: String,
     pub to: String,
+    pub bound: Vec<String>,
     pub already: bool,
 }
 
 /// A record moved back out of the archive; `already` marks the replay.
+/// `bound` names the records bound to a restored Task, which returned with
+/// it; `unbound` the Task a record restored alone was bound to, whose
+/// binding the restore cleared.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Restored {
     pub id: String,
     pub from: String,
     pub to: String,
+    pub bound: Vec<String>,
+    pub unbound: Option<String>,
     pub already: bool,
 }
 
@@ -256,6 +288,7 @@ pub struct GraphNode {
     pub ready: Option<bool>,
     pub blocked_by: Vec<String>,
     pub origin: Option<String>,
+    pub task: Option<String>,
     /// The records this one links, each under the kind its `link` line
     /// gives the relation.
     pub links: Vec<(String, String)>,
@@ -308,6 +341,9 @@ impl Graph {
             if let Some(origin) = node.origin.as_deref() {
                 draw(origin, &node.id, EdgeKind::Origin, &mut edges);
             }
+            if let Some(task) = node.task.as_deref() {
+                draw(task, &node.id, EdgeKind::Bound, &mut edges);
+            }
         }
         for node in &self.nodes {
             for (kind, linked) in &node.links {
@@ -349,12 +385,14 @@ pub struct GraphEdge<'a> {
 }
 
 /// How two records are related: by what one waits on, by what it was born
-/// from, by a link one declares to the other, or by one naming the other
-/// in its prose.
+/// from, by the Task it is bound to, by a link one declares to the other,
+/// or by one naming the other in its prose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeKind<'a> {
     BlockedBy,
     Origin,
+    /// A record bound to a Task, drawn out of the Task it leaves with.
+    Bound,
     /// A `link` line naming a record, under the kind the line gives it:
     /// the relation a record declares to what it belongs to, follows or
     /// cites, in the notebook's own vocabulary.
@@ -368,7 +406,7 @@ impl<'a> EdgeKind<'a> {
     /// The words of the relations the notebook draws itself. A link kind
     /// spelled like one would be read as that relation, so no link may
     /// carry one.
-    pub(crate) const DRAWN_WORDS: [&'static str; 3] = ["waits", "born", "mentions"];
+    pub(crate) const DRAWN_WORDS: [&'static str; 4] = ["waits", "born", "bound", "mentions"];
 
     /// The one word every surface prints for the edge: the notebook's for
     /// the three relations it draws itself, the link's own for a link.
@@ -377,8 +415,9 @@ impl<'a> EdgeKind<'a> {
         match self {
             EdgeKind::BlockedBy => EdgeKind::DRAWN_WORDS[0],
             EdgeKind::Origin => EdgeKind::DRAWN_WORDS[1],
+            EdgeKind::Bound => EdgeKind::DRAWN_WORDS[2],
             EdgeKind::Link(kind) => kind,
-            EdgeKind::Mentions => EdgeKind::DRAWN_WORDS[2],
+            EdgeKind::Mentions => EdgeKind::DRAWN_WORDS[3],
         }
     }
 }
@@ -427,9 +466,10 @@ impl std::fmt::Display for CitedProof {
     }
 }
 
-/// One record read whole: the envelope as it stands, the body, the two
-/// derived Mention blocks, and the live records whose `link` lines name
-/// it.
+/// One record read whole: the envelope as it stands, the body, and every
+/// record it is directly related to, in both directions and wherever that
+/// record lives. Each outgoing relation is in the order the record states
+/// it; each incoming one by id.
 #[derive(Debug, PartialEq, Eq)]
 pub struct View {
     pub id: String,
@@ -437,11 +477,19 @@ pub struct View {
     pub archived: bool,
     pub fields: Vec<(String, String)>,
     pub body: String,
-    pub mentions: Vec<String>,
-    pub mentioned_by: Vec<String>,
+    pub from: Vec<String>,
+    pub born: Vec<String>,
+    pub task: Vec<String>,
+    pub bound: Vec<String>,
+    pub blocked_by: Vec<String>,
+    pub blocks: Vec<String>,
+    /// Each as the link's kind and the record it names.
+    pub links: Vec<(String, String)>,
     /// Each as the link's kind and the record carrying it, by kind and
     /// then by id, so a reader sees one relation's members together.
     pub linked_by: Vec<(String, String)>,
+    pub mentions: Vec<String>,
+    pub mentioned_by: Vec<String>,
 }
 
 /// One finding against the file that carries it: `check`'s row, and the

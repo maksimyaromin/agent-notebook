@@ -28,8 +28,8 @@ pub struct Filter {
     pub untaken: bool,
     /// Only the records addressed to this identity.
     pub to: Option<String>,
-    /// Only records whose id, title, tags, people or body hold this text,
-    /// matched without regard to case.
+    /// Only records in which every word of this text starts a word of the
+    /// id, title, tags, people or body, matched without regard to case.
     pub text: Option<String>,
     /// The archive too. Most of what a long-lived notebook holds is
     /// finished, and reading all of it buries the work in flight, so the
@@ -54,7 +54,8 @@ pub struct Focus {
 
 /// A record to be created; `id: None` mints one from the title, `by: None`
 /// signs it with the notebook's identity, `taken_by` hands a Task over as
-/// it is written, `to` addresses a Task or a Question to someone.
+/// it is written, `to` addresses a Task or a Question to someone, `task`
+/// binds a Decision, Note or Question to the live Task it serves.
 #[derive(Debug)]
 pub struct Draft {
     pub record_type: RecordType,
@@ -66,6 +67,7 @@ pub struct Draft {
     pub taken_by: Option<String>,
     pub to: Option<String>,
     pub from: Option<String>,
+    pub task: Option<String>,
     pub tags: Vec<String>,
     pub links: Vec<Link>,
     pub supersedes: Option<String>,
@@ -86,6 +88,7 @@ impl Draft {
             taken_by: None,
             to: None,
             from: None,
+            task: None,
             tags: Vec::new(),
             links: Vec::new(),
             supersedes: None,
@@ -121,12 +124,15 @@ impl Link {
 #[derive(Debug, Default)]
 pub struct Edit {
     pub title: Option<String>,
+    /// A Decision's or Note's kind, one word of its type's vocabulary.
+    pub kind: Option<String>,
     pub body: Option<String>,
     pub add_tags: Vec<String>,
     pub remove_tags: Vec<String>,
     pub add_links: Vec<Link>,
     pub remove_links: Vec<Link>,
     pub from: Option<String>,
+    pub task: Option<String>,
     pub priority: Option<u32>,
     pub review_by: Option<String>,
     pub taken_by: Option<String>,
@@ -141,9 +147,10 @@ pub struct Edit {
 /// those with an eraser of their own — a body through an empty `--body`, a
 /// tag through `--untag`. A field the record's type does not allow is
 /// erasable all the same; erasing it is the repair.
-pub(crate) const CLEARABLE: [&str; 5] = [FROM, PRIORITY, REVIEW_BY, TAKEN_BY, TO];
+pub(crate) const CLEARABLE: [&str; 6] = [FROM, TASK, PRIORITY, REVIEW_BY, TAKEN_BY, TO];
 
 pub(crate) const FROM: &str = "from";
+pub(crate) const TASK: &str = "task";
 pub(crate) const PRIORITY: &str = "priority";
 pub(crate) const REVIEW_BY: &str = "review-by";
 pub(crate) const TAKEN_BY: &str = "taken-by";
@@ -152,12 +159,14 @@ pub(crate) const TO: &str = "to";
 impl Edit {
     pub(crate) fn changes_nothing(&self) -> bool {
         self.title.is_none()
+            && self.kind.is_none()
             && self.body.is_none()
             && self.add_tags.is_empty()
             && self.remove_tags.is_empty()
             && self.add_links.is_empty()
             && self.remove_links.is_empty()
             && self.from.is_none()
+            && self.task.is_none()
             && self.priority.is_none()
             && self.review_by.is_none()
             && self.taken_by.is_none()

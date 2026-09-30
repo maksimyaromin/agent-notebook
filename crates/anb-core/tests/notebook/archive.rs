@@ -49,7 +49,7 @@ mod divergent_copies {
     #[test]
     fn restore_never_discards_a_different_same_id_copy() {
         assert_both_copies_survive(
-            |notebook| notebook.restore("task.demo").map(|_| ()),
+            |notebook| notebook.restore("task.demo", TODAY).map(|_| ()),
             "tasks/task.demo.md",
         );
     }

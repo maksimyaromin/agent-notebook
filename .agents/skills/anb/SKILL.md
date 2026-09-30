@@ -11,9 +11,16 @@ Keep the context that makes the next decision easier. The notebook connects work
 
 ## Recall before acting
 
-Run `anb recall` at the start of a session, unless a hook has already supplied it. It brings together current work, shared project knowledge and your private practices, with their audiences labelled. Open `.agents/anb.md` if present for the project's workflow extensions; do not copy or fork this installed skill to customize it.
+Run `anb recall` at the start of a session, unless a hook has already supplied it. It shows current work, this session's focus, and the standing rules from the project and from your private notebooks, each labelled with its audience. Open `.agents/anb.md` if present for the project's workflow extensions; do not copy or fork this installed skill to customize it.
 
-Follow the user's subject. `anb recall --for <id>` prioritizes a record's context; `anb recall "phrase"` searches knowledge across all three audiences. Read the relevant records with `show`, using `--all` when the reply reports omitted content. Read referenced source material when the decision depends on it. A remembered conclusion is evidence with a scope, not permission to ignore the current request, code or source.
+Follow the user's subject. Other Decisions and Notes appear only as counts until the work needs them:
+
+| Question | Read | Why |
+|---|---|---|
+| What does this record connect to? | `anb show <id>` | It lists every related record as an id, archived ones included; `show` one of them to go further. `start <id>` replies with the same read. |
+| Where is this subject recorded? | `anb recall "<words>"` or `anb list --match "<words>"` | The search matches words, not meanings, so try the project's other words when the first ones miss. |
+
+Use `--all` when a reply reports omitted content. Read referenced source material when the decision depends on it. A remembered conclusion is evidence with a scope, not permission to ignore the current request, code or source.
 
 ## Find the work before starting
 
@@ -37,6 +44,7 @@ Save information when it changes future action and would otherwise be expensive 
 | Work with a checkable outcome | A Task |
 | An unresolved choice that blocks or changes future work | A Question |
 | A settled constraint or choice, with its reason | A Decision |
+| A choice, spec or open doubt that serves one piece of design work | A Decision, Note or Question added with `--task <id>`, so it leaves with that Task |
 | Reusable evidence, vocabulary, a model or a procedure | A Note |
 | A canonical ticket, document or web source | A link plus the useful local conclusion |
 
@@ -62,11 +70,12 @@ Shared typed links resolve within the shared notebook. A colleague's `check` mus
 
 ## Carry out the user's intent
 
-Before an unfamiliar operation, read `anb <command> --help`. Use the returned id rather than reconstructing it from the title. Set `--via` to your actual agent tool on additions and attributed comments or outcomes; leave the accountable person's identity to the host.
+Before an unfamiliar operation, read `anb <command> --help`. A new record's title becomes its id, so write a title worth citing. A long title is cut at a word boundary and a taken id gets a suffix, so never rebuild an id from a title: use the id the reply returns, and when one script creates a record and names it in a later command, choose the id with `--id`. `collision` in the reply names the record that already held the id, which may be the same work. Set `--via` to your actual agent tool on additions and attributed comments or outcomes; leave the accountable person's identity to the host.
 
 | The user asks | Operation |
 |---|---|
 | “Change that wording” | `edit <id> --title "…"` or `edit <id> --body-file <path>` |
+| “That one is a standing rule” | `edit <id> --kind rule`; a rule reaches every session opening |
 | “Add this finding” | `comment <id> --body "…"` |
 | “Assign it to Grace” | `edit <id> --taken-by Grace` |
 | “Put it back in the shared queue” | `edit <id> --clear taken-by` |
@@ -82,7 +91,11 @@ Before an unfamiliar operation, read `anb <command> --help`. Use the returned id
 
 Body flags have the same meaning on add, edit, comment and outcome commands: `--body` supplies text; `--body-file <path>` reads a file; `--body-file -` reads standard input. Editing a body replaces it, so read the existing record first and preserve unrelated content. Comments append without replacing it.
 
-Make a Task's result and completion evidence clear. Connect records only for a reason: `--from` identifies their origin, `block` expresses a prerequisite, a bare id in prose supplies context, and `--link "<kind> <target>"` declares a typed relationship. Related work is not necessarily blocked work. For a larger outcome, a hub Task can have children created `--from` it; block the hub on deliverables whose completion it actually requires.
+Make a Task's result and completion evidence clear. Connect records only for a reason: `--from` identifies their origin, `--task` binds a record's lifetime to a Task, `block` expresses a prerequisite, a bare id in prose supplies context, and `--link "<kind> <target>"` declares a typed relationship. Related work is not necessarily blocked work. For a larger outcome, a hub Task can have children created `--from` it; block the hub on deliverables whose completion it actually requires.
+
+When a Task follows a Decision, cite the Decision's full id in the Task or link it with `--link "follows <id>"`; the tool follows only full ids.
+
+Bind a record with `--task` when it serves one piece of work and loses its value once that work is done, such as the choices, specs and open questions of a design. It then leaves for the archive with that Task, and the Tasks that cite it still reach it through `show`. Leave a record unbound when it should outlive the work; a `rule` is never bound. The close reply lists the records born from a Task that no binding covers, so the choice can be made before the archive. [The worked session](references/session.md) shows a design Task end to end.
 
 Do not take a colleague's Task just because you can edit its assignment. An explicit reassignment request authorizes that change; otherwise choose your own work or the untaken queue. Use `start <id> --join` only for intentional collaboration on the same Task.
 

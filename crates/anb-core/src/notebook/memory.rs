@@ -1,28 +1,31 @@
 //! Select maintained knowledge without confusing authorship with audience.
 
-use super::{NotebookError, guard_filter, query, read_archived_record, read_live_corpus};
+use super::{NotebookError, guard_filter, query, read_live_corpus};
 use crate::debt;
-use crate::record::RecordType;
+use crate::record::{Record, RecordType};
 use crate::request::Filter;
-use crate::resolve::path_stem;
 use crate::{Knowledge, Memory, Storage};
 
-/// Read active Notes and Decisions, including their evidence and bodies.
-/// `text` uses the same case-insensitive search as `list`. `focus` ranks
-/// knowledge within two relationships of a record before unrelated knowledge;
-/// it does not hide standing rules elsewhere in the notebook. An archived
-/// focus supplies relationships without admitting archived knowledge.
+/// The Decision kinds a session opens with: standing rules, and the agreed
+/// exceptions to them, since a rule read without its exception misleads.
+const STANDING_KINDS: [&str; 2] = ["rule", "drift"];
+
+/// Read the live Notes and Decisions a session needs before its work is
+/// known, or the ones a phrase finds.
+///
+/// Without `text`, the standing Decisions: every live `rule` and `drift`.
+/// Design choices and Notes are reached from the work that cites them, so
+/// `other` counts them instead. With `text`, every live Note and Decision
+/// the match of [`Filter::text`] admits. Either way Decisions come first,
+/// rules and then drifts leading them, and ids order the rest, so an
+/// unchanged notebook recalls the same way twice.
 ///
 /// Invalid records are reported separately, never recalled as established facts.
 /// Reads do not update usage counters, timestamps or file representations.
 ///
 /// # Errors
-/// A storage failure, or an unknown focus record.
-pub fn recall(
-    storage: &dyn Storage,
-    text: Option<&str>,
-    focus: Option<&str>,
-) -> Result<Knowledge, NotebookError> {
+/// A storage failure, or an empty `text`.
+pub fn recall(storage: &dyn Storage, text: Option<&str>) -> Result<Knowledge, NotebookError> {
     let filter = Filter {
         types: vec![RecordType::Decision, RecordType::Note],
         text: text.map(str::to_owned),
@@ -31,29 +34,9 @@ pub fn recall(
     guard_filter(&filter)?;
     let corpus = read_live_corpus(storage)?;
     let resolvable = corpus.resolver();
-    if let Some(id) = focus
-        && !resolvable.resolves(id)
-    {
-        return Err(NotebookError::UnknownId { id: id.to_owned() });
-    }
-    let archived_focus = match focus {
-        Some(id) if resolvable.read(id).is_none() => Some(
-            read_archived_record(storage, id)?
-                .ok_or_else(|| NotebookError::UnknownId { id: id.to_owned() })?,
-        ),
-        _ => None,
-    };
-    let mut knowledge = Knowledge::default();
-    let mut all = corpus.records.iter().collect::<Vec<_>>();
-    if let Some(record) = &archived_focus {
-        if debt::is_excluded(record, &resolvable) {
-            knowledge.invalid.push(record.path().to_owned());
-        } else {
-            all.push(record);
-        }
-    }
-    let nearby = focus.map(|id| query::neighbourhood(&all, id, 2));
     let admission = query::Admission::of(&filter, None);
+    let mut knowledge = Knowledge::default();
+    let mut other = 0;
     for record in &corpus.records {
         if debt::is_excluded(record, &resolvable) {
             knowledge.invalid.push(record.path().to_owned());
@@ -65,31 +48,34 @@ pub fn recall(
         let Some(record_type) = record.record_type() else {
             continue;
         };
-        let file = record.file();
-        let id = path_stem(record.path());
-        knowledge.records.push(Memory {
-            id: id.to_owned(),
-            path: record.path().to_owned(),
-            record_type,
-            kind: file.field("kind").map(str::to_owned),
-            title: file.field("title").unwrap_or_default().to_owned(),
-            body: file.body().to_owned(),
-            by: file.field("by").map(str::to_owned),
-            links: file.field_values("link").map(str::to_owned).collect(),
-            related: nearby.as_ref().is_some_and(|ids| ids.contains(id)),
-        });
+        if text.is_none() && !is_standing(record) {
+            other += 1;
+            continue;
+        }
+        knowledge.records.push(Memory::of(record, record_type));
     }
-    knowledge.records.sort_by(|left, right| {
+    let rank = |memory: &Memory| {
+        let kind = memory.kind.as_deref().unwrap_or_default();
         (
-            !left.related,
-            left.record_type != RecordType::Decision,
-            &left.id,
+            memory.record_type != RecordType::Decision,
+            STANDING_KINDS
+                .iter()
+                .position(|standing| *standing == kind)
+                .unwrap_or(STANDING_KINDS.len()),
+            memory.id.clone(),
         )
-            .cmp(&(
-                !right.related,
-                right.record_type != RecordType::Decision,
-                &right.id,
-            ))
-    });
+    };
+    knowledge.records.sort_by_key(rank);
+    knowledge.other = text.is_none().then_some(other);
     Ok(knowledge)
+}
+
+/// Whether the record binds every session whatever its work: a live
+/// Decision of a standing kind.
+fn is_standing(record: &Record) -> bool {
+    record.record_type() == Some(RecordType::Decision)
+        && record
+            .file()
+            .field("kind")
+            .is_some_and(|kind| STANDING_KINDS.contains(&kind))
 }

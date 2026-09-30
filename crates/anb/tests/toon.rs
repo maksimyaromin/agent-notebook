@@ -61,9 +61,16 @@ fn toon_and_json_preserve_control_characters_and_unicode_as_the_same_data() {
             archived: false,
             fields: vec![("title".to_owned(), "# Правило, 雪 🧠".to_owned())],
             body: format!("{controls}\n# a heading\n\"quoted\" and \\u001b"),
+            from: vec![],
+            born: vec![],
+            task: vec![],
+            bound: vec![],
+            blocked_by: vec![],
+            blocks: vec![],
+            links: vec![],
+            linked_by: vec![],
             mentions: vec![],
             mentioned_by: vec![],
-            linked_by: vec![],
         },
         all: true,
     };
@@ -166,15 +173,16 @@ fn recall_budgets_work_and_memory_together() {
                 body: "A long definition. ".repeat(1000),
                 by: Some("Grace".to_owned()),
                 links: vec![],
-                related: false,
             },
         })
         .collect();
     let reply = Reply::Recalled(Box::new(Recall {
-        work: status(Budget::Tokens(1500), 20),
+        work: Some(status(Budget::Tokens(1500), 20)),
         focus: None,
+        text: None,
         memories,
         invalid: vec![],
+        other: vec![],
         all: false,
         budget: Budget::Tokens(1500),
         more: "anb recall --all".to_owned(),
@@ -185,12 +193,10 @@ fn recall_budgets_work_and_memory_together() {
     assert_eq!(value["budget"]["spent"], spent);
     assert_eq!(value["count"], 12);
     assert!(value["work"].get("budget").is_none());
-    assert!(
-        value["memories"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|memory| memory["body"]["omitted"].as_u64().unwrap() > 0)
+    assert_eq!(
+        value["memories"].as_array().unwrap().len(),
+        12,
+        "bodies give way before a recalled row does"
     );
 }
 
@@ -252,10 +258,12 @@ fn status_expansion_preserves_identity_and_widening_is_explicit() {
 #[test]
 fn recall_selects_bounded_work_before_encoding_a_large_notebook() {
     let reply = Reply::Recalled(Box::new(Recall {
-        work: status(Budget::Unbounded, 10_000),
+        work: Some(status(Budget::Unbounded, 10_000)),
         focus: None,
+        text: None,
         memories: vec![],
         invalid: vec![],
+        other: vec![],
         all: false,
         budget: Budget::Tokens(1500),
         more: "anb recall --all".to_owned(),
@@ -315,13 +323,15 @@ fn host_action_paths_are_applied_once_before_budget_measurement() {
 #[test]
 fn recall_invalid_files_keep_scope_path_and_repair_separate() {
     let reply = Reply::Recalled(Box::new(Recall {
-        work: status(Budget::Unbounded, 0),
+        work: Some(status(Budget::Unbounded, 0)),
         focus: None,
+        text: None,
         memories: vec![],
         invalid: vec![anb::recall::ScopedInvalid {
             audience: Audience::Global,
             path: "notes/note.broken.md".to_owned(),
         }],
+        other: vec![],
         all: true,
         budget: Budget::Unbounded,
         more: "anb recall --all".to_owned(),
@@ -331,55 +341,4 @@ fn recall_invalid_files_keep_scope_path_and_repair_separate() {
         value["invalid"],
         serde_json::json!({"count":1,"omitted":0,"rows":[{"scope":"global","path":"notes/note.broken.md","repair":"anb check --global"}]})
     );
-}
-
-#[test]
-fn recall_budgets_the_focused_records_relationships_and_preserves_their_counts() {
-    let references: Vec<_> = (0..60)
-        .map(|n| format!("note.{n}{}", "reference".repeat(12)))
-        .collect();
-    let focus = anb_core::View {
-        id: "task.focus".to_owned(),
-        path: "tasks/task.focus.md".to_owned(),
-        archived: false,
-        fields: vec![],
-        body: String::new(),
-        mentions: references.clone(),
-        mentioned_by: references.clone(),
-        linked_by: references
-            .iter()
-            .map(|id| ("related".to_owned(), id.clone()))
-            .collect(),
-    };
-    let mut reply = Reply::Recalled(Box::new(Recall {
-        work: status(Budget::Unbounded, 0),
-        focus: Some(focus),
-        memories: vec![],
-        invalid: vec![],
-        all: false,
-        budget: Budget::Tokens(600),
-        more: "anb recall --focus task.focus --all".to_owned(),
-    }));
-    let value = decoded(&reply);
-    assert!(value["budget"]["spent"].as_u64().unwrap() <= 600);
-    assert_eq!(value["focus"]["id"], "task.focus");
-    assert_eq!(value["focus"]["more"], "anb show task.focus --all");
-    for name in ["mentions", "mentioned-by", "linked-by"] {
-        let section = &value["focus"][name];
-        assert_eq!(section["count"], 60);
-        assert_eq!(
-            section["omitted"],
-            60 - section["rows"].as_array().unwrap().len()
-        );
-    }
-    let Reply::Recalled(recall) = &mut reply else {
-        unreachable!()
-    };
-    recall.all = true;
-    recall.budget = Budget::Unbounded;
-    let value = decoded(&reply);
-    for name in ["mentions", "mentioned-by", "linked-by"] {
-        assert_eq!(value["focus"][name]["rows"].as_array().unwrap().len(), 60);
-        assert_eq!(value["focus"][name]["omitted"], 0);
-    }
 }

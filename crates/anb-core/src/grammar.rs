@@ -49,7 +49,7 @@ pub(crate) fn residence(path: &str, type_word: &str) -> Option<Residence> {
 /// What a field's value must look like, checked by key.
 #[derive(Clone, Copy)]
 enum Form {
-    /// `<type>.<slug>` per the id grammar: ASCII, at most 64 bytes.
+    /// `<type>.<slug>` per the id grammar: ASCII, at most [`ID_CAP`] bytes.
     Id,
     /// One of the four record type words.
     TypeWord,
@@ -120,6 +120,7 @@ const FIELD_TABLE: &[FieldSpec] = &[
     optional("taken-by", Form::NonEmptyText),
     optional("to", Form::NonEmptyText),
     optional("from", Form::Id),
+    optional("task", Form::Id),
     optional("tags", Form::TagList),
     repeatable("link", Form::Link),
     optional("supersedes", Form::Id),
@@ -995,7 +996,7 @@ pub(crate) fn date_error(value: &str) -> Option<String> {
 }
 
 /// How long an id may be, in bytes.
-pub(crate) const ID_CAP: usize = 64;
+pub(crate) const ID_CAP: usize = 96;
 
 /// The id grammar: `<type>.<slug>`, ASCII, at most [`ID_CAP`] bytes. The
 /// first dot splits: slugs contain no dots.

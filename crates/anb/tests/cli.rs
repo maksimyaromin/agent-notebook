@@ -284,7 +284,7 @@ fn dangling_link_records_are_not_ready_or_recalled_as_valid_knowledge() {
             .unwrap()
             .is_empty()
     );
-    let recalled = notebook.recall(None, None).unwrap();
+    let recalled = notebook.recall(Some("fact")).unwrap();
     assert!(recalled.records.is_empty());
     assert!(recalled.invalid.contains(&"notes/note.demo.md".to_owned()));
 }
@@ -796,7 +796,7 @@ mod task_cycle_replies {
             ),
             (
                 vec!["add", "task", "???"],
-                "title: yields an empty id; pass an explicit id",
+                "title: has no ASCII letter or digit to make an id from; pass --id",
             ),
         ] {
             let mut storage = MemoryStorage::new();
@@ -2204,9 +2204,9 @@ mod single_record {
                     "id":"task.demo", "path":"tasks/task.demo.md", "archived":false,
                     "fields":{"count":7,"omitted":0,"rows":[["id","task.demo"],["type","task"],["state","active"],["title","A demo record"],["priority","1"],["created","2026-08-24"],["updated","2026-08-25"]]},
                     "body":{"lines":3,"head":"The plan follows decision.chosen.\n\n- 2026-08-25 Maks: started\n","omitted":0},
-                    "mentions":{"count":1,"omitted":0,"rows":["decision.chosen"]},
-                    "mentioned-by":{"count":1,"omitted":0,"rows":["decision.chosen"]},
-                    "linked-by":{"count":0,"omitted":0,"rows":[]}
+                    "mentions":["decision.chosen"],
+                    "mentioned-by":["decision.chosen"],
+                    "linked-by":[]
                 }),
             );
         }
@@ -2244,7 +2244,7 @@ mod single_record {
         ] {
             assert_reply(
                 ok(&mut storage, &format),
-                serde_json::json!({"linked-by":{"count":1,"omitted":0,"rows":[{"id":"note.credits","kind":"schema"}]}}),
+                serde_json::json!({"linked-by":[{"id":"note.credits","kind":"schema"}]}),
             );
         }
     }
@@ -4013,7 +4013,7 @@ mod maintenance_replies {
             refused(&mut storage, &["edit", "task.demo", "--clear", "state"]),
             serde_json::json!({
               "error": "invalid-argument",
-              "message": "clear: `state` is not an erasable field; from, priority, review-by, taken-by, to",
+              "message": "clear: `state` is not an erasable field; from, task, priority, review-by, taken-by, to",
               "try": [
                 "anb edit task.demo --title \"<title>\""
               ]
@@ -4268,7 +4268,7 @@ mod maintenance_replies {
             refused(&mut storage, &["edit", "task.demo"]),
             serde_json::json!({
               "error": "invalid-argument",
-              "message": "edit: nothing to change; pass --title, --body, --tag, --untag, --link, --unlink, --from, --priority, --review-by, --taken-by, --to, or --clear",
+              "message": "edit: nothing to change; pass --title, --kind, --body, --tag, --untag, --link, --unlink, --from, --task, --priority, --review-by, --taken-by, --to, or --clear",
               "try": [
                 "anb edit task.demo --title \"<title>\""
               ]
@@ -4846,7 +4846,7 @@ mod task_graph {
         let parsed: serde_json::Value =
             serde_json::from_str(&payload).unwrap_or_else(|_| panic!("not JSON: {payload}"));
 
-        assert_eq!(parsed["v"], 4);
+        assert_eq!(parsed["v"], 5);
         assert_eq!(parsed["slice"]["match"], "blocker");
         assert_eq!(parsed["slice"]["tag"], serde_json::json!(["parser"]));
         assert_eq!(parsed["slice"]["archive"], false);
@@ -5377,20 +5377,11 @@ mod bounded_consequences {
     }
 
     #[test]
-    fn a_view_bounds_who_cites_the_record_and_says_what_lifts_the_bound() {
+    fn a_view_names_every_record_that_cites_this_one_without_a_bound() {
         let mut storage = citers_of("note.magnet", MANY);
         assert_reply(
             ok(&mut storage, &["show", "note.magnet"]),
-            serde_json::json!({"mentioned-by":{"count":21,"omitted":1,"rows":(0..20).map(|n|format!("task.c{n:02}")).collect::<Vec<_>>()},"more":"anb show note.magnet --all"}),
-        );
-    }
-
-    #[test]
-    fn a_view_all_names_every_record_that_cites_this_one() {
-        let mut storage = citers_of("note.magnet", MANY);
-        assert_reply(
-            ok(&mut storage, &["show", "note.magnet", "--all"]),
-            serde_json::json!({"mentioned-by":{"count":21,"omitted":0,"rows":(0..21).map(|n|format!("task.c{n:02}")).collect::<Vec<_>>()}}),
+            serde_json::json!({"mentioned-by":(0..21).map(|n|format!("task.c{n:02}")).collect::<Vec<_>>()}),
         );
     }
 
@@ -5968,5 +5959,160 @@ mod the_users_notebook_behind_every_surface {
         let checked: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(checked["count"], 1);
         assert_eq!(checked["findings"][0]["code"], "dangling-ref");
+    }
+}
+
+mod bound_records {
+    use super::*;
+
+    #[test]
+    fn close_names_each_unbound_finding_with_the_command_that_binds_it() {
+        let mut storage = storage_with(&[open_task("task.design", "Design", &[])]);
+        ok(
+            &mut storage,
+            &["add", "note", "A finding", "--from", "task.design"],
+        );
+        ok(
+            &mut storage,
+            &["add", "note", "The spec", "--task", "task.design"],
+        );
+        ok(&mut storage, &["start", "task.design"]);
+        assert_reply(
+            ok(
+                &mut storage,
+                &["close", "task.design", "--body", "Designed."],
+            ),
+            serde_json::json!({"unbound": {"count": 1, "omitted": 0, "rows": [
+                {"id": "note.a-finding", "bind": "anb edit note.a-finding --task task.design"}
+            ]}}),
+        );
+        assert_reply(
+            ok(&mut storage, &["archive", "task.design"]),
+            serde_json::json!({"bound": {"count": 1, "omitted": 0, "rows": ["note.the-spec"]}}),
+        );
+    }
+
+    #[test]
+    fn binding_to_an_archived_task_points_at_restore() {
+        let mut storage = storage_with(&[(
+            "archive/tasks/task.design.md".to_owned(),
+            record_file(
+                "task.design",
+                "task",
+                "closed",
+                "Design",
+                &["reason: done elsewhere"],
+                "",
+            ),
+        )]);
+        assert_reply(
+            refused(
+                &mut storage,
+                &["add", "note", "The spec", "--task", "task.design"],
+            ),
+            serde_json::json!({"error": "archived", "try": [
+                "anb show task.design", "anb restore task.design"
+            ]}),
+        );
+    }
+}
+
+mod every_edge {
+    use super::*;
+
+    /// A hub with a child filed away, a child still open that waits on the
+    /// hub, a design Note bound to it, and a Decision the hub links.
+    fn hub() -> MemoryStorage {
+        storage_with(&[
+            (
+                "tasks/task.hub.md".to_owned(),
+                record_file(
+                    "task.hub",
+                    "task",
+                    "active",
+                    "The hub",
+                    &["from: task.idea", "link: follows decision.shape"],
+                    "",
+                ),
+            ),
+            (
+                "archive/tasks/task.idea.md".to_owned(),
+                record_file(
+                    "task.idea",
+                    "task",
+                    "closed",
+                    "The idea",
+                    &["reason: done"],
+                    "",
+                ),
+            ),
+            (
+                "archive/tasks/task.done.md".to_owned(),
+                record_file(
+                    "task.done",
+                    "task",
+                    "closed",
+                    "Done",
+                    &["from: task.hub", "reason: done"],
+                    "",
+                ),
+            ),
+            (
+                "tasks/task.next.md".to_owned(),
+                record_file(
+                    "task.next",
+                    "task",
+                    "open",
+                    "Next",
+                    &["from: task.hub", "blocked-by: task.hub"],
+                    "",
+                ),
+            ),
+            (
+                "notes/note.spec.md".to_owned(),
+                record_file(
+                    "note.spec",
+                    "note",
+                    "active",
+                    "Spec",
+                    &["task: task.hub"],
+                    "",
+                ),
+            ),
+            (
+                "decisions/decision.shape.md".to_owned(),
+                record_file("decision.shape", "decision", "active", "Shape", &[], ""),
+            ),
+        ])
+    }
+
+    #[test]
+    fn show_names_every_direct_relation_in_both_directions_wherever_it_lives() {
+        assert_reply(
+            ok(&mut hub(), &["show", "task.hub"]),
+            serde_json::json!({
+                "from": ["task.idea"],
+                "born": ["task.done", "task.next"],
+                "task": [],
+                "bound": ["note.spec"],
+                "blocked-by": [],
+                "blocks": ["task.next"],
+                "links": [{"kind": "follows", "id": "decision.shape"}],
+                "linked-by": [],
+                "mentions": [],
+                "mentioned-by": [],
+            }),
+        );
+    }
+
+    #[test]
+    fn start_replies_with_the_task_as_show_reads_it() {
+        let mut storage = hub();
+        let shown = reply_value(ok(&mut storage, &["show", "task.next"]));
+        let started = reply_value(ok(&mut storage, &["start", "task.next"]));
+        assert_eq!(started["ok"], "start");
+        for relation in ["from", "blocked-by", "born"] {
+            assert_eq!(started["record"][relation], shown[relation], "{relation}");
+        }
     }
 }

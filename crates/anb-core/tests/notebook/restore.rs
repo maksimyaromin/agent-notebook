@@ -8,7 +8,9 @@ mod restore_verb {
         // rewrite this file.
         let text = "\u{feff}---\nid: task.demo\ntype:  task\r\nstate: closed\ntitle: A demo record\ncreated: 2026-08-24\n---\nbody\n";
         let mut storage = storage_with(&[("archive/tasks/task.demo.md", text)]);
-        let moved = Notebook::new(&mut storage).restore("task.demo").unwrap();
+        let moved = Notebook::new(&mut storage)
+            .restore("task.demo", TODAY)
+            .unwrap();
         assert_eq!(moved.from, "archive/tasks/task.demo.md");
         assert_eq!(moved.to, "tasks/task.demo.md");
         assert!(!moved.already);
@@ -39,7 +41,7 @@ mod restore_verb {
             let from = format!("archive/{home}/{id}.md");
             let mut storage =
                 storage_with(&[(from.as_str(), &record_file(id, type_word, state, extra, ""))]);
-            let moved = Notebook::new(&mut storage).restore(id).unwrap();
+            let moved = Notebook::new(&mut storage).restore(id, TODAY).unwrap();
             assert!(!moved.already, "{id} sits archived and must move");
             assert!(
                 storage.read(&format!("{home}/{id}.md")).is_ok(),
@@ -58,7 +60,9 @@ mod restore_verb {
     #[test]
     fn restore_erases_the_archived_live_record_finding() {
         let mut storage = storage_with(&[("archive/tasks/task.demo.md", &task_file("open", &[]))]);
-        Notebook::new(&mut storage).restore("task.demo").unwrap();
+        Notebook::new(&mut storage)
+            .restore("task.demo", TODAY)
+            .unwrap();
         let findings = Notebook::new(&mut storage).check().unwrap();
         assert!(
             findings.is_empty(),
@@ -69,7 +73,9 @@ mod restore_verb {
     #[test]
     fn a_restored_record_is_back_in_the_task_cycle() {
         let mut storage = storage_with(&[("archive/tasks/task.demo.md", &task_file("open", &[]))]);
-        Notebook::new(&mut storage).restore("task.demo").unwrap();
+        Notebook::new(&mut storage)
+            .restore("task.demo", TODAY)
+            .unwrap();
         assert_eq!(
             Notebook::new(&mut storage)
                 .start("task.demo", TODAY)
@@ -85,7 +91,9 @@ mod restore_verb {
     fn an_invalid_archived_record_is_restored_verbatim_for_repair() {
         let text = task_file("open", &["priority: 9"]);
         let mut storage = storage_with(&[("archive/tasks/task.demo.md", &text)]);
-        Notebook::new(&mut storage).restore("task.demo").unwrap();
+        Notebook::new(&mut storage)
+            .restore("task.demo", TODAY)
+            .unwrap();
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
     }
 
@@ -97,7 +105,9 @@ mod restore_verb {
             "archive/tasks/task.demo.md",
             &task_file("open", &["priority: 9"]),
         )]);
-        Notebook::new(&mut storage).restore("task.demo").unwrap();
+        Notebook::new(&mut storage)
+            .restore("task.demo", TODAY)
+            .unwrap();
         let findings = Notebook::new(&mut storage).check().unwrap();
         let named = findings
             .iter()
@@ -137,7 +147,9 @@ mod restore_verb {
                 ),
             ),
         ]);
-        Notebook::new(&mut storage).restore("task.demo").unwrap();
+        Notebook::new(&mut storage)
+            .restore("task.demo", TODAY)
+            .unwrap();
         assert!(
             storage.read("archive/notes/note.report.md").is_ok(),
             "the report is history and stays filed"
@@ -152,7 +164,9 @@ mod restore_verb {
     fn a_replayed_restore_answers_already_and_changes_nothing() {
         let text = task_file("closed", &[]);
         let mut storage = storage_with(&[("tasks/task.demo.md", &text)]);
-        let replay = Notebook::new(&mut storage).restore("task.demo").unwrap();
+        let replay = Notebook::new(&mut storage)
+            .restore("task.demo", TODAY)
+            .unwrap();
         assert!(replay.already);
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
     }
@@ -162,7 +176,7 @@ mod restore_verb {
         let mut storage = storage_with(&[]);
         assert!(matches!(
             Notebook::new(&mut storage)
-                .restore("task.ghost")
+                .restore("task.ghost", TODAY)
                 .unwrap_err(),
             NotebookError::UnknownId { .. }
         ));
@@ -172,7 +186,9 @@ mod restore_verb {
     fn a_malformed_id_is_refused_as_an_argument() {
         let mut storage = storage_with(&[]);
         assert!(matches!(
-            Notebook::new(&mut storage).restore("no-dot").unwrap_err(),
+            Notebook::new(&mut storage)
+                .restore("no-dot", TODAY)
+                .unwrap_err(),
             NotebookError::InvalidArgument { .. }
         ));
     }
@@ -186,7 +202,9 @@ mod restore_verb {
             ("tasks/task.demo.md", &text),
             ("archive/tasks/task.demo.md", &text),
         ]);
-        let moved = Notebook::new(&mut storage).restore("task.demo").unwrap();
+        let moved = Notebook::new(&mut storage)
+            .restore("task.demo", TODAY)
+            .unwrap();
         assert!(!moved.already);
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), text);
         assert!(matches!(
@@ -204,7 +222,7 @@ mod restore_verb {
             ("archive/tasks/task.demo.md", &original),
         ]);
         assert!(matches!(
-            Notebook::new(&mut storage).restore("task.demo"),
+            Notebook::new(&mut storage).restore("task.demo", TODAY),
             Err(NotebookError::DuplicateId { .. })
         ));
         assert_eq!(storage.read("tasks/task.demo.md").unwrap(), corrected);
@@ -220,7 +238,11 @@ mod restore_verb {
     fn a_move_interrupted_after_its_write_loses_nothing() {
         let text = task_file("closed", &[]);
         let mut storage = RemoveFails(storage_with(&[("archive/tasks/task.demo.md", &text)]));
-        assert!(Notebook::new(&mut storage).restore("task.demo").is_err());
+        assert!(
+            Notebook::new(&mut storage)
+                .restore("task.demo", TODAY)
+                .is_err()
+        );
         assert_eq!(
             storage.read("tasks/task.demo.md").unwrap(),
             text,
@@ -238,7 +260,7 @@ mod restore_verb {
             ("archive/tasks/task.demo.md", &foreign),
         ]);
         let refusal = Notebook::new(&mut storage)
-            .restore("task.demo")
+            .restore("task.demo", TODAY)
             .unwrap_err();
         assert!(
             matches!(refusal, NotebookError::DuplicateId { .. }),
@@ -257,7 +279,7 @@ mod restore_verb {
             ("archive/tasks/task.demo.md", &task_file("closed", &[])),
         ]);
         let refusal = Notebook::new(&mut storage)
-            .restore("task.demo")
+            .restore("task.demo", TODAY)
             .unwrap_err();
         assert!(
             matches!(
@@ -274,7 +296,9 @@ mod restore_verb {
     #[test]
     fn an_unreadable_archived_source_refuses_the_move_as_an_invalid_record() {
         let storage = &mut BinaryHolding::with_binary_at("archive/tasks/task.demo.md", &[]);
-        let refusal = Notebook::new(storage).restore("task.demo").unwrap_err();
+        let refusal = Notebook::new(storage)
+            .restore("task.demo", TODAY)
+            .unwrap_err();
         match refusal {
             NotebookError::InvalidRecord { path, findings } => {
                 assert_eq!(path, "archive/tasks/task.demo.md");
@@ -294,7 +318,9 @@ mod restore_verb {
             "tasks/task.demo.md",
             &[("archive/tasks/task.demo.md", &text)],
         );
-        let refusal = Notebook::new(storage).restore("task.demo").unwrap_err();
+        let refusal = Notebook::new(storage)
+            .restore("task.demo", TODAY)
+            .unwrap_err();
         assert!(
             matches!(
                 refusal,
@@ -311,7 +337,9 @@ mod restore_verb {
     #[test]
     fn a_replay_over_an_unreadable_live_record_is_refused() {
         let storage = &mut BinaryHolding::with_binary_at("tasks/task.demo.md", &[]);
-        let refusal = Notebook::new(storage).restore("task.demo").unwrap_err();
+        let refusal = Notebook::new(storage)
+            .restore("task.demo", TODAY)
+            .unwrap_err();
         match refusal {
             NotebookError::InvalidRecord { path, findings } => {
                 assert_eq!(path, "tasks/task.demo.md");

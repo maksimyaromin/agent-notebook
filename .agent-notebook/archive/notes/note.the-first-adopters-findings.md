@@ -6,15 +6,17 @@ kind: idea
 title: The first adopter's findings
 by: Maksim Yaromin
 via: claude-code
-link: issue https://github.com/maksimyaromin/agent-notebook/issues/42
-link: issue https://github.com/maksimyaromin/agent-notebook/issues/43
-link: issue https://github.com/maksimyaromin/agent-notebook/issues/44
-link: issue https://github.com/maksimyaromin/agent-notebook/issues/45
-link: issue https://github.com/maksimyaromin/agent-notebook/issues/46
-link: issue https://github.com/maksimyaromin/agent-notebook/issues/47
-link: issue https://github.com/maksimyaromin/agent-notebook/issues/48
+task: task.release-0-3-0
+link:
+  - issue https://github.com/maksimyaromin/agent-notebook/issues/42
+  - issue https://github.com/maksimyaromin/agent-notebook/issues/43
+  - issue https://github.com/maksimyaromin/agent-notebook/issues/44
+  - issue https://github.com/maksimyaromin/agent-notebook/issues/45
+  - issue https://github.com/maksimyaromin/agent-notebook/issues/46
+  - issue https://github.com/maksimyaromin/agent-notebook/issues/47
+  - issue https://github.com/maksimyaromin/agent-notebook/issues/48
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-30
 ---
 
 

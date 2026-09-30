@@ -20,7 +20,7 @@ The CLI handles record changes and checks that their states and relationships ar
 
 Setup connects the supplied method to your agent. Keep project-specific instructions in `.agents/anb.md`; upgrades preserve that file, so there is no skill to fork. Each session can continue its own Task while people share definitions, constraints and decisions. The [customization guide](guides/customization.md) explains the available controls.
 
-At the start of a session, the agent recalls its work, relevant project knowledge and personal practices:
+At the start of a session, the agent recalls its work, the project's standing rules and your personal practices:
 
 ```sh
 anb recall

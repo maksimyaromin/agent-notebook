@@ -723,3 +723,63 @@ mod unreadable_files {
         ));
     }
 }
+
+mod unreadable_references {
+    use crate::*;
+
+    #[test]
+    fn a_wiki_slug_naming_a_record_is_reported_with_the_id_to_write() {
+        let mut storage = storage_with(&[
+            (
+                "decisions/decision.fences-never-nest.md",
+                &record_file("decision.fences-never-nest", "decision", "active", &[], ""),
+            ),
+            (
+                "tasks/task.hub.md",
+                &record_file(
+                    "task.hub",
+                    "task",
+                    "open",
+                    &[],
+                    "Governed by — [[fences-never-nest]] and [[a-page-elsewhere]].\n",
+                ),
+            ),
+            (
+                "tasks/task.quoting.md",
+                &record_file(
+                    "task.quoting",
+                    "task",
+                    "open",
+                    &[],
+                    "The form `[[fences-never-nest]]` connects nothing.\n",
+                ),
+            ),
+            (
+                "archive/tasks/task.history.md",
+                &record_file(
+                    "task.history",
+                    "task",
+                    "closed",
+                    &["reason: done"],
+                    "Followed [[fences-never-nest]].\n",
+                ),
+            ),
+        ]);
+        let findings = Notebook::new(&mut storage).check().unwrap();
+        assert_eq!(
+            findings.len(),
+            1,
+            "a slug naming nothing, a quoted one and one in history are left alone: {findings:?}"
+        );
+        assert_eq!(findings[0].path, "tasks/task.hub.md");
+        assert_eq!(findings[0].finding.code, FindingCode::UnreadableReference);
+        assert!(
+            findings[0]
+                .finding
+                .message
+                .contains("`decision.fences-never-nest`"),
+            "the finding names the id to write: {}",
+            findings[0].finding.message
+        );
+    }
+}

@@ -105,10 +105,12 @@ fn host_input_recalls_exact_session_focus_with_private_practices_without_writing
     project.run(&[
         "--personal",
         "add",
-        "note",
+        "decision",
         "Review practice",
+        "--kind",
+        "rule",
         "--id",
-        "note.practice",
+        "decision.practice",
         "--body",
         "Check customer examples first.",
     ]);

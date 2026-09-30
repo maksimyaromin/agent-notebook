@@ -48,6 +48,49 @@ pub(crate) fn mentions(text: &str) -> Vec<&str> {
     found
 }
 
+/// The targets of `[[target]]` and `[[target|label]]` references in
+/// `text` that are not ids, first appearance first, each once: the wiki
+/// form a reader follows by name and the scan above cannot. A reference in
+/// code is a quotation, as an id there is, and one never spans lines.
+pub(crate) fn wiki_targets(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut found: Vec<&str> = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'`' {
+            at = if opens_fence(bytes, at) {
+                after_fence(bytes, at)
+            } else {
+                after_span_run(bytes, at)
+            };
+            continue;
+        }
+        let Some(inner) = wiki_inner_at(text, at) else {
+            at += 1;
+            continue;
+        };
+        let target = inner.split('|').next().unwrap_or_default().trim();
+        if !target.is_empty() && grammar::id_error(target).is_some() && !found.contains(&target) {
+            found.push(target);
+        }
+        at += "[[".len() + inner.len() + "]]".len();
+    }
+    found
+}
+
+/// What stands between `[[` at `at` and the `]]` closing it on the same
+/// line, if a reference opens there.
+fn wiki_inner_at(text: &str, at: usize) -> Option<&str> {
+    // `at` walks bytes, so the text is sliced only once it is known to
+    // start an ASCII `[[`.
+    if !text.as_bytes()[at..].starts_with(b"[[") {
+        return None;
+    }
+    let rest = &text[at + "[[".len()..];
+    let line = rest.split('\n').next().unwrap_or_default();
+    line.find("]]").map(|close| &rest[..close])
+}
+
 /// A fence opens at a line-leading run of three or more backticks.
 fn opens_fence(bytes: &[u8], at: usize) -> bool {
     (at == 0 || bytes[at - 1] == b'\n') && backtick_run_len(bytes, at) >= 3
@@ -244,7 +287,7 @@ mod tests {
 
     #[test]
     fn an_id_longer_than_the_grammar_allows_is_not_a_mention() {
-        let past_the_cap = format!("See task.{} maybe.", "a".repeat(70));
+        let past_the_cap = format!("See task.{} maybe.", "a".repeat(100));
         assert_eq!(mentions(&past_the_cap), Vec::<&str>::new());
     }
 }
